@@ -70,6 +70,15 @@ class DistributionTests(unittest.TestCase):
         self.assertIn("explicit approval", text)
         self.assertIn("Do not edit the target", text)
 
+    def test_codex_bootstrap_is_project_local_and_separate(self):
+        setup_skill = ROOT / ".agents" / "skills" / "lawyeredos-setup" / "SKILL.md"
+        text = setup_skill.read_text(encoding="utf-8")
+        self.assertIn("name: lawyeredos-setup", text)
+        self.assertIn("scripts/setup_codex.py", text)
+        self.assertIn("~/.codex", text)
+        self.assertIn("--require-new-workspace", text)
+        self.assertTrue((ROOT / "CODEX.md").is_file())
+
     def test_lawyeredos_branding_and_namespace(self):
         manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "lawyeredos")

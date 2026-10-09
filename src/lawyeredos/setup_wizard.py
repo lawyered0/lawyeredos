@@ -217,9 +217,12 @@ def validate_answers(answers: Answers, source: Path) -> None:
         raise ValueError(f"unknown modules: {', '.join(unknown)}")
     if not {"matter", "tracker"}.issubset(answers.modules):
         raise ValueError("matter and tracker are required core modules")
-    if answers.mail_adapter not in {"unavailable", "claude-gmail-connector", "gmail-api-readonly"}:
+    if answers.mail_adapter not in {
+        "unavailable", "claude-gmail-connector", "codex-session-tools", "gmail-api-readonly",
+    }:
         raise ValueError(
-            "mail adapter must be unavailable, claude-gmail-connector, or gmail-api-readonly"
+            "mail adapter must be unavailable, claude-gmail-connector, codex-session-tools, "
+            "or gmail-api-readonly"
         )
     if answers.calendar_adapter not in {"unavailable", "google-calendar-api"}:
         raise ValueError("calendar adapter must be unavailable or google-calendar-api")
@@ -272,7 +275,7 @@ def render_config(answers: Answers, plugin_target: Path) -> str:
         f"mail_adapter = {_toml_string(answers.mail_adapter)}",
         f"calendar_adapter = {_toml_string(answers.calendar_adapter)}",
         'practice_manager_adapter = "unavailable"',
-        "# claude-gmail-connector uses Claude's user-authorized connector; setup cannot verify session access.",
+        "# Host session connectors/tools are user-authorized; setup cannot verify session access.",
         "# gmail-api-readonly and the live Calendar adapter are experimental and not live-account accepted.",
         "", "[credentials]",
         'gmail_token_env = "LAWYEREDOS_GMAIL_TOKEN"',
@@ -427,6 +430,8 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
             (
                 "Gmail connector selected: authorization stays in Claude/Google and is verified only by a successful bounded read in the active session."
                 if effective.mail_adapter == "claude-gmail-connector"
+                else "Codex session tools selected: setup stores no credential and only a successful bounded read in the active session proves availability."
+                if effective.mail_adapter == "codex-session-tools"
                 else "Gmail was explicitly skipped; email-dependent workflows will disclose that email was not checked."
                 if effective.mail_adapter == "unavailable"
                 else "Experimental Gmail REST adapter selected: it requires a separately provisioned gmail.readonly token in the named environment variable."
