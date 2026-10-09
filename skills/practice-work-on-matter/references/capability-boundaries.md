@@ -1,8 +1,11 @@
 # Capability boundaries
 
-- **Mail:** no live adapter is bundled. Use a verified Claude connector only
-  when installed and authorized. Search a bounded scope, preserve ambiguity,
-  and do not change mailbox state unless separately requested.
+- **Mail:** setup records one of three states: unavailable by explicit skip;
+  Claude Gmail connector configured but not locally verifiable; or experimental
+  local `gmail.readonly` REST adapter. Only a successful bounded read in the
+  active session establishes a connection for that request. Preserve ambiguity
+  and never draft, send, reply, forward, label, archive, or delete from the
+  matter-orientation workflow.
 - **Calendar:** orientation may inspect or propose; it may not create, update,
   or delete events.
 - **Practice manager:** unavailable by default. Never treat a tracker write as

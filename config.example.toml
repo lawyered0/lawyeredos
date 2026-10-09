@@ -34,7 +34,9 @@ practice_manager_adapter = "unavailable"
 # For deterministic local testing only:
 # mail_adapter = "fixture-json"
 # mail_fixture = "/absolute/path/to/fictional-mail.json"
-# For a real read-only Gmail connection:
+# For Claude's user-authorized Gmail connector. Setup cannot verify session access:
+# mail_adapter = "claude-gmail-connector"
+# For the experimental local read-only Gmail REST adapter:
 # mail_adapter = "gmail-api-readonly"
 # For an explicitly approved dedicated-calendar connection:
 # calendar_adapter = "google-calendar-api"

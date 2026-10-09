@@ -36,14 +36,24 @@ The wizard asks for:
 1. a project workspace;
 2. neutral, individual, or firm branding and one local display label;
 3. no jurisdiction profile or the bundled Ontario workflow-boundary profile;
-4. optional letters, redline, calendar, and review modules; and
-5. optional experimental Gmail read-only or dedicated Google Calendar adapters.
+4. optional letters, redline, calendar, and review modules;
+5. one explicit email choice: Claude Gmail connector, safe skip, or the
+   experimental local `gmail.readonly` REST adapter; and
+6. an optional experimental dedicated Google Calendar adapter.
 
 Matter orientation and the tracker are required core modules. Selecting a
 jurisdiction profile does not install current law or replace primary-law
-verification. The wizard asks only for an exact dedicated calendar identifier,
-never a token. Gmail and Calendar tokens remain environment-only and must be
-configured separately after setup.
+verification. For the supported Claude route, the user authenticates directly
+with Google in Claude's **+ > Connectors > Gmail** interface and reviews
+Google's consent screen. The wizard never sees a credential and cannot prove
+that an active session is connected; it records only that the connector was
+configured. A successful bounded read is required before a workflow may report
+it connected. The connector can expose write actions, but LawyeredOS does not
+auto-send and does not treat connection as approval to draft, send, reply,
+forward, label, archive, or delete. The experimental REST route is narrower
+(`gmail.readonly`) but requires the user to provision a token independently and
+has only fake-transport acceptance. Token values remain environment-only. The
+wizard asks only for an exact dedicated calendar identifier, never a token.
 
 ## Preview and apply
 
@@ -151,6 +161,9 @@ XLSX projection. `python-docx` is required when letters or redlines are selected
 Poppler enable visual document checks; OCRmyPDF enables OCR. Missing optional
 tools are reported with fixes but are never installed automatically.
 
-Live Gmail and Google Calendar acceptance remains incomplete. Their adapters
-are visibly experimental, disabled by default, and fail closed when their named
-environment variables are absent. The practice-manager adapter is unavailable.
+The Claude Gmail connector is a supported Claude feature, but LawyeredOS cannot
+verify its authorization locally and has not completed a real-mail acceptance
+run. The bundled Gmail REST and Google Calendar adapters remain experimental
+and fail closed when their named environment variables are absent. Email is
+never silently disabled: `skip` is an explicit, safe choice. The
+practice-manager adapter is unavailable.

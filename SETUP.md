@@ -28,7 +28,9 @@ file. LawyeredOS never installs skills, agents, or settings into user-global
 `~/.claude`; selected skills are created only under the exact approved
 workspace's `.claude/` directory.
 
-Setup must not change global Claude settings, collect credentials, enable live
-integrations by default, or use real client data for the first trial. Terminal
+Setup must not change global Claude settings, collect credentials, silently
+disable email, authorize integrations for the user, or use real client data for
+the first trial. It prominently asks the user to connect Gmail in Claude, skip
+email safely, or choose the experimental local `gmail.readonly` route. Terminal
 commands in `docs/INSTALL.md` are inspection and fallback instructions, not the
 primary route.

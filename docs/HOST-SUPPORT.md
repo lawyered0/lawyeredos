@@ -18,7 +18,8 @@ commands, local SQLite, and local document tools.
 | Windows or Linux | Not tested | Unsupported for the first release |
 | Local matter register/orientation | Core | Required and fail-closed |
 | DOCX letters/redlines | Optional selected modules | Require Python document packages; visual verification additionally requires LibreOffice and Poppler |
-| Gmail read-only / dedicated Calendar | Experimental | Disabled by default; fake-transport tests only |
+| Claude Gmail connector | Configurable, not locally verifiable | User authenticates directly in Claude; only a successful bounded read proves connection for that request; no real-mail acceptance claim |
+| Local Gmail read-only / dedicated Calendar REST adapters | Experimental | Explicit opt-in; fake-transport tests only |
 | OCR | Experimental optional | Unverified on the test host |
 | Practice manager | Unavailable | No adapter bundled |
 

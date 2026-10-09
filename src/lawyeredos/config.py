@@ -82,7 +82,9 @@ def load_config(path: str | Path) -> PracticeConfig:
         "practice_manager_adapter": str(integrations.get("practice_manager_adapter", "unavailable")),
     }
     allowed = {
-        "mail_adapter": {"unavailable", "fixture-json", "gmail-api-readonly"},
+        "mail_adapter": {
+            "unavailable", "fixture-json", "claude-gmail-connector", "gmail-api-readonly",
+        },
         "calendar_adapter": {"unavailable", "google-calendar-api"},
         "practice_manager_adapter": {"unavailable"},
     }

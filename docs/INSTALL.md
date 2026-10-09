@@ -11,8 +11,9 @@ LawyeredOS targets Claude Code inside the Claude desktop app on macOS. You need:
   access.
 
 LibreOffice and Poppler are recommended for document rendering. OCRmyPDF is
-optional. Gmail and Calendar are experimental and should remain off for the
-first setup.
+optional. Setup makes email a required explicit choice: connect through
+Claude's supported Gmail connector, skip email safely, or select the
+experimental local read-only REST adapter. Calendar remains experimental.
 
 Claude Code may transmit selected workspace content to Anthropic under the
 user's account and settings. Do not treat local storage as offline processing.
@@ -93,7 +94,9 @@ For the first run, choose:
 - neutral branding unless you have reviewed a private template;
 - no jurisdiction profile unless the Ontario boundary notes are useful;
 - matter and tracker modules, plus only the optional modules you need; and
-- mail and calendar off.
+- one explicit mail choice after reviewing the access and action boundaries;
+  use `skip` if you do not want email access; and
+- calendar off unless you are deliberately testing its experimental adapter.
 
 Review the paths, dependency report, selected modules, and exact configuration.
 Type `APPLY` only when they are correct. Any other response cancels.

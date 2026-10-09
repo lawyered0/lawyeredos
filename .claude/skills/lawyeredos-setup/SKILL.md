@@ -17,7 +17,7 @@ slash command. Preserve every approval gate below.
 
 - Work only from this extracted LawyeredOS release package.
 - Do not change global Claude settings, install a plugin globally, use
-  `--plugin-dir`, collect credentials, enable a live integration by default, or
+  `--plugin-dir`, collect credentials, authorize a connector for the user, or
   publish anything.
 - Do not use real client data for an acceptance trial.
 - Do not create a virtual environment or install packages without showing the
@@ -61,12 +61,32 @@ Code even though files are stored locally. Then obtain and repeat back:
    authority);
 5. modules, with `matter,tracker` required and any of
    `letters,redline,calendar,review` optional;
-6. existing-config policy: `reuse`, `replace`, or `error`.
+6. one explicit mail choice (there is no default):
+   - `claude-gmail` to use Claude's supported Gmail connector after the user
+     authenticates directly with Google in Claude;
+   - `skip` to continue safely without email; or
+   - `gmail-readonly` for the experimental local REST adapter, which requires a
+     separately provisioned `gmail.readonly` token and has not had live-account
+     acceptance;
+7. existing-config policy: `reuse`, `replace`, or `error`.
 
-Keep mail and calendar integrations `off` for the first setup unless the user
-explicitly requests an experimental adapter after its limits are explained.
-Never request a token. Google Calendar also requires the exact dedicated
-calendar identifier and must not use a primary calendar.
+Make mail a prominent decision. For `claude-gmail`, explain before the user
+connects that Google's consent screen includes mail sending permissions because
+Claude's connector may expose write actions. LawyeredOS uses it only for bounded
+reads and never treats access as authority to send or change mailbox state. Ask
+the user to use Claude's **+ > Connectors > Gmail** flow, authenticate directly
+with Google, review the consent screen, and return only after choosing whether
+to approve it. Do not handle passwords, OAuth codes, tokens, or credentials. On
+Team or Enterprise, an owner may need to enable the connector.
+
+The wizard cannot inspect connector authorization. Record `claude-gmail` only
+after the user confirms completing the UI flow, and describe it as
+**configured, not verified connected** until a bounded Gmail read succeeds in
+the active session. If the connector is unavailable, the user declines the
+permissions, or they do not want Anthropic-hosted connector retrieval, offer
+`skip` or the narrower but experimental `gmail-readonly` route. Never request a
+token value. Google Calendar also requires the exact dedicated calendar
+identifier and must not use a primary calendar.
 
 ## Prepare the runtime
 
@@ -102,7 +122,7 @@ meaning the exact interpreter selected above:
   --branding-label '<label>' \
   --jurisdiction '<profile>' \
   --modules '<comma-separated-modules>' \
-  --mail 'off' \
+  --mail '<claude-gmail|skip|gmail-readonly>' \
   --calendar 'off' \
   --existing-config '<policy>' \
   --json

@@ -217,8 +217,10 @@ def validate_answers(answers: Answers, source: Path) -> None:
         raise ValueError(f"unknown modules: {', '.join(unknown)}")
     if not {"matter", "tracker"}.issubset(answers.modules):
         raise ValueError("matter and tracker are required core modules")
-    if answers.mail_adapter not in {"unavailable", "gmail-api-readonly"}:
-        raise ValueError("mail adapter must be unavailable or gmail-api-readonly")
+    if answers.mail_adapter not in {"unavailable", "claude-gmail-connector", "gmail-api-readonly"}:
+        raise ValueError(
+            "mail adapter must be unavailable, claude-gmail-connector, or gmail-api-readonly"
+        )
     if answers.calendar_adapter not in {"unavailable", "google-calendar-api"}:
         raise ValueError("calendar adapter must be unavailable or google-calendar-api")
     if answers.calendar_adapter == "google-calendar-api":
@@ -270,7 +272,8 @@ def render_config(answers: Answers, plugin_target: Path) -> str:
         f"mail_adapter = {_toml_string(answers.mail_adapter)}",
         f"calendar_adapter = {_toml_string(answers.calendar_adapter)}",
         'practice_manager_adapter = "unavailable"',
-        "# Live Gmail/Calendar adapters are experimental and have not completed live-account acceptance.",
+        "# claude-gmail-connector uses Claude's user-authorized connector; setup cannot verify session access.",
+        "# gmail-api-readonly and the live Calendar adapter are experimental and not live-account accepted.",
         "", "[credentials]",
         'gmail_token_env = "LAWYEREDOS_GMAIL_TOKEN"',
         'calendar_token_env = "LAWYEREDOS_CALENDAR_TOKEN"',
@@ -421,7 +424,15 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "notes": [
             "No global Claude settings will be changed.",
             "No credentials or token values will be collected or written.",
-            "Live Gmail and Google Calendar adapters remain optional and experimental.",
+            (
+                "Gmail connector selected: authorization stays in Claude/Google and is verified only by a successful bounded read in the active session."
+                if effective.mail_adapter == "claude-gmail-connector"
+                else "Gmail was explicitly skipped; email-dependent workflows will disclose that email was not checked."
+                if effective.mail_adapter == "unavailable"
+                else "Experimental Gmail REST adapter selected: it requires a separately provisioned gmail.readonly token in the named environment variable."
+            ),
+            "LawyeredOS never treats mail access as authority to send, reply, forward, label, archive, or delete.",
+            "The live Google Calendar adapter remains optional and experimental.",
             "The installed plugin is versioned; private configuration and data remain outside it.",
             "The launcher records the Python interpreter used for setup so the installed dependencies remain available at runtime.",
             *( ["Existing configuration governs branding, modules, jurisdiction, and integrations for this run."] if reused_existing else [] ),
@@ -827,6 +838,15 @@ def _ask(prompt: str, default: str) -> str:
     return value or default
 
 
+def _ask_required_choice(prompt: str, choices: tuple[str, ...]) -> str:
+    allowed = "/".join(choices)
+    while True:
+        value = input(f"{prompt} ({allowed}): ").strip().lower()
+        if value in choices:
+            return value
+        print(f"Choose one of: {', '.join(choices)}. No mail choice is applied by default.")
+
+
 def interactive_answers(args: argparse.Namespace) -> Answers:
     print("LawyeredOS guided setup for Claude Code inside the Claude desktop app")
     print("No global Claude settings or credentials will be changed.\n")
@@ -837,7 +857,16 @@ def interactive_answers(args: argparse.Namespace) -> Answers:
         branding_label = _ask("Local display label (no address, email, logo, or signature)", "Organization")
     jurisdiction = args.jurisdiction or _ask("Jurisdiction profile (none/ontario)", "none")
     modules_raw = args.modules or _ask("Modules (comma separated)", ",".join(MODULES))
-    mail = args.mail or _ask("Mail integration (off/gmail-readonly experimental)", "off")
+    if args.mail:
+        mail = args.mail
+    else:
+        print("\nChoose how LawyeredOS should handle email:")
+        print("  claude-gmail  Connect Gmail in Claude with Google's consent screen; setup stores no credential.")
+        print("                 The setup can record this choice but cannot verify the active session connection.")
+        print("  skip           Continue safely without email; workflows will say email was not checked.")
+        print("  gmail-readonly Experimental local REST adapter using a separately provisioned gmail.readonly token.")
+        print("                 It has only fake-transport acceptance and no live-account acceptance.")
+        mail = _ask_required_choice("Mail choice", ("claude-gmail", "skip", "gmail-readonly"))
     calendar = args.calendar or _ask("Calendar integration (off/google-calendar experimental)", "off")
     calendar_id = args.calendar_id or ""
     if calendar == "google-calendar" and not calendar_id:
@@ -854,7 +883,12 @@ def normalize_answers(workspace: Path, branding_mode: str, branding_label: str, 
         workspace=workspace.expanduser().resolve(), branding_mode=branding_mode.strip().lower(),
         branding_label=branding_label.strip(), jurisdiction=jurisdiction.strip().lower(),
         modules=modules,
-        mail_adapter={"off": "unavailable", "gmail-readonly": "gmail-api-readonly"}.get(mail, mail),
+        mail_adapter={
+            "off": "unavailable",  # accepted for older scripted invocations
+            "skip": "unavailable",
+            "claude-gmail": "claude-gmail-connector",
+            "gmail-readonly": "gmail-api-readonly",
+        }.get(mail, mail),
         calendar_adapter={"off": "unavailable", "google-calendar": "google-calendar-api"}.get(calendar, calendar),
         calendar_id=calendar_id.strip(), existing_config=existing.strip().lower(),
     )
@@ -867,7 +901,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--branding-label")
     parser.add_argument("--jurisdiction", choices=("none", "ontario"))
     parser.add_argument("--modules")
-    parser.add_argument("--mail", choices=("off", "gmail-readonly"))
+    parser.add_argument(
+        "--mail", choices=("claude-gmail", "skip", "gmail-readonly", "off"),
+        help="required explicit mail choice; 'off' is retained only for older scripted invocations",
+    )
     parser.add_argument("--calendar", choices=("off", "google-calendar"))
     parser.add_argument("--calendar-id", default="")
     parser.add_argument("--existing-config", choices=("reuse", "replace", "error"))

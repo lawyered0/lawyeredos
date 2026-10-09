@@ -205,8 +205,15 @@ def main(argv: list[str] | None = None) -> int:
                 if config.mail_fixture is None:
                     raise ValueError("fixture-json mail adapter requires integrations.mail_fixture")
                 result = fixture_mail(config.mail_fixture, args.query, args.limit)
-            else:
+            elif config.mail_adapter == "gmail-api-readonly":
                 result = gmail_from_config(config).search(args.query, args.limit)
+            elif config.mail_adapter == "claude-gmail-connector":
+                raise ValueError(
+                    "the Claude Gmail connector is available only through an authorized Claude session; "
+                    "the local integrations CLI cannot call it"
+                )
+            else:
+                raise ValueError("mail is unavailable because setup explicitly skipped a mail connection")
         elif args.command == "calendar-list":
             result = calendar_from_config(config).list_events(args.time_min, args.time_max)
         else:

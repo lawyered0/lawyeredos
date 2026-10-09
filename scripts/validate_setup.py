@@ -65,6 +65,11 @@ def main() -> int:
         errors.append("fixture-json mail adapter requires an existing integrations.mail_fixture")
     if config.mail_adapter == "gmail-api-readonly" and not os.environ.get(config.gmail_token_env):
         errors.append(f"Gmail token environment variable is not set: {config.gmail_token_env}")
+    if config.mail_adapter == "claude-gmail-connector":
+        warnings.append(
+            "Claude Gmail connector is configured but local validation cannot prove that it is "
+            "authorized or available in the active Claude session; a successful bounded read is required"
+        )
     if config.calendar_adapter == "google-calendar-api" and not os.environ.get(config.calendar_token_env):
         errors.append(f"Calendar token environment variable is not set: {config.calendar_token_env}")
     result = {"ok": not errors, "errors": errors, "warnings": warnings}

@@ -64,9 +64,19 @@ rollback.
 
 ## Gmail or Calendar is unavailable
 
-These adapters are experimental and disabled by default. Missing credentials or
-an unavailable adapter must be reported as unavailable. Never substitute a
-different account, primary calendar, or connector.
+Check the configured mail state first. `unavailable` means setup explicitly
+skipped email. `claude-gmail-connector` means the user chose Claude's connector,
+but the local validator cannot prove it is authorized in this session: open
+Claude's **+ > Connectors**, enable Gmail, authenticate directly with Google,
+and review the account and consent screen. On Team or Enterprise an owner may
+need to enable it first. Only a successful bounded read establishes connection
+for that request. Do not use connector send or mailbox-mutation actions.
+
+`gmail-api-readonly` is the experimental local REST route. It requires a valid,
+separately provisioned `gmail.readonly` token in the named environment variable;
+the value never belongs in TOML. Missing credentials fail closed. Calendar is
+also experimental. Never substitute a different account, primary calendar, or
+connector.
 
 ## Asking for help
 

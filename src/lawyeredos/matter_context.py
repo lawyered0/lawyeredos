@@ -95,6 +95,8 @@ def orient(config_path: Path, identifier: str, recent_limit: int) -> dict[str, A
             (
                 "Email context was not loaded because the mail adapter is unavailable."
                 if config.mail_adapter == "unavailable"
+                else "Email context was not loaded by orientation. The Claude Gmail connector is configured but must be present and successfully authorized in this session before a bounded read can establish that it is connected."
+                if config.mail_adapter == "claude-gmail-connector"
                 else "Email context was not loaded by orientation; run a separate bounded mail search if needed."
             ),
         ],

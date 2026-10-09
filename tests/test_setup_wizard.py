@@ -17,6 +17,7 @@ from lawyeredos.setup_wizard import (
     build_plan,
     dependency_report,
     main,
+    normalize_answers,
     render_launcher,
     render_terminal_launcher,
     rollback,
@@ -62,6 +63,38 @@ class SetupWizardTests(unittest.TestCase):
         terminal = render_terminal_launcher(plan)
         self.assertIn("exec claude", terminal)
         self.assertNotIn("--desktop", terminal)
+
+    def test_mail_choice_maps_connector_skip_and_experimental_routes(self):
+        common = dict(
+            workspace=self.workspace, branding_mode="neutral",
+            branding_label="Organization", jurisdiction="none",
+            modules_raw="matter,tracker", calendar="off", calendar_id="",
+            existing="reuse",
+        )
+        connector = normalize_answers(mail="claude-gmail", **common)
+        skipped = normalize_answers(mail="skip", **common)
+        experimental = normalize_answers(mail="gmail-readonly", **common)
+        self.assertEqual(connector.mail_adapter, "claude-gmail-connector")
+        self.assertEqual(skipped.mail_adapter, "unavailable")
+        self.assertEqual(experimental.mail_adapter, "gmail-api-readonly")
+        connector_plan = build_plan(connector)
+        self.assertTrue(any("Gmail connector selected" in note for note in connector_plan["notes"]))
+        self.assertTrue(any("never treats mail access" in note for note in connector_plan["notes"]))
+
+    def test_experimental_mail_route_fails_validation_without_credential(self):
+        result = apply_plan(build_plan(self.answers(mail_adapter="gmail-api-readonly")))
+        environment = os.environ.copy()
+        environment.pop("LAWYEREDOS_GMAIL_TOKEN", None)
+        validation = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parents[1] / "scripts" / "validate_setup.py"),
+                "--config", result["config"],
+            ],
+            capture_output=True, text=True, check=False, env=environment,
+        )
+        self.assertEqual(validation.returncode, 2)
+        self.assertIn("Gmail token environment variable is not set", validation.stdout)
 
     def test_dependency_requirements_follow_selected_modules(self):
         core = {item["name"]: item for item in dependency_report(("matter", "tracker"))}
@@ -149,6 +182,22 @@ class SetupWizardTests(unittest.TestCase):
         self.assertEqual(settings["env"]["EXAMPLE"], "kept")
         self.assertIn("LAWYEREDOS_CONFIG", settings["env"])
 
+    def test_apply_preserves_unrelated_private_skill_and_settings(self):
+        private_skill = self.workspace / ".claude" / "skills" / "private-existing-skill"
+        private_skill.mkdir(parents=True)
+        skill_file = private_skill / "SKILL.md"
+        skill_file.write_text("private user skill", encoding="utf-8")
+        settings_path = self.workspace / ".claude" / "settings.local.json"
+        settings_path.write_text(
+            json.dumps({"permissions": {"allow": ["Read"]}, "env": {"PRIVATE_SETTING": "kept"}}),
+            encoding="utf-8",
+        )
+        apply_plan(build_plan(self.answers(mail_adapter="claude-gmail-connector")))
+        self.assertEqual(skill_file.read_text(encoding="utf-8"), "private user skill")
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(settings["permissions"], {"allow": ["Read"]})
+        self.assertEqual(settings["env"]["PRIVATE_SETTING"], "kept")
+
     def test_preflight_refuses_symlinked_managed_directory(self):
         outside = self.root / "outside"
         outside.mkdir()
@@ -230,7 +279,7 @@ class SetupWizardTests(unittest.TestCase):
         argv = [
             "--workspace", str(self.workspace), "--branding-mode", "neutral",
             "--branding-label", "Organization", "--jurisdiction", "none",
-            "--modules", "matter,tracker", "--mail", "off", "--calendar", "off",
+            "--modules", "matter,tracker", "--mail", "skip", "--calendar", "off",
             "--existing-config", "reuse", "--apply",
         ]
         with patch("builtins.input", return_value=""):

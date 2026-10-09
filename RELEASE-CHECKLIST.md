@@ -72,9 +72,10 @@ tests that remain before public distribution.
 - [ ] Exercise OCR on a disposable document with OCRmyPDF and its platform
   dependencies installed. OCR remains optional and unavailable on the tested
   host.
-- [ ] Exercise Gmail read-only and dedicated-calendar operations against
-  purpose-created test accounts. Current tests use injected fake transports;
-  no live account claim is made.
+- [ ] Exercise the configured Claude Gmail connector, the local Gmail read-only
+  adapter, and dedicated-calendar operations against purpose-created test
+  accounts. Current local-adapter tests use injected fake transports; setup
+  cannot verify a Claude connector; no real-mail or live-calendar claim is made.
 - [ ] Validate migration against a read-only copy or export of the owner's real
   tracker, reconcile every row and history count, and keep rollback material.
   Fictional SQLite/CSV/JSON/XLSX paths are verified; private tracker
@@ -133,4 +134,5 @@ tests that remain before public distribution.
 - Calendar deletion and all other live mutations require exact current approval;
   nothing in the demo authorizes live changes.
 - OCR, LibreOffice, Poppler, Gmail, and Google Calendar are optional external
-  capabilities and fail closed when unavailable.
+  capabilities and fail closed when unavailable. A configured Claude Gmail
+  choice is not called connected until a bounded read succeeds in that session.

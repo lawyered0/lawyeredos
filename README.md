@@ -12,12 +12,9 @@ decided contract redlines, calendar planning, and independent draft review.
 
 ## Try the macOS beta
 
-Download **[LawyeredOS 0.2.0 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.1.zip)**
-and verify its SHA-256:
-
-```text
-f949d6d33d449b674c5fd1e290646b1b53b2cdf497e2c48d60ab88f09c8177cc
-```
+Download **[LawyeredOS 0.2.0 beta.2](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.2.zip)**.
+Before extracting a downloaded copy, compare its SHA-256 with the checksum
+published alongside the download on the public LawyeredOS site or repository.
 
 1. Extract the ZIP into a private folder you will retain.
 2. Open the extracted `lawyeredos` folder in the Claude desktop app's
@@ -74,9 +71,12 @@ Python 3.11 or newer. Python 3.12 is the fully tested runtime. The separate
 terminal launcher is an optional fallback documented in
 [installation](docs/INSTALL.md).
 
-Windows and other operating systems are not currently supported. Live Gmail and
-Google Calendar, OCR, and the complete multi-lens review remain experimental or
-optional; the practice-manager adapter is not implemented. See
+Windows and other operating systems are not currently supported. Setup asks
+whether to configure Claude's Gmail connector, skip email, or use the
+experimental local read-only adapter; it never silently turns email off.
+LawyeredOS does not auto-send email. Google Calendar, OCR, and the complete
+multi-lens review remain experimental or optional; the practice-manager adapter
+is not implemented. See
 [host support](docs/HOST-SUPPORT.md), [dependencies](docs/DEPENDENCIES.md), and
 [the roadmap](ROADMAP.md).
 

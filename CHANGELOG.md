@@ -3,6 +3,17 @@
 All notable changes will be recorded here. The project has not yet made a public
 release.
 
+## 0.2.0 beta.2
+
+- Made email a required explicit onboarding decision instead of silently
+  defaulting it off.
+- Added an honest configured-but-unverified route for Claude's Gmail connector,
+  retained safe skip behavior, and kept the narrower token-based REST adapter
+  clearly experimental.
+- Documented connector permissions, direct user authentication, bounded reads,
+  runtime connection verification, and the separate approval boundary for all
+  send or mailbox-write actions.
+
 ## 0.2.0 — private macOS beta candidate
 
 - Renamed the package and plugin namespace to LawyeredOS / `lawyeredos`.

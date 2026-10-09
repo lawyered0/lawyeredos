@@ -33,9 +33,16 @@ next step. State absences no wider than the sources actually checked.
   jurisdiction profile are verified.
 - If the configured mail adapter is unavailable, disclose that current email
   was not checked. Do not claim a clean inbox or invent another connection.
-- When Gmail is configured, use only a bounded query through
-  `lawyeredos.integrations`; its metadata/snippet result is not a
-  complete mailbox claim and never authorizes mailbox changes.
+- When `claude-gmail-connector` is configured, use Claude's Gmail connector only
+  if its read/search tool is present in the active session. A configured value
+  is not proof of a connection. Treat an authorization prompt, missing tool, or
+  failed read as unavailable; only a successful bounded read establishes that
+  the connector was connected for that request. Never invoke draft, send,
+  reply, forward, label, archive, or delete actions from this workflow.
+- When `gmail-api-readonly` is configured, use a bounded query through
+  `lawyeredos.integrations`; its metadata/snippet result is not a complete
+  mailbox claim and never authorizes mailbox changes. This route is
+  experimental and has only fake-transport acceptance.
 - Use document-specific extraction and visual QA for PDFs and DOCX files. Stop
   dependent work when OCR or extraction is unusable. `document_helpers ocr`
   creates a separate copy and a hash-bound report; it never replaces a source.

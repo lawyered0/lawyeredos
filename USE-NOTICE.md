@@ -47,6 +47,8 @@ or endorsed by Anthropic. Claude and related marks belong to their respective
 owners, and access to Claude is governed separately by the provider's terms.
 
 The accepted beta target is Claude Desktop Code in a Local session on macOS,
-with Python 3.12 used for acceptance. Windows, Linux, OCR, live Gmail and
-Calendar adapters, and complete four-lens review orchestration are unverified
-or experimental as described in [`docs/HOST-SUPPORT.md`](docs/HOST-SUPPORT.md).
+with Python 3.12 used for acceptance. Windows, Linux, OCR, the local Gmail and
+Calendar REST adapters, and complete four-lens review orchestration are
+unverified or experimental. Claude's Gmail connector is user-authorized and
+locally unverifiable; LawyeredOS has not completed a real-mail acceptance run.
+See [`docs/HOST-SUPPORT.md`](docs/HOST-SUPPORT.md).
