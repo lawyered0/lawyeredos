@@ -43,6 +43,9 @@ the active host. Repository skills cannot technically reduce a delegated
 reviewer's tool set, so the four-lens workflow remains hash-verified and must
 report itself unavailable when independent delegation is absent.
 
+The private acceptance record, including the distinction between Codex CLI
+and Codex desktop coverage, is in [`docs/CODEX-ACCEPTANCE.md`](docs/CODEX-ACCEPTANCE.md).
+
 ## Terminal preview
 
 The normal flow is conversational. For inspection, the equivalent preview is:
