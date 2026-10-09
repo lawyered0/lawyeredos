@@ -1,36 +1,31 @@
-# LawyeredOS website preview
+# LawyeredOS public beta website
 
-Static, dependency-free preview for a possible future `get.lawyered.lawyer`
-project site. This folder is intentionally separate from the LawyeredOS
-distribution package.
+Static, dependency-free source for `get.lawyered.lawyer`. The versioned public
+download is stored under `downloads/`; the development repository remains
+private.
 
 ## Local preview
 
-Run the server from the parent task directory so the explicitly private local
-archive link resolves without copying the ZIP into the website:
+Run the server from this directory so the versioned download resolves:
 
 ```bash
 python3 -m http.server 4173 \
-  --directory /absolute/path/to/the/task-directory
+  --directory /absolute/path/to/website
 ```
 
 Then open:
 
 ```text
-http://127.0.0.1:4173/lawyeredos-site-preview/
+http://127.0.0.1:4173/
 ```
 
 The page has no build step, external assets, analytics, network forms, service
-workers, or third-party scripts. Deploy `index.html`, `styles.css`, `script.js`,
-and `wizard-terminal.png` together on any static host after removing or
-replacing the local archive link. Do not deploy the parent directory.
+workers, or third-party scripts. Deploy the HTML, CSS, JavaScript, image, and
+versioned ZIP together.
 
-## Before publication
+## Release update checklist
 
-- choose the public repository, publisher identity, support route, and download
-  destination;
-- decide whether the local archive call-to-action should become a public
-  download, source link, waitlist, or documentation link;
-- complete name/trademark review and final copy/legal review;
-- re-run responsive, accessibility, and link checks on the intended host; and
-- remove all private-preview language only when the release is actually public.
+- add the newly reviewed versioned ZIP under `downloads/`;
+- update the version, SHA-256, release notes, and tested limits together;
+- re-run privacy, responsive, accessibility, download, and link checks; and
+- publish only the exact reviewed site and archive.
