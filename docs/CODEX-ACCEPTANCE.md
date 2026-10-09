@@ -50,15 +50,25 @@ Four actual independent Codex agents performed the opposing-reader,
 fact-and-source, privilege/admissions/authority, and pre-mortem/operational-risk
 lenses on a fictional options note. They were not scripted result fixtures.
 One invalid source path was rejected and corrected before collection. The
-collector completed all four lenses, reported four findings and explicit
-coverage gaps, and confirmed that the deliverable and supplied source hashes
-were unchanged.
+collector completed all four lenses, reported one optional operational finding
+and explicit coverage gaps, and confirmed that the deliverable and supplied
+source hashes were unchanged. The collection command returned `ok: false`
+because source and authority gaps remained; that result was preserved rather
+than relabelled as a complete substantive review.
 
 The `read_only` review instruction is behavioral. A repository skill cannot
 technically remove tools from a delegated agent. The enforceable controls are
 bounded inputs, schema validation, source-path validation, and before/after
 hash verification. If the host cannot provide independent agents, the skill
 must report the review panel unavailable rather than emulate independence.
+
+## Fictional document render
+
+The generated fictional response DOCX was rendered to a one-page PDF and PNG
+with the document verifier and inspected at full resolution. The page had no
+clipping, overlap, broken glyphs, footer collision, or unexpected page break.
+The rendered copy remained acceptance evidence only; it was not added to the
+release archive.
 
 ## Desktop status
 

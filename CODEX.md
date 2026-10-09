@@ -33,9 +33,11 @@ remain experimental or unverified as described in the existing documentation.
 
 ## Verified host boundary
 
-The candidate targets the tested macOS environment with Python 3.12.7, Codex
-CLI 0.147.0, and the ChatGPT desktop app. It makes no Windows, Linux, other
-Python-version, cloud-host, or live-connector compatibility claim.
+The candidate's core and project-skill discovery target the tested macOS
+environment with Python 3.12.7 and Codex CLI 0.147.0. A separate fresh-task
+discovery check in the Codex desktop app remains pending and is not implied by
+the CLI result. The candidate makes no Windows, Linux, other Python-version,
+cloud-host, or live-connector compatibility claim.
 
 Project skill discovery follows Codex's documented `.agents/skills` mechanism.
 Codex can delegate independent reviewers when that capability is exposed in

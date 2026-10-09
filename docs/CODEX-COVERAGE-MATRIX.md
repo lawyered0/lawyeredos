@@ -12,7 +12,7 @@ This matrix is the private pre-release gate. `Pass` identifies actual evidence;
 | Guarded tracker write | Codex CLI host | Pass | Fresh auto-reviewed workspace-write session performed read, dry-run, exact-diff inspection, token-bound commit, and verification. |
 | New-session persistence | Fresh read-only Codex CLI process | Pass | Separate session recovered the saved action, date, status, and revision. |
 | Full matter lifecycle | Local CLI/core | Pass | Fictional create, next-action update, close, reopen, history, and database verification advanced cleanly through revision 4. |
-| Draft generation | Local document workflow | Pass | Generated a neutral fictional DOCX from the installed template and created a bounded Markdown options note for review. |
+| Draft generation | Local document workflow and render QA | Pass | Generated a neutral fictional DOCX from the installed template, rendered and inspected its one-page output with no clipping, overlap, broken glyphs, footer collision, or unexpected page break, and created a bounded Markdown options note for review. |
 | Independent review | Four actual Codex agents plus deterministic collector | Pass with reported gaps | Four lenses completed. One optional operational finding and explicit source/authority gaps were reported. Deliverable and source hashes remained unchanged. Collector `ok: false` is expected whenever coverage gaps remain. |
 | Reviewer write prevention | Repository skill | Excluded as technically unenforceable | Instructions are behavioral. Enforced controls are bounded paths, result schema validation, source-path validation, and before/after hashes. |
 | Repeat install | Installer | Pass | Identical reapply returned `idempotent: true` with no changed paths. |
