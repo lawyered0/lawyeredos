@@ -12,7 +12,7 @@ decided contract redlines, calendar planning, and independent draft review.
 
 ## Try the macOS beta
 
-Download **[LawyeredOS 0.2.0 beta.1](https://lawyered0.github.io/downloads/lawyeredos-0.2.0-macos-beta.1.zip)**
+Download **[LawyeredOS 0.2.0 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.1.zip)**
 and verify its SHA-256:
 
 ```text
