@@ -13,10 +13,16 @@ changed.
 
 The extracted archive passed:
 
-- 63 LawyeredOS unit and distribution tests;
+- 65 LawyeredOS unit and distribution tests;
 - 97 vendored redline tests;
 - the repository privacy audit; and
 - an exact repeat install with `idempotent: true` and no changed paths.
+
+The installer also passed a simulated mid-apply interruption with complete
+rollback of only newly created paths, while preserving an unrelated private
+file. A retained installation was upgraded to a new versioned core by changing
+only installer-managed skill and current-core links; the old core remained
+available, and the next identical run was idempotent.
 
 ## Codex CLI end-to-end result
 

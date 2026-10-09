@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from lawyeredos.codex_setup import apply_plan, build_plan, normalize_answers
 from lawyeredos.config import load_config
@@ -110,6 +111,34 @@ class CodexSetupTests(unittest.TestCase):
         self.assertEqual(tasks["schema"], "codex-review-tasks-v1")
         self.assertTrue(all(task["read_only"] for task in tasks["tasks"]))
         self.assertEqual(before, {path: path.read_bytes() for path in (deliverable, source)})
+
+    def test_failed_apply_rolls_back_created_paths_and_preserves_private_file(self):
+        self.workspace.mkdir()
+        private = self.workspace / "private.txt"
+        private.write_text("preserve", encoding="utf-8")
+
+        def fail_after_partial_tracker(path):
+            path.write_bytes(b"partial")
+            raise OSError("simulated interruption")
+
+        with patch("lawyeredos.codex_setup.initialize", side_effect=fail_after_partial_tracker):
+            with self.assertRaisesRegex(OSError, "simulated interruption"):
+                apply_plan(build_plan(self.answers()))
+        self.assertEqual(private.read_text(encoding="utf-8"), "preserve")
+        self.assertFalse((self.workspace / ".lawyeredos").exists())
+        self.assertFalse((self.workspace / ".agents").exists())
+
+    def test_managed_links_upgrade_to_new_versioned_core(self):
+        first = apply_plan(build_plan(self.answers()))
+        old_plugin = Path(first["plugin"])
+        with patch("lawyeredos.codex_setup.package_digest", return_value="a" * 64):
+            upgraded = apply_plan(build_plan(self.answers(existing="reuse")))
+        new_plugin = Path(upgraded["plugin"])
+        self.assertNotEqual(old_plugin, new_plugin)
+        self.assertTrue(old_plugin.is_dir())
+        self.assertEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), new_plugin.resolve())
+        for path in upgraded["skills"].values():
+            self.assertTrue(Path(path).resolve().is_relative_to(new_plugin.resolve()))
 
 
 if __name__ == "__main__":

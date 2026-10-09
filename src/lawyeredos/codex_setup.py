@@ -334,74 +334,110 @@ def apply_plan(plan: dict) -> dict:
     source, setup_root, plugin = Path(plan["source"]), Path(plan["setup_root"]), Path(plan["plugin"])
     config, current = Path(plan["config"]), Path(plan["current"])
     runner, launcher, discovery = Path(plan["runner"]), Path(plan["launcher"]), Path(plan["discovery"])
-    for path in (workspace, setup_root / "scratch", setup_root / "data", setup_root / "plugins", workspace / ".agents" / "skills"):
-        path.mkdir(parents=True, exist_ok=True)
+    created: list[Path] = []
+    replaced_links: list[tuple[Path, str]] = []
+    replaced_files: list[tuple[Path, bytes, int]] = []
     changed: list[str] = []
-    if not plugin.exists():
-        shutil.copytree(source, plugin, ignore=_ignored)
-        selected = set(plan["answers"]["modules"])
-        for module, skill in MODULE_SKILLS.items():
-            if module not in selected:
-                shutil.rmtree(plugin / "skills" / skill)
-        _prepare_payload(plugin, selected)
-        (plugin / ".lawyeredos-package.json").write_text(json.dumps({
-            "version": VERSION, "digest": plan["package_digest"], "modules": plan["answers"]["modules"],
-            "host": "codex",
-        }, indent=2) + "\n", encoding="utf-8")
-        changed.append(str(plugin))
-    marker = plugin / ".lawyeredos-package.json"
-    if not marker.is_file() or json.loads(marker.read_text(encoding="utf-8")).get("digest") != plan["package_digest"]:
-        raise ValueError(f"installed core does not match this candidate: {plugin}")
-    desired = {Path(path) for path in plan["project_skills"].values()}
-    desired.update({current, runner, launcher})
-    for raw in plan.get("prior_managed", []):
-        old = Path(raw)
-        if old in desired or (not old.exists() and not old.is_symlink()):
-            continue
-        if old.is_dir() and not old.is_symlink():
-            shutil.rmtree(old)
-        else:
-            old.unlink()
-        changed.append(str(old))
-    for module, raw in plan["project_skills"].items():
-        target = Path(raw)
-        source_skill = plugin / ".lawyeredos-codex-project" / "skills" / PROJECT_SKILLS[module]
-        if target.is_symlink() and target.resolve() == source_skill.resolve():
-            continue
-        if target.exists() or target.is_symlink():
-            raise ValueError(f"refusing to overwrite project skill: {target}")
-        target.symlink_to(source_skill, target_is_directory=True)
-        changed.append(str(target))
-    if not (current.is_symlink() and current.resolve() == plugin.resolve()):
-        if current.exists() or current.is_symlink():
-            raise ValueError(f"refusing to overwrite current core link: {current}")
-        current.symlink_to(plugin, target_is_directory=True)
-        changed.append(str(current))
-    for path, content in ((runner, render_runner(plan)), (launcher, render_launcher(plan))):
-        if path.exists() and path.read_text(encoding="utf-8") != content:
-            raise ValueError(f"refusing to overwrite modified managed launcher: {path}")
-        if not path.exists():
-            path.write_text(content, encoding="utf-8")
-            path.chmod(0o700)
-            changed.append(str(path))
-    if plan["config_preview"] is not None:
-        if config.exists():
-            raise ValueError("Codex candidate does not replace an existing config without a separate reviewed migration")
-        config.write_text(plan["config_preview"], encoding="utf-8")
-        tracker = setup_root / "data" / "matters.sqlite3"
-        initialize(tracker)
-        changed.extend([str(config), str(tracker)])
-    managed = sorted(str(path) for path in desired)
-    discovery_text = json.dumps({
-        "schema_version": 1, "host": "codex", "package_digest": plan["package_digest"],
-        "managed_paths": managed,
-    }, indent=2, sort_keys=True) + "\n"
-    if not discovery.exists() or discovery.read_text(encoding="utf-8") != discovery_text:
-        discovery.write_text(discovery_text, encoding="utf-8")
-        changed.append(str(discovery))
-    with sqlite3.connect(load_config(config).tracker_database) as connection:
-        if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
-            raise ValueError("tracker quick_check failed")
+    try:
+        for path in (
+            workspace, setup_root, setup_root / "scratch", setup_root / "data",
+            setup_root / "plugins", workspace / ".agents", workspace / ".agents" / "skills",
+        ):
+            if not path.exists():
+                path.mkdir(parents=True, exist_ok=False)
+                created.append(path)
+        if not plugin.exists():
+            created.append(plugin)
+            shutil.copytree(source, plugin, ignore=_ignored)
+            selected = set(plan["answers"]["modules"])
+            for module, skill in MODULE_SKILLS.items():
+                if module not in selected:
+                    shutil.rmtree(plugin / "skills" / skill)
+            _prepare_payload(plugin, selected)
+            (plugin / ".lawyeredos-package.json").write_text(json.dumps({
+                "version": VERSION, "digest": plan["package_digest"], "modules": plan["answers"]["modules"],
+                "host": "codex",
+            }, indent=2) + "\n", encoding="utf-8")
+            changed.append(str(plugin))
+        marker = plugin / ".lawyeredos-package.json"
+        if not marker.is_file() or json.loads(marker.read_text(encoding="utf-8")).get("digest") != plan["package_digest"]:
+            raise ValueError(f"installed core does not match this candidate: {plugin}")
+        desired = {Path(path) for path in plan["project_skills"].values()}
+        desired.update({current, runner, launcher})
+        prior_managed = set(plan.get("prior_managed", []))
+        stale = [Path(raw) for raw in prior_managed if Path(raw) not in desired and (Path(raw).exists() or Path(raw).is_symlink())]
+        if stale:
+            raise ValueError(f"managed paths require a separate reviewed migration: {', '.join(map(str, stale))}")
+
+        def install_link(target: Path, destination: Path, label: str) -> None:
+            if target.is_symlink() and target.resolve() == destination.resolve():
+                return
+            if target.is_symlink() and str(target) in prior_managed:
+                previous = os.readlink(target)
+                target.unlink()
+                try:
+                    target.symlink_to(destination, target_is_directory=True)
+                except Exception:
+                    target.symlink_to(previous, target_is_directory=True)
+                    raise
+                replaced_links.append((target, previous))
+                changed.append(str(target))
+                return
+            if target.exists() or target.is_symlink():
+                raise ValueError(f"refusing to overwrite {label}: {target}")
+            target.symlink_to(destination, target_is_directory=True)
+            created.append(target)
+            changed.append(str(target))
+
+        for module, raw in plan["project_skills"].items():
+            source_skill = plugin / ".lawyeredos-codex-project" / "skills" / PROJECT_SKILLS[module]
+            install_link(Path(raw), source_skill, "project skill")
+        install_link(current, plugin, "current core link")
+        for path, content in ((runner, render_runner(plan)), (launcher, render_launcher(plan))):
+            if path.exists() and path.read_text(encoding="utf-8") != content:
+                raise ValueError(f"refusing to overwrite modified managed launcher: {path}")
+            if not path.exists():
+                created.append(path)
+                path.write_text(content, encoding="utf-8")
+                path.chmod(0o700)
+                changed.append(str(path))
+        if plan["config_preview"] is not None:
+            if config.exists():
+                raise ValueError("Codex candidate does not replace an existing config without a separate reviewed migration")
+            created.append(config)
+            config.write_text(plan["config_preview"], encoding="utf-8")
+            tracker = setup_root / "data" / "matters.sqlite3"
+            created.append(tracker)
+            initialize(tracker)
+            changed.extend([str(config), str(tracker)])
+        managed = sorted(str(path) for path in desired)
+        discovery_text = json.dumps({
+            "schema_version": 1, "host": "codex", "package_digest": plan["package_digest"],
+            "managed_paths": managed,
+        }, indent=2, sort_keys=True) + "\n"
+        if not discovery.exists() or discovery.read_text(encoding="utf-8") != discovery_text:
+            if discovery.exists():
+                replaced_files.append((discovery, discovery.read_bytes(), discovery.stat().st_mode))
+            else:
+                created.append(discovery)
+            discovery.write_text(discovery_text, encoding="utf-8")
+            changed.append(str(discovery))
+        with sqlite3.connect(load_config(config).tracker_database) as connection:
+            if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                raise ValueError("tracker quick_check failed")
+    except Exception:
+        for path, content, mode in reversed(replaced_files):
+            path.write_bytes(content)
+            path.chmod(mode)
+        for path, previous in reversed(replaced_links):
+            path.unlink(missing_ok=True)
+            path.symlink_to(previous, target_is_directory=True)
+        for path in reversed(created):
+            if path.is_symlink() or path.is_file():
+                path.unlink(missing_ok=True)
+            elif path.is_dir():
+                shutil.rmtree(path)
+        raise
     return {"ok": True, "idempotent": not changed, "changed": changed, "workspace": str(workspace),
             "config": str(config), "plugin": str(plugin), "launcher": str(launcher),
             "skills": plan["project_skills"], "discovery": str(discovery)}
