@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a bounded lawyer workflow improvement without confidential examples.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include client data, credentials, private paths, or confidential documents.
+  - type: textarea
+    id: lawyer_task
+    attributes:
+      label: Lawyer task
+      description: What should an unfamiliar lawyer be able to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Evidence, writes, and approval boundaries
+      description: What may be read, what may change, and what must require approval?
+    validations:
+      required: true
+  - type: textarea
+    id: failure
+    attributes:
+      label: Failure and recovery
+      description: How should the workflow stop safely and recover?
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: This request contains only fictional or fully sanitized information.
+          required: true

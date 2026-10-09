@@ -1,0 +1,16 @@
+[
+  {
+    "sync_key": "2030-001:FUP:2030-03-15:delivery-clause",
+    "date": "2030-03-15",
+    "title": "2030-001 FUP Confirm delivery clause",
+    "timezone": "UTC",
+    "visibility": "private"
+  },
+  {
+    "sync_key": "2030-001:FUP:2030-04-01:status-review",
+    "date": "2030-04-01",
+    "title": "2030-001 FUP Status review",
+    "timezone": "UTC",
+    "visibility": "private"
+  }
+]

@@ -1,0 +1,193 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+
+from lawyeredos.calendar_plan import plan
+from lawyeredos.config import load_config
+from lawyeredos.matter_context import orient
+from lawyeredos.review_bundle import create_manifest, verify_manifest
+from lawyeredos.safe_output import commit as commit_output
+from lawyeredos.safe_output import preview as preview_output
+from lawyeredos.tracker_cli import commit_mutation, initialize, preview_mutation, read_show, verify
+
+
+def mutation_args(database: Path, command: str, **values):
+    defaults = dict(
+        database=str(database), file_number="2030-001", dry_run=True,
+        confirm_token=None, client="Northstar Bakery Ltd.",
+        description="Fictional supply agreement", matter_folder="2030-001-northstar",
+        opposing_party="Harbor Paper Co.", other_parties="", primary_email="",
+        set_values=[], event_date="2030-01-05", text="Reviewed fictional source.",
+    )
+    defaults.update(values)
+    return argparse.Namespace(**defaults)
+
+
+class TrackerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.database = self.root / "matters.sqlite3"
+        initialize(self.database)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def create_matter(self):
+        args = mutation_args(self.database, "create")
+        preview = preview_mutation(self.database, "create", args)
+        return commit_mutation(self.database, "create", args, preview["confirm_token"])
+
+    def test_create_update_timeline_and_history(self):
+        created = self.create_matter()
+        self.assertTrue(created["committed"])
+        args = mutation_args(self.database, "update", set_values=["next_action=Review clause"])
+        preview = preview_mutation(self.database, "update", args)
+        commit_mutation(self.database, "update", args, preview["confirm_token"])
+        timeline = mutation_args(self.database, "timeline")
+        preview = preview_mutation(self.database, "timeline", timeline)
+        commit_mutation(self.database, "timeline", timeline, preview["confirm_token"])
+        matter = read_show(self.database, "2030-001")
+        self.assertEqual(matter["next_action"], "Review clause")
+        self.assertEqual(len(matter["timeline"]), 1)
+        self.assertTrue(verify(self.database)["ok"])
+
+    def test_stale_token_fails(self):
+        self.create_matter()
+        first = mutation_args(self.database, "timeline", text="First event")
+        first_preview = preview_mutation(self.database, "timeline", first)
+        second = mutation_args(self.database, "timeline", text="Second event")
+        second_preview = preview_mutation(self.database, "timeline", second)
+        commit_mutation(self.database, "timeline", second, second_preview["confirm_token"])
+        with self.assertRaises(ValueError):
+            commit_mutation(self.database, "timeline", first, first_preview["confirm_token"])
+
+
+class WorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def config(self) -> Path:
+        workspace = self.root / "workspace"
+        scratch = self.root / "scratch"
+        matter = workspace / "2030-001-northstar"
+        matter.mkdir(parents=True)
+        scratch.mkdir()
+        (matter / "_matter-brief.md").write_text("# Fictional matter\n", encoding="utf-8")
+        database = workspace / "matters.sqlite3"
+        initialize(database)
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """INSERT INTO matters(file_number, client, description, matter_folder,
+                status, created_at, updated_at) VALUES
+                ('2030-001', 'Northstar Bakery Ltd.', 'Fictional agreement',
+                '2030-001-northstar', 'open', '2030-01-01', '2030-01-01')"""
+            )
+        template = self.root / "template.docx"
+        template.write_bytes(b"fixture")
+        config = self.root / "config.toml"
+        config.write_text(f'''schema_version = 1
+[workspace]
+root = "{workspace}"
+scratch = "{scratch}"
+timezone = "UTC"
+[tracker]
+database = "{database}"
+[documents]
+template = "{template}"
+author = "Authorized reviewer"
+[jurisdiction]
+profile = "none"
+[integrations]
+mail_adapter = "unavailable"
+calendar_adapter = "unavailable"
+practice_manager_adapter = "unavailable"
+[calendar]
+calendar_id = ""
+[review]
+external_ai = false
+''', encoding="utf-8")
+        return config
+
+    def test_orientation_is_read_only(self):
+        result = orient(self.config(), "2030-001", 10)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "ok_read_only")
+        self.assertTrue(result["brief"]["present"])
+
+    def test_safe_output_refuses_overwrite_and_escape(self):
+        matter = self.root / "matter"
+        matter.mkdir()
+        content = self.root / "draft.txt"
+        content.write_text("fictional draft", encoding="utf-8")
+        args = argparse.Namespace(
+            root=str(self.root), matter_folder="matter", relative_path="draft-v01.txt",
+            content_file=str(content), confirm_token=None,
+        )
+        preview = preview_output(args)
+        args.confirm_token = preview["confirm_token"]
+        result = commit_output(args)
+        self.assertTrue(result["committed"])
+        with self.assertRaises(ValueError):
+            preview_output(args)
+        escaped = argparse.Namespace(
+            root=str(self.root), matter_folder="matter", relative_path="../escape.txt",
+            content_file=str(content), confirm_token=None,
+        )
+        with self.assertRaises(ValueError):
+            preview_output(escaped)
+
+    def test_calendar_plan(self):
+        desired = [{"sync_key":"x","date":"2030-01-02","title":"X","timezone":"UTC"}]
+        existing = [{"sync_key":"x","date":"2030-01-01","title":"X","timezone":"UTC"}]
+        result = plan(desired, existing)
+        self.assertEqual(len(result["update"]), 1)
+        self.assertTrue(result["read_only"])
+
+    def test_review_manifest_detects_change(self):
+        source = self.root / "source.txt"
+        deliverable = self.root / "draft.txt"
+        source.write_text("source", encoding="utf-8")
+        deliverable.write_text("draft", encoding="utf-8")
+        manifest = create_manifest(deliverable, [source], self.root)
+        manifest_path = self.root / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertTrue(verify_manifest(manifest_path)["unchanged"])
+        source.write_text("changed source", encoding="utf-8")
+        source_result = verify_manifest(manifest_path)
+        self.assertFalse(source_result["unchanged"])
+        self.assertFalse(source_result["sources_unchanged"])
+        source.write_text("source", encoding="utf-8")
+        deliverable.write_text("changed", encoding="utf-8")
+        deliverable_result = verify_manifest(manifest_path)
+        self.assertFalse(deliverable_result["unchanged"])
+        self.assertFalse(deliverable_result["deliverable_unchanged"])
+
+    def test_config_rejects_external_ai(self):
+        config = self.config()
+        text = config.read_text(encoding="utf-8").replace("external_ai = false", "external_ai = true")
+        config.write_text(text, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            load_config(config)
+
+    def test_config_rejects_unknown_adapter(self):
+        config = self.config()
+        text = config.read_text(encoding="utf-8").replace(
+            'mail_adapter = "unavailable"', 'mail_adapter = "unknown"'
+        )
+        config.write_text(text, encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "unsupported mail_adapter"):
+            load_config(config)
+
+
+if __name__ == "__main__":
+    unittest.main()

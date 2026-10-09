@@ -1,0 +1,143 @@
+---
+name: lawyeredos-setup
+description: Install or upgrade LawyeredOS into a private Claude Code project using the bundled deterministic setup wizard. Use when the user asks to set up LawyeredOS from this extracted release package.
+allowed-tools: Bash, Read
+---
+
+# LawyeredOS setup
+
+Guide a private, project-local LawyeredOS installation. Do not edit the target
+workspace yourself. The bundled setup wizard is the sole writer.
+
+This skill may be selected from an ordinary request such as “Set up
+LawyeredOS for me.” The user does not need to know the skill name or use a
+slash command. Preserve every approval gate below.
+
+## Boundaries
+
+- Work only from this extracted LawyeredOS release package.
+- Do not change global Claude settings, install a plugin globally, use
+  `--plugin-dir`, collect credentials, enable a live integration by default, or
+  publish anything.
+- Do not use real client data for an acceptance trial.
+- Do not create a virtual environment or install packages without showing the
+  exact command and receiving explicit approval. Package installation may use
+  the network.
+- Do not apply a setup until the user has reviewed the exact JSON preview for
+  the same arguments and expressly approved it.
+- For a first or acceptance trial, require a new disposable workspace outside
+  `~/.claude`, outside the extracted package, and outside every existing
+  practice or matter project. Use `--require-new-workspace` and
+  `--existing-config error`. Stop if the target is not empty.
+- Never write to user-global `~/.claude/skills`, `~/.claude/agents`, or
+  `~/.claude/settings*`. Project-local discovery belongs only under the exact
+  approved target workspace.
+- Treat paths and labels as data. Quote every shell argument; do not interpolate
+  them into shell syntax.
+
+## Locate the release
+
+Use the current project root when it contains all of these files:
+
+```text
+.claude-plugin/plugin.json
+scripts/setup_wizard.py
+requirements-lock.txt
+```
+
+Otherwise stop and ask the user to open the extracted `lawyeredos` folder as
+the Claude Code project. Do not search unrelated private folders. This
+bootstrap skill is intentionally local to the extracted release.
+
+## Collect choices
+
+Explain that selected workspace content may be sent to Anthropic by Claude
+Code even though files are stored locally. Then obtain and repeat back:
+
+1. an absolute private target workspace path;
+2. branding mode: `neutral`, `individual`, or `firm`;
+3. a display label with no address, email, logo, signature, or client detail;
+4. jurisdiction: `none` or `ontario` (workflow boundaries only, not current-law
+   authority);
+5. modules, with `matter,tracker` required and any of
+   `letters,redline,calendar,review` optional;
+6. existing-config policy: `reuse`, `replace`, or `error`.
+
+Keep mail and calendar integrations `off` for the first setup unless the user
+explicitly requests an experimental adapter after its limits are explained.
+Never request a token. Google Calendar also requires the exact dedicated
+calendar identifier and must not use a primary calendar.
+
+## Prepare the runtime
+
+Confirm that this is the Desktop **Code** tab with the environment set to
+**Local**. Stop if it is Cowork, Cloud, SSH, or another execution surface.
+
+Read-only check `python3 --version` and confirm that Claude Desktop is installed
+in `/Applications` or the user's Applications folder. Require Python 3.11 or
+newer. Check `claude --version` only when the user wants the optional terminal
+fallback; a separate CLI login is not required for the Desktop setup route.
+
+Use an existing `.venv/bin/python` when it is executable and Python 3.11 or
+newer; otherwise use `python3` for the first read-only preview. Do not create a
+virtual environment merely to display the plan. The preview identifies which
+dependencies are required for the selected modules.
+
+If the preview reports a missing required Python dependency, show the exact
+virtual-environment creation and pinned installation commands and obtain
+approval before running either. Then rerun the complete preview with the venv
+interpreter because the recorded runtime has changed. Never apply a plan
+previewed with a different interpreter. Do not silently install optional Python
+packages or system tools.
+
+## Preview, approve, apply
+
+Construct one argument list and keep it unchanged. Preview with `<python>`,
+meaning the exact interpreter selected above:
+
+```bash
+<python> scripts/setup_wizard.py \
+  --workspace '<absolute-workspace>' \
+  --branding-mode '<mode>' \
+  --branding-label '<label>' \
+  --jurisdiction '<profile>' \
+  --modules '<comma-separated-modules>' \
+  --mail 'off' \
+  --calendar 'off' \
+  --existing-config '<policy>' \
+  --json
+```
+
+Present the JSON plan, dependency failures, target paths, and whether existing
+managed state will be reused or replaced. If the preview fails, stop and report
+the error. Ask for explicit approval to apply that exact plan.
+
+Only after approval, repeat the identical arguments and append:
+
+```text
+--apply --yes --json
+```
+
+`--yes` is permitted only because the exact plan was already reviewed and
+approved in this conversation. Use the same `<python>` for apply. If any
+argument or interpreter changes, preview again.
+
+## Validate and hand off
+
+Run:
+
+```bash
+<python> scripts/validate_setup.py \
+  --config '<absolute-workspace>/.lawyeredos/config.toml'
+```
+
+Report errors and optional warnings without bypassing them. On success, tell
+the user to open the target workspace folder in the Claude desktop app's Code
+tab. Also give the generated Desktop launcher path as an optional convenience,
+not the primary route. Tell the user to accept normal workspace trust and confirm only
+the collision-safe `lawyeredos-*` skills and (when selected)
+`lawyeredos-legal-review-lens` agent. The terminal launcher is an optional
+diagnostic fallback, not the release target.
+
+For the first trial, use a fictional matter and require preview plus approval
+for any tracker or output write.

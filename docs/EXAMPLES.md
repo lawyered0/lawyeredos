@@ -1,0 +1,42 @@
+# Examples
+
+All names and file numbers below are fictional.
+
+## Orient to a matter
+
+```bash
+PYTHONPATH=src python3 -m lawyeredos.matter_context \
+  --config /private/config.toml --identifier 2030-001
+```
+
+## Preview and create a tracker row
+
+```bash
+PYTHONPATH=src python3 -m lawyeredos.tracker_cli create \
+  --database /workspace/matters.sqlite3 --file-number 2030-002 \
+  --client "Rivera Foods Ltd." --description "Commercial lease advice" \
+  --matter-folder "2030-002-rivera-foods" --dry-run
+```
+
+Repeat the command with `--confirm-token TOKEN` returned by the preview.
+
+## Preview a safe output save
+
+```bash
+PYTHONPATH=src python3 -m lawyeredos.safe_output preview \
+  --root /workspace --matter-folder 2030-001-northstar \
+  --relative-path correspondence/draft-v01.docx --content-file /scratch/draft.docx
+```
+
+Use the returned token with the `commit` command and identical arguments.
+
+## Plan calendar reconciliation
+
+```bash
+PYTHONPATH=src python3 -m lawyeredos.calendar_plan plan \
+  --desired fixtures/calendar/desired.json \
+  --existing fixtures/calendar/existing.json
+```
+
+This produces a diff only. No mock or live mutation command is bundled; it
+changes neither an event file nor a live account.

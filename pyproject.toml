@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lawyeredos"
+version = "0.2.0"
+description = "Local-first support toolkit for the Claude Code LawyeredOS plugin"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "vendor/legal-redline-tools/LICENSE"]
+dependencies = ["openpyxl>=3.1,<4"]
+
+[project.optional-dependencies]
+documents = ["python-docx>=1.1,<2", "lxml>=4.9,<7", "fpdf2>=2.7,<3"]
+
+[project.scripts]
+practice-tracker = "lawyeredos.tracker_cli:main"
+practice-orient = "lawyeredos.matter_context:main"
+practice-safe-write = "lawyeredos.safe_output:main"
+practice-calendar = "lawyeredos.calendar_plan:main"
+practice-review-bundle = "lawyeredos.review_bundle:main"
+practice-review = "lawyeredos.review_orchestrator:main"
+practice-tracker-migrate = "lawyeredos.tracker_migration:main"
+practice-tracker-xlsx = "lawyeredos.tracker_xlsx:main"
+practice-integrations = "lawyeredos.integrations:main"
+practice-documents = "lawyeredos.document_helpers:main"
+practice-memory = "lawyeredos.memory_search:main"
+practice-voice-lint = "lawyeredos.voice_lint:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

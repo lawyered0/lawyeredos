@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="LawyeredOS is a free, open-source set of practical legal-work skills for Claude Desktop Code.">
+  <meta name="theme-color" content="#15181d">
+  <title>LawyeredOS — Claude and the right legal-work skills</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-header>
+    <div class="shell nav-shell">
+      <a class="brand" href="#top" aria-label="LawyeredOS home">
+        <span class="brand-mark" aria-hidden="true"><span>L</span></span>
+        <span class="brand-word">Lawyered<span>OS</span></span>
+      </a>
+
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">
+        <span class="sr-only">Toggle navigation</span>
+        <span aria-hidden="true"></span><span aria-hidden="true"></span>
+      </button>
+
+      <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
+        <a href="#skills">Skills</a>
+        <a href="#workflows">Example</a>
+        <a href="#setup">Setup</a>
+        <a href="#principles">Principles</a>
+        <a href="#release">Release</a>
+        <a class="nav-cta" href="#preview">See setup</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="top" class="hero section-dark">
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="shell hero-layout">
+        <div class="hero-copy">
+          <div class="eyebrow-row">
+            <span class="status-dot"></span>
+            <span>Free and open-source Claude skills · pre-public candidate</span>
+          </div>
+          <h1>You don’t need another legal software subscription. <em>You need Claude and the right skills.</em></h1>
+          <p class="hero-lede">
+            LawyeredOS is the open-source toolkit built from the skills used in
+            a working legal practice. Here they are: practical, inspectable, and
+            installed into your own Claude Desktop project.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#skills">See the skills <span aria-hidden="true">↘</span></a>
+            <a class="button button-quiet" href="#setup">How setup works <span aria-hidden="true">→</span></a>
+          </div>
+          <ul class="hero-facts" aria-label="How LawyeredOS is used">
+            <li><span>Includes</span><strong>Six working skills</strong></li>
+            <li><span>Installs to</span><strong>Your Claude project</strong></li>
+            <li><span>License</span><strong>GPL-3.0-or-later</strong></li>
+          </ul>
+        </div>
+
+        <aside class="hero-panel example-panel" aria-label="Supported fictional matter example">
+          <div class="panel-topline">
+            <span>What installs</span>
+            <span class="panel-version">Project-local</span>
+          </div>
+          <blockquote>Six focused skills. One bounded reviewer. A macOS beta, not a new dashboard.</blockquote>
+          <ol class="example-trace">
+            <li><span>1</span><div><strong>Open and orient</strong><p>Resolve one exact matter and report sources and limits.</p></div></li>
+            <li><span>2</span><div><strong>Draft and redline</strong><p>Create reviewable letters and apply already-decided edits.</p></div></li>
+            <li><span>3</span><div><strong>Track and challenge</strong><p>Preview register changes and stress-test important drafts.</p></div></li>
+          </ol>
+          <p class="example-result"><span></span> LawyeredOS is free · Claude access is separate</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="intro-strip" aria-label="Product principles summary">
+      <div class="shell intro-strip-grid">
+        <p>Skills, not another silo.</p>
+        <p>Keep Claude as the working surface. Add narrow workflows for matters, documents, tracking, and review—without pretending to replace every practice-management function.</p>
+      </div>
+    </section>
+
+    <section id="skills" class="section skills-section">
+      <div class="shell">
+        <div class="section-heading story-heading">
+          <p class="kicker">Here are the skills</p>
+          <h2>Six jobs lawyers ask Claude to do every day.</h2>
+          <p>Each skill is intentionally narrow. It tells Claude what evidence to use, where to stop, what to preview, and what still requires the lawyer’s judgment.</p>
+        </div>
+        <div class="skills-grid">
+          <article><span>01</span><h3>Work on a matter</h3><code>lawyeredos-work-on-matter</code><p>Open one exact tracked folder, read bounded sources, explain the current position and uncertainty, and recommend a next step.</p></article>
+          <article><span>02</span><h3>Matter tracker</h3><code>lawyeredos-matter-tracker</code><p>Find, add, update, close, or reopen a matter through an exact preview and confirmation token.</p></article>
+          <article><span>03</span><h3>Letterhead</h3><code>lawyeredos-letterhead</code><p>Create a neutral branded DOCX draft and verify its metadata and rendered pages before it leaves the workspace.</p></article>
+          <article><span>04</span><h3>Contract redline</h3><code>lawyeredos-contract-redline</code><p>Apply already-decided edits as real Word tracked changes and produce marked and clean review copies.</p></article>
+          <article><span>05</span><h3>Calendar sync</h3><code>lawyeredos-calendar-sync</code><p>Plan a change to one dedicated calendar and require approval before writing. The live connector remains experimental and off by default.</p></article>
+          <article><span>06</span><h3>Adversarial panel</h3><code>lawyeredos-adversarial-panel</code><p>Experimentally send a bounded draft through four independent, read-only review lenses. One current-name source-fidelity lens has been runtime-accepted; the complete panel has not.</p></article>
+        </div>
+        <p class="skills-note"><strong>Plus one installer skill:</strong> <code>lawyeredos-setup</code> gathers choices, shows the deterministic setup plan, and waits for approval before any write.</p>
+      </div>
+    </section>
+
+    <section id="workflows" class="section workflows-section">
+      <div class="shell">
+        <div class="section-heading story-heading">
+          <p class="kicker">What that looks like</p>
+          <h2>From a folder of documents<br>to a useful next step.</h2>
+          <p>Once a local folder is linked to an exact file number in the LawyeredOS register, the lawyer works through ordinary requests in Claude Code.</p>
+        </div>
+
+        <article class="matter-story" aria-label="Fictional matter 2030-001 example">
+          <header class="matter-story-head">
+            <div><span>Fictional example</span><strong>Matter 2030-001</strong></div>
+            <p>Supply agreement dispute · fictional local workspace</p>
+          </header>
+
+          <div class="story-grid">
+            <section class="story-input">
+              <span class="story-index">01 · What the lawyer provides</span>
+              <h3>A tracked folder and the source documents</h3>
+              <ul>
+                <li>A matter brief describing the file</li>
+                <li>A source note and relevant local documents</li>
+                <li>An exact file number, so Claude does not guess</li>
+              </ul>
+            </section>
+
+            <section class="story-request">
+              <span class="story-index">02 · What the lawyer types</span>
+              <blockquote>“Open matter 2030-001. Review the matter brief and source note. Tell me the current position, what is uncertain, and one recommended next step. Do not change any files.”</blockquote>
+            </section>
+
+            <section class="story-process">
+              <span class="story-index">03 · What actually happens</span>
+              <ol>
+                <li><b>Resolve.</b> Match the register to one exact local folder.</li>
+                <li><b>Read.</b> Inspect only the bounded sources needed for the request.</li>
+                <li><b>Explain.</b> Identify the current position, uncertainty, candidate dates, and sources checked.</li>
+                <li><b>Stop safely.</b> Refuse ambiguity and disclose unavailable email, calendar, OCR, or other support.</li>
+              </ol>
+            </section>
+
+            <section class="story-output">
+              <span class="story-index">04 · What the lawyer gets</span>
+              <div class="output-list">
+                <article><strong>Matter orientation</strong><p>A concise answer in Claude Code, with limits and one recommended next step.</p></article>
+                <article><strong>Internal letter draft</strong><p>On request: a versioned DOCX created from the configured template and visually checked when the required rendering tools are available.</p></article>
+                <article><strong>Marked and clean agreement</strong><p>On request: already-decided edits applied as Word tracked changes to an editable DOCX, with verification requiring the document toolchain.</p></article>
+                <article><strong>Proposed tracker update</strong><p>On request: the exact next-action change shown before any register write.</p></article>
+              </div>
+            </section>
+          </div>
+
+          <aside class="lawyer-boundary">
+            <span>Your professional review remains the control</span>
+            <p>You verify facts, governing documents, current law, and deadlines; decide legal and negotiation positions; and approve every saved or external action. LawyeredOS never sends, signs, files, serves, or changes an account on its own.</p>
+          </aside>
+        </article>
+
+        <div class="next-requests" aria-label="Supported follow-up requests">
+          <p>After orientation, a lawyer can ask:</p>
+          <ul>
+            <li>“Draft an internal letter from these established facts. Do not send it.”</li>
+            <li>“Apply these decided edits to the editable agreement and produce marked and clean copies.”</li>
+            <li>“Preview changing the next action to ‘Review delivery clause.’”</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="principles" class="section principle-section section-dark">
+      <div class="shell principle-layout">
+        <div class="principle-copy">
+          <p class="kicker kicker-light">Designed for accountable work</p>
+          <h2>Local workspace.<br>Explicit boundaries.</h2>
+          <p>
+            LawyeredOS treats every source as evidence—not an instruction. It
+            keeps authority, permission, and uncertainty visible at each step.
+          </p>
+          <p class="processing-note">
+            Local storage does not mean offline processing. Claude Code may send
+            selected content to Anthropic under the lawyer’s account, settings,
+            and applicable terms.
+          </p>
+        </div>
+        <div class="principle-list">
+          <article><span>01</span><div><h3>Bounded context</h3><p>Resolve the exact matter and disclose what was—and was not—checked.</p></div></article>
+          <article><span>02</span><div><h3>Previewed writes</h3><p>Show the precise change before a guarded mutation or file save.</p></div></article>
+          <article><span>03</span><div><h3>Verifiable artifacts</h3><p>Hash, render, inspect, and preserve history instead of relying on confidence.</p></div></article>
+          <article><span>04</span><div><h3>Fail closed</h3><p>Missing dependencies or connections stay unavailable—never silently substituted.</p></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="setup" class="section setup-section">
+      <div class="shell setup-layout">
+        <div class="setup-copy">
+          <p class="kicker">Guided local setup</p>
+          <h2>See every change<br>before it happens.</h2>
+          <p>
+            Download and extract LawyeredOS on a Mac, then open that folder in
+            the Claude desktop app’s Code tab and choose <strong>Local</strong>.
+            Paste this:
+          </p>
+          <div class="install-prompt" role="group" aria-label="Copyable LawyeredOS setup prompt">Set up LawyeredOS for me. Follow the setup instructions in this folder, ask me what you need, and check with me before changing existing files.</div>
+          <p class="setup-safety">Claude finds the project-local setup skill, asks for the few choices it needs, and shows the deterministic installer’s exact plan before applying it. Setup never writes to user-global Claude skills, agents, or settings. It stops if a selected project skill name is already occupied by something LawyeredOS does not own. Use a brand-new empty workspace for the first fictional trial.</p>
+          <ol class="setup-steps">
+            <li><span>1</span><div><strong>Open it locally</strong><p>In Claude Desktop’s Code tab on macOS, choose <strong>Local</strong> and select the extracted <code>lawyeredos</code> folder. Cowork and Cloud are not supported release targets.</p></div></li>
+            <li><span>2</span><div><strong>Paste one sentence</strong><p>Claude follows the included setup instructions and asks only for the choices it needs.</p></div></li>
+            <li><span>3</span><div><strong>Review the plan</strong><p>See every path, dependency, operation, and configuration value before writing.</p></div></li>
+            <li><span>4</span><div><strong>Link the first folder</strong><p>Ask Claude to preview linking one existing folder to an exact file number before running the example request.</p></div></li>
+          </ol>
+        </div>
+
+        <div id="preview" class="setup-evidence">
+          <figure class="capture-frame">
+            <img src="wizard-terminal.png" alt="Actual LawyeredOS terminal wizard in preview mode, showing a fictional temporary workspace, planned file operations, and host dependency checks.">
+            <figcaption><strong>Deterministic installer.</strong> The setup skill delegates to this actual preview-only wizard; the pictured fictional run made no changes.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section architecture-section">
+      <div class="shell architecture-layout">
+        <div class="section-heading">
+          <p class="kicker">The boundary is the feature</p>
+          <h2>Claude reasons.<br>LawyeredOS constrains.</h2>
+        </div>
+        <div class="architecture-flow" aria-label="LawyeredOS architecture flow">
+          <article><span class="flow-index">01</span><h3>Your project</h3><p>Private workspace, matter files, config, and local register.</p></article>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <article class="flow-core"><span class="flow-index">02</span><h3>LawyeredOS</h3><p>Bounded skills, guards, previews, verification, and rollback.</p></article>
+          <div class="flow-arrow" aria-hidden="true">→</div>
+          <article><span class="flow-index">03</span><h3>Claude Code</h3><p>The reasoning host inside the Claude desktop app, using project-local discovery.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="release" class="section release-section section-dark">
+      <div class="shell release-layout">
+        <div class="release-copy">
+          <p class="kicker kicker-light">Private beta</p>
+          <h2>Version 0.2.0</h2>
+          <p>
+            LawyeredOS itself is free and open source. Claude access is separate.
+            Anthropic currently documents Claude Code access through Pro and Max
+            subscriptions and eligible Team and Enterprise seats; plan terms and
+            usage limits can change. The current build is a private macOS beta candidate—not a public
+            distribution channel. The intended repository is
+            <code>github.com/lawyered0/lawyeredos</code>; support, security
+            reporting, and production download links remain pending approval.
+          </p>
+          <p class="plan-links">Check Anthropic’s current <a href="https://support.claude.com/en/articles/11145838-use-claude-code-with-your-pro-or-max-plan">Pro/Max</a> and <a href="https://support.claude.com/en/articles/11845131-use-claude-code-with-your-team-or-enterprise-plan">Team/Enterprise</a> guidance before setup.</p>
+          <div class="release-meta">
+            <div><span>License</span><strong>GPL-3.0-or-later</strong></div>
+            <div><span>Verified host</span><strong>Mac · Python 3.12</strong></div>
+            <div><span>Evidence</span><strong>Private QA report</strong></div>
+          </div>
+          <a class="button button-primary local-download" href="../lawyeredos-private-0.2.0.zip" download>
+            Private local archive <span aria-hidden="true">↓</span>
+          </a>
+          <p class="download-note">Works only in this local preview. Not a public release link.</p>
+        </div>
+        <aside class="release-card">
+            <div class="release-card-head"><span>Current scope</span><span>macOS beta</span></div>
+          <ul>
+            <li class="complete"><span></span>Matter orientation and local drafting</li>
+            <li class="complete"><span></span>DOCX letters and decided redlines with the required local tools</li>
+            <li class="complete"><span></span>Previewed local tracker changes</li>
+            <li><span></span>Full four-lens review remains experimental</li>
+            <li><span></span>Live Gmail remains unverified</li>
+            <li><span></span>Live Calendar remains unverified</li>
+            <li><span></span>OCR remains unverified</li>
+            <li><span></span>Other operating systems remain unverified</li>
+          </ul>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section license-section">
+      <div class="shell license-layout">
+        <div class="license-mark" aria-hidden="true">↗</div>
+        <div>
+          <p class="kicker">Open by design</p>
+          <h2>Built to stay inspectable.</h2>
+        </div>
+        <div class="license-copy">
+          <p>
+            Original LawyeredOS material is designated GPL-3.0-or-later. When a
+            public distribution channel is selected, recipients will receive the
+            corresponding source and the rights granted by that license.
+          </p>
+          <p>
+            The bundled <code>legal-redline-tools</code> derivative retains its
+            upstream MIT license and attribution. No source repository URL is
+            advertised until a real publication destination exists.
+          </p>
+          <p>
+            The GPL governs copying, modification, and distribution. Separate
+            safety notices add no GPL conditions: this beta is provided as-is,
+            and every material output still requires independent verification.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section limitations-section">
+      <div class="shell limitations-layout">
+        <div>
+          <p class="kicker">Beta means bounded</p>
+          <h2>What this build<br>does not claim.</h2>
+        </div>
+        <div class="limitations-grid">
+          <article><span>01</span><h3>No live connector acceptance yet</h3><p>Gmail and dedicated Calendar adapters use fake transports in automated tests and remain experimental.</p></article>
+          <article><span>02</span><h3>No OCR acceptance yet</h3><p>OCRmyPDF was unavailable on the test host, so OCR remains optional and unverified there.</p></article>
+          <article><span>03</span><h3>No broad host claim</h3><p>The accepted target is macOS Desktop Code Local with Python 3.12. Windows and Linux remain unverified.</p></article>
+          <article><span>04</span><h3>No full reviewer claim</h3><p>One bounded current-name source-fidelity lens passed without tools or writes; complete four-lens orchestration remains experimental.</p></article>
+          <article><span>05</span><h3>No autonomous legal authority</h3><p>Jurisdiction profiles define workflow boundaries; current primary law still requires verification.</p></article>
+          <article><span>06</span><h3>Not offline inference</h3><p>Files are selected from a local workspace, but Claude Code may transmit relevant content under the user’s Anthropic account and settings.</p></article>
+          <article><span>07</span><h3>No legal advice or relationship</h3><p>LawyeredOS is software, not a lawyer or law firm. Downloading or using it provides no legal advice and creates no lawyer-client relationship with the project or maintainers.</p></article>
+          <article><span>08</span><h3>Verify before acting</h3><p>Claude can make material errors. Verify facts, citations, authorities, deadlines, calculations, document changes, and final work product before reliance, sending, signing, filing, or service.</p></article>
+          <article><span>09</span><h3>Independent project</h3><p>LawyeredOS is not affiliated with, sponsored by, or endorsed by Anthropic. Claude access, processing, retention, and privacy depend on the user’s account, plan, settings, and current provider terms.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing-section section-dark">
+      <div class="shell closing-layout">
+        <p class="kicker kicker-light">A calmer operating system for serious work</p>
+        <h2>Move deliberately.<br><em>Ship with evidence.</em></h2>
+        <a class="button button-primary" href="#setup">Review the setup flow <span aria-hidden="true">↑</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-layout">
+      <a class="brand brand-footer" href="#top" aria-label="Back to top">
+        <span class="brand-mark" aria-hidden="true"><span>L</span></span>
+        <span class="brand-word">Lawyered<span>OS</span></span>
+      </a>
+      <p>Private website preview · No analytics · No transmitted forms</p>
+      <p>GPL-3.0-or-later · v0.2.0</p>
+    </div>
+  </footer>
+</body>
+</html>

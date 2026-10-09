@@ -1,0 +1,10 @@
+{
+  "name": "lawyeredos",
+  "displayName": "LawyeredOS",
+  "version": "0.2.0",
+  "description": "Local-first Claude Code workflows for bounded matter orientation, guarded tracking, document work, and review.",
+  "author": {
+    "name": "Lawyered"
+  },
+  "agents": ["./agents/legal-review-lens.md"]
+}

@@ -1,0 +1,53 @@
+schema_version = 1
+
+[workspace]
+root = "/absolute/path/to/lawyeredos-workspace"
+scratch = "/absolute/path/to/private-scratch"
+timezone = "UTC"
+
+[tracker]
+database = "/absolute/path/to/lawyeredos-workspace/matters.sqlite3"
+
+[documents]
+template = "/absolute/path/to/lawyeredos/assets/neutral-letterhead.docx"
+author = "Authorized reviewer"
+
+[branding]
+mode = "neutral"
+label = "Organization"
+
+[jurisdiction]
+profile = "none"
+
+[modules]
+matter = true
+tracker = true
+letters = true
+redline = true
+calendar = true
+review = true
+
+[integrations]
+mail_adapter = "unavailable"
+calendar_adapter = "unavailable"
+practice_manager_adapter = "unavailable"
+# For deterministic local testing only:
+# mail_adapter = "fixture-json"
+# mail_fixture = "/absolute/path/to/fictional-mail.json"
+# For a real read-only Gmail connection:
+# mail_adapter = "gmail-api-readonly"
+# For an explicitly approved dedicated-calendar connection:
+# calendar_adapter = "google-calendar-api"
+
+[credentials]
+# Store tokens only in the named environment variables, never in this file.
+gmail_token_env = "LAWYEREDOS_GMAIL_TOKEN"
+calendar_token_env = "LAWYEREDOS_CALENDAR_TOKEN"
+
+[calendar]
+# Required for google-calendar-api. "primary" is refused.
+calendar_id = ""
+api_base = "https://www.googleapis.com/calendar/v3"
+
+[review]
+external_ai = false

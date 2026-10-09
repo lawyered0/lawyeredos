@@ -1,0 +1,332 @@
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from lawyeredos.config import load_config
+from lawyeredos.setup_wizard import (
+    Answers,
+    apply_plan,
+    build_plan,
+    dependency_report,
+    main,
+    render_launcher,
+    render_terminal_launcher,
+    rollback,
+)
+
+
+class SetupWizardTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.workspace = self.root / "fictional-workspace"
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def answers(self, **changes) -> Answers:
+        values = dict(
+            workspace=self.workspace,
+            branding_mode="firm",
+            branding_label="Northstar Legal Lab",
+            jurisdiction="none",
+            modules=("matter", "tracker", "letters", "redline", "review"),
+            mail_adapter="unavailable",
+            calendar_adapter="unavailable",
+            calendar_id="",
+            existing_config="reuse",
+        )
+        values.update(changes)
+        return Answers(**values)
+
+    def test_preview_has_no_side_effects_or_secret_values(self):
+        plan = build_plan(self.answers())
+        self.assertFalse(self.workspace.exists())
+        self.assertIn("Northstar Legal Lab", plan["config_preview"])
+        self.assertNotIn("password", plan["config_preview"].lower())
+        self.assertNotIn("api_key", plan["config_preview"].lower())
+        self.assertIn("LAWYEREDOS_GMAIL_TOKEN", plan["config_preview"])
+        self.assertEqual(plan["runtime_python"], os.path.abspath(sys.executable))
+        launcher = render_launcher(plan)
+        self.assertIn("exec open -a Claude", launcher)
+        self.assertNotIn("exec claude", launcher)
+        self.assertNotIn("--plugin-dir", launcher)
+        terminal = render_terminal_launcher(plan)
+        self.assertIn("exec claude", terminal)
+        self.assertNotIn("--desktop", terminal)
+
+    def test_dependency_requirements_follow_selected_modules(self):
+        core = {item["name"]: item for item in dependency_report(("matter", "tracker"))}
+        self.assertFalse(core["openpyxl"]["required"])
+        self.assertFalse(core["python-docx"]["required"])
+        self.assertFalse(core["lxml"]["required"])
+        self.assertFalse(core["fpdf2"]["required"])
+
+        letters = {item["name"]: item for item in dependency_report(("matter", "tracker", "letters"))}
+        self.assertTrue(letters["python-docx"]["required"])
+        self.assertFalse(letters["lxml"]["required"])
+        self.assertFalse(letters["fpdf2"]["required"])
+
+        redline = {item["name"]: item for item in dependency_report(("matter", "tracker", "redline"))}
+        self.assertTrue(redline["python-docx"]["required"])
+        self.assertTrue(redline["lxml"]["required"])
+        self.assertTrue(redline["fpdf2"]["required"])
+
+    def test_launcher_stops_if_retained_runtime_is_missing(self):
+        plan = build_plan(self.answers())
+        missing = self.root / "removed-runtime" / "bin" / "python"
+        plan["runtime_python"] = str(missing)
+        launcher = self.root / "launch-lawyeredos.sh"
+        launcher.write_text(render_launcher(plan), encoding="utf-8")
+        launcher.chmod(0o700)
+        result = subprocess.run(
+            [str(launcher)], capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("runtime is unavailable", result.stderr)
+
+    def test_apply_repeat_preserves_existing_config(self):
+        first = apply_plan(build_plan(self.answers()))
+        self.assertTrue(first["ok"])
+        config_path = Path(first["config"])
+        original = config_path.read_bytes()
+        loaded = load_config(config_path)
+        self.assertEqual(loaded.branding_label, "Northstar Legal Lab")
+        self.assertFalse(loaded.modules["calendar"])
+        plugin = Path(first["plugin"])
+        self.assertFalse((plugin / "skills" / "practice-calendar-sync").exists())
+        self.assertTrue((plugin / "skills" / "practice-contract-redline").is_dir())
+        project_skill = self.workspace / ".claude" / "skills" / "lawyeredos-contract-redline"
+        self.assertTrue(project_skill.is_symlink())
+        skill_text = (project_skill / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("name: lawyeredos-contract-redline", skill_text)
+        self.assertIn("${LAWYEREDOS_ROOT}", skill_text)
+        settings = json.loads((self.workspace / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["env"]["LAWYEREDOS_ROOT"], str(plugin))
+        agent = self.workspace / ".claude" / "agents" / "lawyeredos-legal-review-lens.md"
+        self.assertIn("name: lawyeredos-legal-review-lens", agent.read_text(encoding="utf-8"))
+        second = apply_plan(build_plan(self.answers(branding_label="Ignored on reuse")))
+        self.assertTrue(second["idempotent"])
+        self.assertEqual(config_path.read_bytes(), original)
+
+    def test_projectized_skills_use_only_project_names(self):
+        apply_plan(build_plan(self.answers()))
+        skills_root = self.workspace / ".claude" / "skills"
+        texts = {
+            path.parent.name: path.read_text(encoding="utf-8")
+            for path in skills_root.glob("*/SKILL.md")
+        }
+        self.assertEqual(set(texts), {
+            "lawyeredos-work-on-matter",
+            "lawyeredos-matter-tracker",
+            "lawyeredos-letterhead",
+            "lawyeredos-contract-redline",
+            "lawyeredos-adversarial-panel",
+        })
+        combined = "\n".join(texts.values())
+        self.assertNotIn("lawyeredos:practice-", combined)
+        self.assertNotIn("lawyeredos:legal-review-lens", combined)
+        self.assertNotIn("panel-lens", combined)
+        self.assertIn("lawyeredos-matter-tracker", texts["lawyeredos-work-on-matter"])
+        self.assertIn("lawyeredos-adversarial-panel", texts["lawyeredos-letterhead"])
+        self.assertIn("lawyeredos-legal-review-lens", texts["lawyeredos-adversarial-panel"])
+
+    def test_apply_merges_unrelated_project_local_settings(self):
+        settings_path = self.workspace / ".claude" / "settings.local.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"theme": "dark", "env": {"EXAMPLE": "kept"}}), encoding="utf-8")
+        apply_plan(build_plan(self.answers()))
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(settings["theme"], "dark")
+        self.assertEqual(settings["env"]["EXAMPLE"], "kept")
+        self.assertIn("LAWYEREDOS_CONFIG", settings["env"])
+
+    def test_preflight_refuses_symlinked_managed_directory(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        self.workspace.mkdir()
+        (self.workspace / ".claude").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            build_plan(self.answers())
+
+    def test_trial_requires_new_or_empty_workspace(self):
+        self.workspace.mkdir()
+        (self.workspace / "existing-skill.txt").write_text("keep", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "must be new or empty"):
+            build_plan(self.answers(existing_config="error"), require_new_workspace=True)
+
+    def test_trial_rechecks_empty_workspace_before_apply(self):
+        plan = build_plan(self.answers(existing_config="error"), require_new_workspace=True)
+        self.workspace.mkdir()
+        keep = self.workspace / "existing-skill.txt"
+        keep.write_text("keep", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "no longer empty"):
+            apply_plan(plan)
+        self.assertEqual(keep.read_text(encoding="utf-8"), "keep")
+        self.assertEqual(list(self.workspace.iterdir()), [keep])
+
+    def test_workspace_refuses_global_claude_and_package_descendants(self):
+        with self.assertRaisesRegex(ValueError, "user-global"):
+            build_plan(self.answers(workspace=Path.home() / ".claude" / "skills"))
+        package_child = Path(__file__).resolve().parents[1] / "unsafe-workspace"
+        with self.assertRaisesRegex(ValueError, "inside the source package|outside the extracted"):
+            build_plan(self.answers(workspace=package_child))
+
+    def test_preflight_refuses_unowned_project_skill_collision(self):
+        skill = self.workspace / ".claude" / "skills" / "lawyeredos-work-on-matter"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("user-owned", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "not managed by LawyeredOS"):
+            build_plan(self.answers())
+        self.assertEqual((skill / "SKILL.md").read_text(encoding="utf-8"), "user-owned")
+
+    def test_preflight_refuses_non_object_settings_env(self):
+        settings_path = self.workspace / ".claude" / "settings.local.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"env": []}), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "env must contain a JSON object"):
+            build_plan(self.answers())
+
+    def test_existing_config_replace_is_backed_up_and_rollback_restores(self):
+        first = apply_plan(build_plan(self.answers()))
+        config_path = Path(first["config"])
+        original = config_path.read_bytes()
+        replacement = self.answers(
+            branding_mode="individual", branding_label="Example Independent Practice",
+            jurisdiction="ontario", existing_config="replace",
+        )
+        changed = apply_plan(build_plan(replacement))
+        self.assertIn(str(config_path), changed["changed"])
+        self.assertIn("Example Independent Practice", config_path.read_text(encoding="utf-8"))
+        result = rollback(self.workspace)
+        self.assertIn(str(config_path), result["restored"])
+        self.assertEqual(config_path.read_bytes(), original)
+
+    def test_upgrade_keeps_old_plugin_and_updates_launcher(self):
+        first = apply_plan(build_plan(self.answers()))
+        old_plugin = Path(first["plugin"])
+        plan = build_plan(self.answers())
+        plan["package_digest"] = "f" * 64
+        new_plugin = Path(plan["setup_root"]) / "plugins" / f"lawyeredos-0.2.0-{'f' * 8}-upgrade"
+        plan["plugin"] = str(new_plugin)
+        upgraded = apply_plan(plan)
+        self.assertTrue(old_plugin.is_dir())
+        self.assertTrue(new_plugin.is_dir())
+        settings = json.loads((self.workspace / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+        self.assertEqual(settings["env"]["LAWYEREDOS_ROOT"], str(new_plugin))
+        project_skill = self.workspace / ".claude" / "skills" / "lawyeredos-work-on-matter"
+        self.assertTrue(project_skill.is_symlink())
+        self.assertTrue(str(project_skill.resolve()).startswith(str(new_plugin)))
+
+    def test_cancelled_apply_has_no_side_effects(self):
+        argv = [
+            "--workspace", str(self.workspace), "--branding-mode", "neutral",
+            "--branding-label", "Organization", "--jurisdiction", "none",
+            "--modules", "matter,tracker", "--mail", "off", "--calendar", "off",
+            "--existing-config", "reuse", "--apply",
+        ]
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(main(argv), 1)
+        self.assertFalse(self.workspace.exists())
+
+    def test_invalid_paths_existing_policy_and_calendar_are_rejected(self):
+        self.workspace.write_text("not a directory", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "not a directory"):
+            build_plan(self.answers())
+        self.workspace.unlink()
+        apply_plan(build_plan(self.answers()))
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            build_plan(self.answers(existing_config="error"))
+        with self.assertRaisesRegex(ValueError, "dedicated calendar ID"):
+            build_plan(self.answers(
+                modules=("matter", "tracker", "calendar"),
+                calendar_adapter="google-calendar-api", calendar_id="primary",
+            ))
+
+    def test_first_install_rollback_removes_managed_files_only(self):
+        self.workspace.mkdir()
+        keep = self.workspace / "keep.txt"
+        keep.write_text("user file", encoding="utf-8")
+        result = apply_plan(build_plan(self.answers()))
+        self.assertTrue(Path(result["plugin"]).exists())
+        rollback(self.workspace)
+        self.assertTrue(keep.is_file())
+        self.assertFalse(Path(result["plugin"]).exists())
+        self.assertFalse(Path(result["config"]).exists())
+        self.assertEqual(keep.read_text(encoding="utf-8"), "user file")
+
+    def test_rollback_ignores_python_runtime_cache_in_plugin(self):
+        result = apply_plan(build_plan(self.answers()))
+        cache = Path(result["plugin"]) / "src" / "lawyeredos" / "__pycache__"
+        cache.mkdir(parents=True, exist_ok=True)
+        (cache / "runtime.cpython-312.pyc").write_bytes(b"runtime cache")
+        rolled_back = rollback(self.workspace)
+        self.assertTrue(rolled_back["ok"])
+        self.assertFalse(Path(result["plugin"]).exists())
+
+    def test_rollback_still_detects_plugin_source_changes(self):
+        result = apply_plan(build_plan(self.answers()))
+        source = Path(result["plugin"]) / "src" / "lawyeredos" / "config.py"
+        source.write_text(source.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
+        rolled_back = rollback(self.workspace)
+        self.assertFalse(rolled_back["ok"])
+        self.assertIn(str(Path(result["plugin"])), rolled_back["preserved_modified"])
+
+    def test_rollback_preserves_tracker_after_matter_activity(self):
+        result = apply_plan(build_plan(self.answers()))
+        tracker = self.workspace / ".lawyeredos" / "data" / "matters.sqlite3"
+        with sqlite3.connect(tracker) as connection:
+            connection.execute("UPDATE meta SET value='1' WHERE key='revision'")
+        rolled_back = rollback(self.workspace)
+        self.assertFalse(rolled_back["ok"])
+        self.assertEqual(rolled_back["status"], "modified_managed_state")
+        self.assertTrue(tracker.is_file())
+        self.assertIn(str(tracker.resolve()), rolled_back["preserved_modified"])
+        self.assertTrue(Path(result["plugin"]).exists())
+        self.assertTrue(Path(result["config"]).exists())
+
+    def test_rollback_without_fingerprints_fails_safe(self):
+        result = apply_plan(build_plan(self.answers()))
+        state_path = Path(result["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state.pop("managed_fingerprints")
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        rolled_back = rollback(self.workspace)
+        self.assertFalse(rolled_back["ok"])
+        self.assertTrue(Path(result["plugin"]).is_dir())
+        self.assertTrue(Path(result["config"]).is_file())
+        self.assertIn(str(Path(result["plugin"])), rolled_back["preserved_modified"])
+
+    def test_rollback_preserves_modified_replacement(self):
+        first = apply_plan(build_plan(self.answers()))
+        config = Path(first["config"])
+        replacement = self.answers(
+            branding_mode="individual",
+            branding_label="Example Independent Practice",
+            existing_config="replace",
+        )
+        apply_plan(build_plan(replacement))
+        config.write_text(config.read_text(encoding="utf-8") + "\n# user edit\n", encoding="utf-8")
+        rolled_back = rollback(self.workspace)
+        self.assertFalse(rolled_back["ok"])
+        self.assertIn(str(config), rolled_back["preserved_modified"])
+        self.assertIn("# user edit", config.read_text(encoding="utf-8"))
+
+    def test_state_contains_no_credentials(self):
+        result = apply_plan(build_plan(self.answers()))
+        state = json.loads(Path(result["rollback_state"]).read_text(encoding="utf-8"))
+        serialized = json.dumps(state).lower()
+        self.assertNotIn("token", serialized)
+        self.assertNotIn("password", serialized)
+
+
+if __name__ == "__main__":
+    unittest.main()
