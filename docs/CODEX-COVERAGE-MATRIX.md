@@ -7,7 +7,7 @@ This matrix is the private pre-release gate. `Pass` identifies actual evidence;
 | --- | --- | --- | --- |
 | New disposable setup | Deterministic installer and local host | Pass | Exact JSON preview/apply, required dependency checks, project-local config and skills only. |
 | Project skill discovery | Fresh Codex CLI process | Pass | `$lawyeredos-work-on-matter` and `$lawyeredos-matter-tracker` were discovered from `.agents/skills`. |
-| Desktop project discovery | Fresh Codex desktop task | Pending | Requires opening the installed disposable workspace itself as the project root and running the prompt in the desktop section of `CODEX-ACCEPTANCE.md`. CLI evidence is not substituted. |
+| Desktop functional orientation and persistence | User-created fresh Codex desktop task | Pass with evidence boundary | User reported the exact fictional action, date, revision 2, unverified October 20 request, unavailable email, and no file changes. This is functional evidence, not independent GUI observation, forensic no-write verification, or proof of session-start automatic catalog registration. A delegated task's injected catalog omitted repo-local skills and is recorded as a host-specific caveat, not a substitute GUI test. |
 | Fictional intake and bounded files | Local CLI/core | Pass | Created one fictional tracker record linked to a bounded matter folder; orientation returned only the brief and recent local files and disclosed unavailable email. |
 | Guarded tracker write | Codex CLI host | Pass | Fresh auto-reviewed workspace-write session performed read, dry-run, exact-diff inspection, token-bound commit, and verification. |
 | New-session persistence | Fresh read-only Codex CLI process | Pass | Separate session recovered the saved action, date, status, and revision. |
@@ -21,7 +21,7 @@ This matrix is the private pre-release gate. `Pass` identifies actual evidence;
 | Interrupted installation | Deterministic fault injection | Pass | Simulated failure after partial tracker creation removed only paths created by that attempt and preserved an unrelated private file. |
 | Claude behavior | Shared regression suite | Pass | Existing Claude setup, settings merge, rollback, connector selection, document, tracker, and distribution tests remain green. |
 | Redline engine | Vendored regression suite | Pass | 97 vendored tests pass. |
-| Exact archive | Extracted archive tests | Pass | Archive contents, 65 project tests, 97 vendored tests, privacy audit, GPL/MIT notices, and deterministic build allowlist pass. |
+| Exact archive | Extracted archive and docs-only successor checks | Pass | The runtime-equivalent RC3 archive passed 65 project tests, 97 vendored tests, privacy audit, GPL/MIT notices, and the deterministic allowlist. Later docs-only candidates retained the same member set, changed only the recorded acceptance documents, and passed targeted setup/distribution, ZIP integrity, and privacy checks. |
 | Global private state | Before/after hashes and installer tests | Pass | No user-global Codex configuration or skill directory is written; unrelated project-local private skills/config are preserved. |
 | Live Gmail or other live connectors | External integration | Excluded | User withdrew live Gmail testing. Setup never treats configuration as proof of connection. |
 | OCR creation | Optional dependency | Excluded | OCRmyPDF was not installed on the accepted host. |
@@ -30,7 +30,9 @@ This matrix is the private pre-release gate. `Pass` identifies actual evidence;
 
 ## Release gate
 
-The candidate is not ready for a public Codex release until the one `Pending`
-desktop row passes in a fresh desktop task. Any review coverage gap remains a
+The private candidate has passed the release-critical gates within the stated
+macOS, Python, Codex CLI, fictional-data, and user-reported Desktop evidence
+boundaries. Public release still requires an explicit publication decision and
+must preserve the exclusions above. Any review coverage gap remains a
 matter-specific caution rather than a software failure, provided it is shown
 to the user and the integrity checks pass.

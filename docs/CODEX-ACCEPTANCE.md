@@ -11,12 +11,17 @@ and tested only with fictional matter data. No global Codex configuration,
 global skill directory, real matter, inbox, credential, or OAuth state was
 changed.
 
-The extracted archive passed:
+The runtime-equivalent extracted RC3 archive passed:
 
 - 65 LawyeredOS unit and distribution tests;
 - 97 vendored redline tests;
 - the repository privacy audit; and
 - an exact repeat install with `idempotent: true` and no changed paths.
+
+Later candidate revisions changed only this Codex acceptance documentation.
+Their release archives were compared member-by-member with the fully tested
+archive, then checked with the targeted setup/distribution suite, ZIP integrity
+test, and privacy audit. No runtime file changed.
 
 The installer also passed a simulated mid-apply interruption with complete
 rollback of only newly created paths, while preserving an unrelated private
@@ -70,16 +75,11 @@ clipping, overlap, broken glyphs, footer collision, or unexpected page break.
 The rendered copy remained acceptance evidence only; it was not added to the
 release archive.
 
-## Desktop status
+## Desktop result and evidence boundary
 
-The CLI tests above do not establish a separate Codex desktop UI acceptance.
-Desktop acceptance requires opening the disposable installed workspace itself
-as the project root, starting a fresh task there, and invoking an installed
-skill. The task must not be rooted at the extracted source package or a parent
-directory because project-local skill discovery is rooted in the task's
-workspace.
-
-Minimal read-only desktop prompt:
+At 17:39 UTC on October 9, 2026, the user reported the result of a new task
+created in the Codex desktop project rooted at the disposable installed
+workspace. The task used this read-only prompt:
 
 ```text
 Use $lawyeredos-work-on-matter to orient to fictional matter 2030-001. Read the
@@ -88,9 +88,21 @@ next-action date, tracker revision, any unverified deadline, and whether email
 was checked. Do not write or modify anything.
 ```
 
-Passing requires discovery of the named project skill, successful use of the
-installed launcher and SQLite tracker, accurate fictional values, an explicit
-email-coverage statement, and no writes.
+The reported response identified fictional matter `2030-001`, returned the
+saved next action `Review the controlling agreement and prepare a factual
+options note`, the date October 10, 2030, tracker revision 2, and the requested
+October 20, 2030 response date as unverified because no governing legal basis
+was identified. It also stated that email was not checked because the mail
+adapter was unavailable and that no files were changed. These values match the
+fixture and the prior fresh-session CLI persistence result.
+
+This is accepted as user-reported Desktop functional orientation and
+persistence evidence. It is not an independent screen observation, a forensic
+before/after no-write verification, or proof that the skill name appeared in
+the task's session-start catalog. A separate delegated task rooted at the same
+workspace did not receive repository-local skill descriptions in its injected
+catalog; that host-specific delegated-catalog result is not substituted for,
+or treated as a contradiction of, the user-created Desktop task.
 
 ## Unaccepted capabilities
 
