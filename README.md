@@ -56,31 +56,31 @@ Additional guidance: [installation](docs/INSTALL.md) ·
 
 ## Pick up a matter where you left it
 
-LawyeredOS uses the selected matter's files plus recorded workspace history and
-state—not an assumption that chat memory is complete. A typical read-only first
-request is:
+After setup, normal use is just a natural-language request:
 
-> Open matter 2030-001. Review the matter brief and source note. Tell me the
-> current position, what is uncertain, and one recommended next step. Do not
-> change any files.
+> Let’s work on Northstar.
 
-From there, ask separately for a draft, a decided redline, or a proposed
-tracker update. Material changes are previewed for approval. You remain
-responsible for checking the sources, exercising professional judgment, and
-deciding what to do.
+LawyeredOS then finds the one matching saved matter, reads its recorded state
+and relevant local files, summarizes where things stand, and proposes the next
+useful work for lawyer review. If the name is missing or ambiguous, it stops
+and asks instead of guessing. It does not assume chat memory is complete or
+claim that unavailable inbox, calendar, OCR, or other sources were checked.
+
+From there, say what you want to do next—for example, draft a response, review
+an agreement, or propose a tracker update. LawyeredOS does not send, file,
+sign, serve, or change an external account on its own. Guarded changes still
+require the applicable preview or approval. You remain responsible for
+checking the sources, exercising professional judgment, and deciding what to
+do.
 
 ## Screen the local register for potential conflicts
 
 The matter-tracker skill supports a read-only, case-insensitive name or term
 search across every open and closed matter in the local register. It checks the
 file number, client, description, opposing party, other parties, and primary
-email fields and returns candidate rows for lawyer review. For example:
+email fields and returns candidate rows for lawyer review. Ask naturally:
 
-```bash
-PYTHONPATH=src python3 -m lawyeredos.tracker_cli find \
-  --database /workspace/.lawyeredos/data/matters.sqlite3 \
-  --query "Harbor Paper" --status all
-```
+> Check Harbor Paper against all open and closed matters in the local register.
 
 This is conflict **screening**, not final conflict clearance. The register has
 no dedicated clearance-status field and the search does not perform fuzzy or
@@ -88,6 +88,9 @@ alias matching, identify undisclosed relationships, query external systems, or
 decide whether a conflict exists or can be waived. Record the terms, fields,
 register scope, results, and limitations, then apply the lawyer's own conflicts
 procedure and professional judgment.
+
+Maintainers and advanced users can find the equivalent command-line examples
+in [docs/EXAMPLES.md](docs/EXAMPLES.md).
 
 ## Included skills
 
