@@ -6,6 +6,10 @@
   active session establishes a connection for that request. Preserve ambiguity
   and never draft, send, reply, forward, label, archive, or delete from the
   matter-orientation workflow.
+  An ordinary orientation runs the bounded matter-mail plan. Session tools are
+  used only when actually present and authorized. Missing bodies, attachment
+  bytes, pages, or supported extraction keep the local complete checkpoint from
+  advancing. No route polls in the background or changes Gmail state.
 - **Calendar:** orientation may inspect or propose; it may not create, update,
   or delete events.
 - **Practice manager:** unavailable by default. Never treat a tracker write as

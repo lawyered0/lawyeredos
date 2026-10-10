@@ -25,6 +25,17 @@ their own reviewed version and checksum boundaries.
 - Made tracker conflict screening and name resolution use Unicode case folding
   with literal substring semantics, avoiding non-ASCII false negatives and
   accidental SQL wildcard behavior.
+- Added a shared bounded matter-mail intake core for Claude and Codex routes:
+  exact matter-derived queries, complete-body and attachment retrieval,
+  stable-ID deduplication, bounded-window checkpoints, and explicit partial-coverage
+  reporting. No live mailbox acceptance is claimed.
+- Added conservative attachment handling for PDF, DOCX, XLSX, TXT, Markdown,
+  and CSV: size, MIME, signature, archive, hash, path-confinement, and
+  no-overwrite checks precede local filing and evidence extraction.
+- Extended the experimental Gmail REST adapter with read-only full-message and
+  attachment retrieval and covered it using a fake GET-only transport. Session
+  tool routes require an actually available authorized tool and remain partial
+  when bodies, bytes, or bounded-search coverage are missing.
 
 ## 0.2.0 beta.2
 

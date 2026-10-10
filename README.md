@@ -61,10 +61,21 @@ After setup, normal use is just a natural-language request:
 > Let’s work on Northstar.
 
 LawyeredOS then finds the one matching saved matter, reads its recorded state
-and relevant local files, summarizes where things stand, and proposes the next
-useful work for lawyer review. If the name is missing or ambiguous, it stops
-and asks instead of guessing. It does not assume chat memory is complete or
-claim that unavailable inbox, calendar, OCR, or other sources were checked.
+and relevant local files, and—when read-only email access is both configured
+and actually available—checks a bounded matter-specific slice for new messages.
+It reviews fully retrieved message bodies and safely retrieved supported
+attachments within bounded review windows before summarizing where things stand
+and proposing the next useful work for lawyer review. Longer content remains
+partial until separately reviewed. Safe attachments are saved to the resolved
+matter folder; their source IDs and SHA-256 hashes are recorded in the local
+review ledger for deduplication.
+
+If the matter name is missing or ambiguous, it stops and asks instead of
+guessing. If email access, search coverage, a message body, attachment bytes,
+OCR, or document extraction is unavailable or incomplete, it says so and does
+not mark that material fully reviewed. It does not assume chat memory is
+complete, poll in the background, or claim that unavailable sources were
+checked.
 
 From there, say what you want to do next—for example, draft a response, review
 an agreement, or propose a tracker update. LawyeredOS does not send, file,

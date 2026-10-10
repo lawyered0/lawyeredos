@@ -6,7 +6,7 @@ package; it does not mean a live account or real matter was used.
 
 | Workflow | Preserved and tested | Intentional change | Deferred or missing | Live verification still required |
 |---|---|---|---|---|
-| Work on matter | Unique tracker resolution, folder confinement, bounded brief/file inventory, local memory search, guarded memory writes, PDF extraction/OCR | Neutral paths and explicit adapters; read-only start | Automatic attachment filing and automatic record update | Claude Code permissions, OCR tools, and a disposable private tracker copy |
+| Work on matter | Unique tracker resolution, folder confinement, bounded brief/file inventory, bounded matter-email intake, safe supported attachment filing/review, local memory search, guarded memory writes, PDF extraction/OCR | Neutral paths and explicit adapters; read-only mailbox, local attachment and review-ledger writes only | Background polling and automatic authoritative record update | Live session-tool behavior with a disposable authorized account; live OCR; no real matter or mailbox acceptance |
 | Matter tracker | SQLite schema, health check, find/show/list/history, party/name candidate screening across the local register, guarded mutations, preview-token migration, CSV/JSON export, XLSX projection | SQLite is the only authority; XLSX is derived; screening is not a legal clearance decision | Dedicated conflict-clearance decision/status, fuzzy or alias matching, external conflict sources, folder creation, practice-manager projection | Legacy mapping and concurrent use against a disposable copy |
 | Correspondence | Neutral DOCX creation, placeholder failure, configured author, no-overwrite save, renderer, configurable voice lint | New anonymous template; no logo or signature | Advanced private-template topology, automatic outbound gate, sending | Private template compatibility, fonts, renderer, and full-page visual QA in target host |
 | Contract redline | MIT engine and upstream tests, genuine text OOXML revisions, simple accepted-copy test, renderer | Author is configured; private rationale stays outside the external change set | Complete Word revision-class acceptance, automatic internal/external separation, outbound automation | Representative complex contracts and target Word version |
@@ -20,7 +20,7 @@ package; it does not mean a live account or real matter was used.
 | Tracker writer, schema, audit history | `tracker_cli.py` | Preserved for the neutral SQLite schema; tested |
 | Matter folder resolver | Tracker mapping plus `matter_context.py` | Preserved for one configured root; tested |
 | Brief index and decision search | `memory_search.py` FTS index/search | Preserved generically for Markdown sources; tested |
-| Mail delta/cache, message extraction, attachment fetch | `integrations.py` | Bounded metadata/snippet search preserved; attachment filing deferred |
+| Mail delta/cache, message extraction, attachment fetch | `mail_intake.py`, `integrations.py` | Stable-ID review ledger and complete bounded-window query; fully retrieved bodies and attachment bytes through configured REST or capable session tools; long, ambiguous, or partial retrieval never advances the complete checkpoint |
 | PDF extraction and OCR | `document_helpers.py` | Text extraction and optional OCR with hash-bound report; tested without live OCR execution |
 | Safe output writer | `safe_output.py` | Preserved with token-bound no-overwrite behavior; tested |
 | Matter-memory writer | `memory_search.py` | Compare-and-swap write preserved; tested |

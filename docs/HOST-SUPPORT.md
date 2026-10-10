@@ -18,9 +18,10 @@ Local on macOS; the Codex package has the separate accepted scope below.
 |---|---|---|
 | Local matter register and orientation | Core | SQLite is authoritative; reads and writes fail closed on missing or ambiguous state. |
 | DOCX letters and redlines | Optional selected modules | Require the pinned Python document packages. Visual verification additionally requires LibreOffice and Poppler. |
-| Claude Gmail connector | Configurable, not live-account accepted | The user authorizes it in Claude. Only a successful bounded read proves availability for that request. LawyeredOS does not send or mutate mail. |
-| Codex session mail tools | Configurable, not assumed available | Setup cannot install or authorize a connector. The workflow uses a supported, already-authorized read/search tool only when the active session exposes one. |
-| Local Gmail read-only and dedicated Calendar REST adapters | Experimental | Explicit opt-in; fake-transport tests only. Token values stay in named environment variables. |
+| Claude Gmail connector | Configurable, not live-account accepted | The user authorizes it in Claude. The shared intake accepts results only for the exact planned query and requires fully retrieved bodies, attachment bytes, complete bounded-search coverage, and bounded content review before advancing its local checkpoint. LawyeredOS does not send or mutate mail. |
+| Codex session mail tools | Configurable, not assumed available | Setup cannot install or authorize a connector. The workflow uses a supported, already-authorized read/search tool only when the active session exposes one; metadata-only results are partial. |
+| Local Gmail read-only and dedicated Calendar REST adapters | Experimental | Gmail full-message and attachment retrieval has fake GET-only transport coverage; no live mailbox was used. Calendar also has fake-transport coverage. Token values stay in named environment variables. |
+| Matter attachment filing and review | Candidate core | Supported PDF, DOCX, XLSX, TXT, Markdown, and CSV attachments are size-, type-, signature-, hash-, relationship-, embedding-, and path-checked, saved without overwrite, and treated as untrusted evidence. Active, unsupported, incomplete, oversized, long, or OCR-needing items hold the checkpoint for review. |
 | OCR | Experimental optional | OCRmyPDF was unavailable on the acceptance host. |
 | Multi-lens review | Host-dependent | Codex four-agent collection was exercised on fictional files. Claude's complete four-lens orchestration remains experimental. If independent agents are unavailable, report the panel unavailable. |
 | Practice manager | Unavailable | No adapter is bundled. |

@@ -16,7 +16,14 @@ request. If no supported tool exists, the workflow reports that email was not
 checked and continues only with independent work.
 
 The workflow must not substitute a browser session, a different connector, or
-a send-capable action. No live Codex mail-tool acceptance is claimed.
+a send-capable action. A session tool must return fully retrieved bodies and
+attachment bytes before the shared intake core can review those items within
+its bounded review window; metadata-only or over-window results are partial.
+The transient normalized bundle uses restrictive private-scratch permissions
+and is deleted by the guarded processor. A provider-prefixed, hashed stable
+account identifier scopes deduplication without storing the raw identifier; if
+the session tool cannot establish one, the result is incomplete. No live Codex
+mail-tool acceptance is claimed.
 
 ### Claude Gmail connector
 
@@ -32,7 +39,9 @@ connector can expose draft, send, reply, forward, label, and thread actions.
 LawyeredOS uses only bounded search/read access and never treats the connection
 as approval to send or mutate a mailbox. If the tool is absent, authentication
 is incomplete, or the user declines the permissions, the workflow reports mail
-unavailable and continues only with independent work.
+unavailable and continues only with independent work. If the connector exposes
+attachment metadata but not bytes, affected messages remain partial and their
+review checkpoint does not advance.
 
 Current connector capabilities, authorization steps, data handling, and plan
 controls are documented by Anthropic in [Use Google Workspace
@@ -40,12 +49,17 @@ connectors](https://support.claude.com/en/articles/10166901-use-google-workspace
 
 ### Experimental local REST adapter
 
-`gmail-api-readonly` uses the Gmail REST API to run a bounded query and retrieve
-message metadata and snippets. The caller must supply a token scoped no more
-broadly than `gmail.readonly`. This adapter does not mark read, label, archive,
-delete, download attachments, create drafts, or send. Results disclose that
-coverage is bounded and retain a next-page token instead of claiming a complete
-mailbox search.
+`gmail-api-readonly` uses the Gmail REST API to run the exact bounded matter
+query and retrieve current bodies plus attachment bytes within acquisition
+limits. The
+caller must supply a token scoped no more broadly than `gmail.readonly`. The
+shared core sanitizes and hashes attachments, refuses active or oversized
+content, external OOXML relationships, embedded objects, and unsafe paths;
+saves without overwrite; extracts supported document text; and advances the
+local checkpoint only after complete coverage and bounded review. Long content,
+inline/unsupported parts, and unexplained provider matches remain partial. This
+adapter does not mark read, label, archive, delete, create drafts,
+or send. A result cap or next-page token makes coverage incomplete.
 
 For offline demonstrations, `fixture-json` searches a fictional JSON message
 list. It never contacts a service.
