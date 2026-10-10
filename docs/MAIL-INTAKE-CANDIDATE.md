@@ -4,6 +4,35 @@ This record covers the unreleased shared matter-mail intake candidate. It does
 not amend the acceptance scope of the published Claude beta.2 or Codex beta.1
 archives and is not a live-mail acceptance.
 
+## Host-tool boundary
+
+- Anthropic documents Gmail message search/read plus attachment metadata, but
+  says attachment contents are not directly accessible. Claude messages with
+  attachments therefore cannot complete through that connector alone.
+- Codex documents MCP and plugin tool discovery, but no built-in Gmail tool
+  contract. The Codex route inspects the actual session and names no invented
+  tool.
+- Both routes feed the same versioned normalized bundle only when a runtime
+  tool actually returns complete bodies, complete bounded coverage, stable
+  identifiers, and required attachment bytes. No live-account acceptance is
+  claimed.
+
+Official references: [Claude Google Workspace connectors](https://support.claude.com/en/articles/10166901-use-google-workspace-connectors),
+[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), and
+[Codex skills](https://learn.chatgpt.com/docs/build-skills).
+
+## Scripted host-route acceptance
+
+`python scripts/accept_mail_host_routes.py` runs both normalized host routes in
+separate disposable fictional workspaces. For each route it reviews a complete
+message body and PDF, DOCX, XLSX, TXT, Markdown, and CSV attachments; verifies a
+repeat does not duplicate files or reviews; reviews a new message; proves an
+incomplete body and missing attachment bytes hold the prior checkpoint; and
+then completes the same message on retry. The PDF extractor is replaced only in
+this deterministic acceptance script so CI does not claim a platform Poppler
+binary that it did not exercise. The regular setup smoke remains the platform
+dependency gate.
+
 ## Implemented boundary
 
 The shared Python core resolves one tracker matter, builds a conservative
@@ -25,6 +54,8 @@ remains partial and does not advance the complete checkpoint.
 The reviewed source passed:
 
 - 93 LawyeredOS unit, distribution, setup, confinement, and workflow tests;
+- scripted positive acceptance for both normalized host routes, with complete
+  fictional bodies and every supported attachment category;
 - 97 vendored legal-redline tests;
 - fictional partial/retry, long-content, inline/filename-less MIME,
   account/source/query binding, attachment safety, no-overwrite, private-bundle

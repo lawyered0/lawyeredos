@@ -130,9 +130,12 @@ state.
 | Codex local project, macOS | Codex beta.1 with Python 3.12.7 and Codex CLI 0.147.0; project-local skills, fictional tracker persistence, and bounded review orchestration were verified. Desktop functional persistence evidence is user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
 
 Windows, Linux, other Python or host versions, and cloud execution are not
-accepted targets. Live Gmail was not tested for either host. Codex uses a
-supported, already-authorized session read tool only when one is available;
-setup cannot install or authorize it. The local Gmail adapter, Calendar, OCR,
+accepted targets. Live Gmail was not tested for either host. Claude's documented
+Gmail connector reads messages but directly exposes attachment metadata rather
+than attachment contents. Codex defines MCP/plugin tool discovery but not a
+built-in Gmail tool contract. Either host uses an already-authorized runtime
+read tool only when one is actually available; setup cannot install or authorize
+it. The local Gmail adapter, Calendar, OCR,
 and other optional capabilities remain experimental or unverified as described
 in the package.
 

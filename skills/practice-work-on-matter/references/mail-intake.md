@@ -22,10 +22,14 @@ matter. Never broaden the query to unrelated mail.
 - `gmail-rest`: run the same module with `rest` and the identifier. This uses
   only the separately configured `gmail.readonly` token and makes no mailbox
   changes.
-- `claude-session-tool`: use a Gmail read/search tool only when it is actually
-  present and authorized in the active Claude session.
-- `codex-session-tool`: use a supported mail read/search tool only when it is
-  actually present and authorized in the active Codex session.
+- `claude-session-tool`: use Claude's Gmail read/search tool only when it is
+  actually present and authorized in the active session. Its documented
+  connector exposes attachment metadata, not attachment contents, so a message
+  with an attachment remains partial unless a separate authorized runtime tool
+  actually returns the bytes. Do not assume such a tool exists.
+- `codex-session-tool`: inspect the active Codex session for an actually exposed,
+  already-authorized MCP or plugin mail read/search tool. Codex does not define
+  a built-in Gmail tool contract; never invent or name a hypothetical tool.
 
 For a session tool, run the exact planned query. Retrieve stable message and
 thread IDs, provider arrival time, headers, complete current body, attachment

@@ -9,7 +9,10 @@ Credentials are never written to logs, plans, fixtures, or reports.
 ### Codex session tools
 
 `codex-session-tools` records permission to inspect the active Codex session
-for a supported, already-authorized mail read/search tool. It does not install
+for a supported, already-authorized mail read/search tool supplied by a runtime
+MCP server or plugin. Codex documents how MCP servers and plugin-bundled MCP
+servers expose tools, but does not define a built-in Gmail tool contract. This
+adapter therefore names no hypothetical tool. It does not install
 an app, start OAuth, request credentials, broaden permissions, or prove a tool
 is connected. Only a successful bounded read establishes availability for that
 request. If no supported tool exists, the workflow reports that email was not
@@ -25,6 +28,10 @@ account identifier scopes deduplication without storing the raw identifier; if
 the session tool cannot establish one, the result is incomplete. No live Codex
 mail-tool acceptance is claimed.
 
+See Codex's official [MCP documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)
+and [skills documentation](https://learn.chatgpt.com/docs/build-skills) for the
+supported discovery boundary.
+
 ### Claude Gmail connector
 
 `claude-gmail-connector` records that the user chose Claude's supported Gmail
@@ -39,9 +46,12 @@ connector can expose draft, send, reply, forward, label, and thread actions.
 LawyeredOS uses only bounded search/read access and never treats the connection
 as approval to send or mutate a mailbox. If the tool is absent, authentication
 is incomplete, or the user declines the permissions, the workflow reports mail
-unavailable and continues only with independent work. If the connector exposes
-attachment metadata but not bytes, affected messages remain partial and their
-review checkpoint does not advance.
+unavailable and continues only with independent work. Anthropic's documented
+Gmail connector can search and read messages, but directly exposes attachment
+metadata rather than attachment contents. Consequently, a message with an
+attachment remains partial unless the active runtime separately provides an
+authorized read tool that returns those bytes. LawyeredOS does not assume or
+bundle such a tool, and the checkpoint does not advance past that message.
 
 Current connector capabilities, authorization steps, data handling, and plan
 controls are documented by Anthropic in [Use Google Workspace

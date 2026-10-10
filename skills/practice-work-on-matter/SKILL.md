@@ -50,7 +50,10 @@ and do not advance its local review checkpoint. There is no background polling.
   is not proof of a connection. Treat an authorization prompt, missing tool, or
   failed read as unavailable; only a successful bounded read establishes that
   the connector was connected for that request. Never invoke draft, send,
-  reply, forward, label, archive, or delete actions from this workflow.
+  reply, forward, label, archive, or delete actions from this workflow. Claude's
+  documented connector supplies attachment metadata rather than attachment
+  contents, so do not mark a message with an attachment complete unless a
+  separate, actually available authorized runtime tool supplies its bytes.
 - When `gmail-api-readonly` is configured, use a bounded query through
   `lawyeredos.mail_intake rest`. It retrieves only the matter-scoped result set,
   message bodies, and supported attachment bytes needed by this workflow. This
