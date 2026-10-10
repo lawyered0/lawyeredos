@@ -43,3 +43,11 @@ Review jobs use bounded source paths, schemas, and before/after hashes. A skill
 can instruct an independent agent to remain read-only, but cannot technically
 remove tools from that agent. When the host cannot provide independent agents,
 the panel reports itself unavailable instead of emulating independence.
+
+Mail content uses a separate resumable review protocol. Retrieval and text
+extraction create hash-bound pending chunks; neither state is called review.
+The active host must read each complete chunk and submit a matching
+acknowledgement with locator-linked evidence. Progress is durable, changed bytes
+reset the affected item, and the message/checkpoint remains incomplete until a
+final reconciliation sees every chunk acknowledged. See
+[Resumable mail-content review](CONTENT-REVIEW.md).

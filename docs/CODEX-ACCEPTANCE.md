@@ -109,9 +109,11 @@ or treated as a contradiction of, the user-created Desktop task.
 ## Unaccepted capabilities
 
 - A later candidate exercised one bounded, user-created Gmail self-test through
-  the connector exposed in a delegated development session. It reached the
-  shared core but correctly stopped `review_truncated`; ordinary-host live mail
-  and the portable IMAP provider remain unaccepted.
+  the connector exposed in a delegated development session. After the review
+  protocol was corrected, the active model reviewed and acknowledged all three
+  hash-bound DOCX chunks plus the message body; final reconciliation and repeat
+  deduplication passed. Ordinary-host live mail and the portable IMAP provider
+  remain unaccepted.
 - Codex session tools are available only when an active, user-authorized tool
   is present; setup alone does not prove availability.
 - OCR creation was unavailable because OCRmyPDF was not installed.

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
-import csv
 import io
 import json
 import os
@@ -19,7 +18,13 @@ from typing import Any
 
 from .common import canonical_json, confined_path, emit, sha256_bytes, sha256_file
 from .config import PracticeConfig, load_config
-from .document_helpers import extract_pdf
+from .content_review import (
+    REVIEW_ACK_SCHEMA,
+    acknowledgement_digest,
+    extract_review_content,
+    message_review_content,
+    validate_acknowledgement,
+)
 from .integrations import gmail_from_config
 from .imap_mail import gmail_imap_from_config
 from .matter_context import orient
@@ -29,7 +34,9 @@ SCHEMA = "lawyeredos-mail-bundle-v1"
 MAX_BUNDLE_BYTES = 75 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 MAX_RUN_ATTACHMENT_BYTES = 50 * 1024 * 1024
-MAX_REVIEW_CHARS = 12_000
+MAX_ACK_FILE_BYTES = 64 * 1024
+CONTENT_REVIEW_VERSION = "lawyeredos-content-review-v1"
+STATE_REVIEW_PROTOCOL = "hash-bound-host-review-v1"
 INITIAL_LOOKBACK_DAYS = 30
 SUPPORTED = {
     ".pdf": {"application/pdf"},
@@ -56,7 +63,9 @@ def state_path(config: PracticeConfig) -> Path:
 
 def _state_connection(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
     connection = sqlite3.connect(path, timeout=5)
+    path.chmod(0o600)
     connection.row_factory = sqlite3.Row
     connection.executescript(
         """
@@ -97,15 +106,185 @@ def _state_connection(path: Path) -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS attachment_sha_idx
             ON attachment_reviews(file_number, sha256);
+        CREATE TABLE IF NOT EXISTS content_review_items (
+            review_id TEXT PRIMARY KEY,
+            file_number TEXT NOT NULL,
+            source TEXT NOT NULL,
+            account_fingerprint TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            content_kind TEXT NOT NULL,
+            content_id TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            saved_relative_path TEXT NOT NULL,
+            format TEXT NOT NULL,
+            total_characters INTEGER NOT NULL,
+            total_chunks INTEGER NOT NULL,
+            coverage_json TEXT NOT NULL,
+            pipeline_version TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            UNIQUE(file_number, source, account_fingerprint, message_id, content_kind, content_id)
+        );
+        CREATE TABLE IF NOT EXISTS content_review_chunks (
+            review_id TEXT NOT NULL REFERENCES content_review_items(review_id) ON DELETE CASCADE,
+            chunk_index INTEGER NOT NULL,
+            text_sha256 TEXT NOT NULL,
+            text TEXT NOT NULL,
+            locators_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            acknowledgement_json TEXT,
+            acknowledgement_sha256 TEXT,
+            reviewed_at TEXT,
+            PRIMARY KEY(review_id, chunk_index)
+        );
+        CREATE INDEX IF NOT EXISTS content_review_pending_idx
+            ON content_review_chunks(review_id, status, chunk_index);
+        CREATE TABLE IF NOT EXISTS state_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
         """
     )
+    protocol = connection.execute(
+        "SELECT value FROM state_meta WHERE key='review_protocol'"
+    ).fetchone()
+    if protocol is None or protocol[0] != STATE_REVIEW_PROTOCOL:
+        connection.execute("DELETE FROM scan_state")
+        connection.execute("DELETE FROM message_reviews")
+        connection.execute("DELETE FROM attachment_reviews")
+        connection.execute("DELETE FROM content_review_chunks")
+        connection.execute("DELETE FROM content_review_items")
+        connection.execute(
+            "INSERT INTO state_meta(key, value) VALUES ('review_protocol', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (STATE_REVIEW_PROTOCOL,),
+        )
+        connection.commit()
     return connection
+
+
+def _content_review_id(
+    file_number: str,
+    source: str,
+    account_fingerprint: str,
+    message_id: str,
+    content_kind: str,
+    content_id: str,
+) -> str:
+    identity = "\n".join(
+        (file_number, source, account_fingerprint, message_id, content_kind, content_id)
+    )
+    return sha256_bytes(identity.encode("utf-8"))
+
+
+def _ensure_content_review(
+    connection: sqlite3.Connection,
+    *,
+    file_number: str,
+    source: str,
+    account_fingerprint: str,
+    message_id: str,
+    content_kind: str,
+    content_id: str,
+    content_sha256: str,
+    original_name: str,
+    saved_relative_path: str,
+    extracted: dict[str, Any],
+) -> dict[str, Any]:
+    review_id = _content_review_id(
+        file_number, source, account_fingerprint, message_id, content_kind, content_id
+    )
+    chunks = extracted.get("chunks", []) if extracted.get("complete") else []
+    status = "pending" if chunks else "blocked" if not extracted.get("complete") else "reviewed"
+    coverage = {
+        "complete": bool(extracted.get("complete")),
+        "status": extracted.get("status"),
+        "reason": extracted.get("reason", ""),
+        "format": extracted.get("format"),
+        "units": extracted.get("units", 0),
+        "details": extracted.get("coverage", {}),
+    }
+    existing = connection.execute(
+        "SELECT content_sha256, pipeline_version, status FROM content_review_items "
+        "WHERE review_id=?",
+        (review_id,),
+    ).fetchone()
+    reset = bool(
+        existing is None
+        or existing["content_sha256"] != content_sha256
+        or existing["pipeline_version"] != CONTENT_REVIEW_VERSION
+    )
+    if existing is None:
+        connection.execute(
+            "INSERT INTO content_review_items VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                review_id, file_number, source, account_fingerprint, message_id,
+                content_kind, content_id, content_sha256, original_name,
+                saved_relative_path, extracted.get("format", content_kind),
+                int(extracted.get("characters", 0)), len(chunks), canonical_json(coverage),
+                CONTENT_REVIEW_VERSION, status, now(), now() if status == "reviewed" else None,
+            ),
+        )
+    elif reset:
+        connection.execute("DELETE FROM content_review_chunks WHERE review_id=?", (review_id,))
+        connection.execute(
+            "UPDATE content_review_items SET content_sha256=?, original_name=?, "
+            "saved_relative_path=?, format=?, total_characters=?, total_chunks=?, "
+            "coverage_json=?, pipeline_version=?, status=?, created_at=?, completed_at=? "
+            "WHERE review_id=?",
+            (
+                content_sha256, original_name, saved_relative_path,
+                extracted.get("format", content_kind), int(extracted.get("characters", 0)),
+                len(chunks), canonical_json(coverage), CONTENT_REVIEW_VERSION, status,
+                now(), now() if status == "reviewed" else None, review_id,
+            ),
+        )
+    if existing is None or reset:
+        connection.executemany(
+            "INSERT INTO content_review_chunks "
+            "(review_id, chunk_index, text_sha256, text, locators_json, status) "
+            "VALUES (?, ?, ?, ?, ?, 'pending')",
+            [
+                (
+                    review_id, chunk["index"], chunk["text_sha256"], chunk["text"],
+                    canonical_json(chunk["locators"]),
+                )
+                for chunk in chunks
+            ],
+        )
+    rows = connection.execute(
+        "SELECT status, acknowledgement_json, acknowledgement_sha256 "
+        "FROM content_review_chunks WHERE review_id=? ORDER BY chunk_index",
+        (review_id,),
+    ).fetchall()
+    reviewed = sum(row["status"] == "reviewed" for row in rows)
+    current = connection.execute(
+        "SELECT status FROM content_review_items WHERE review_id=?", (review_id,)
+    ).fetchone()["status"]
+    acknowledgements = [
+        {
+            "sha256": row["acknowledgement_sha256"],
+            "summary": json.loads(row["acknowledgement_json"])["summary"],
+        }
+        for row in rows if row["acknowledgement_json"]
+    ]
+    return {
+        "review_id": review_id,
+        "status": current,
+        "chunks_reviewed": reviewed,
+        "chunks_total": len(rows),
+        "characters": int(extracted.get("characters", 0)),
+        "coverage": coverage,
+        "acknowledgements": acknowledgements,
+    }
 
 
 def _checkpoint(path: Path, file_number: str, source: str, account_fingerprint: str) -> dict[str, str] | None:
     if not path.is_file():
         return None
-    with sqlite3.connect(path) as connection:
+    with _state_connection(path) as connection:
         row = connection.execute(
             "SELECT completed_at, source, query FROM scan_state "
             "WHERE file_number=? AND source=? AND account_fingerprint=?",
@@ -315,54 +494,6 @@ def _unique_destination(folder: Path, name: str, digest: str) -> Path:
     return candidate
 
 
-def _review_attachment(path: Path, suffix: str, scratch: Path) -> dict[str, Any]:
-    if suffix in {".txt", ".md", ".csv"}:
-        text = path.read_text(encoding="utf-8", errors="replace")
-        return {
-            "status": "review_truncated" if len(text) > MAX_REVIEW_CHARS else "reviewed",
-            "characters": len(text), "text": text[:MAX_REVIEW_CHARS],
-        }
-    if suffix == ".docx":
-        from docx import Document
-        document = Document(path)
-        text = "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text.strip())
-        return {
-            "status": "review_truncated" if len(text) > MAX_REVIEW_CHARS else "reviewed",
-            "characters": len(text), "text": text[:MAX_REVIEW_CHARS],
-        }
-    if suffix == ".xlsx":
-        from openpyxl import load_workbook
-        workbook = load_workbook(path, read_only=True, data_only=True)
-        output = io.StringIO()
-        writer = csv.writer(output)
-        for sheet in workbook.worksheets:
-            writer.writerow([f"[{sheet.title}]"])
-            for row in sheet.iter_rows(values_only=True):
-                writer.writerow(["" if value is None else str(value) for value in row])
-                if output.tell() > MAX_REVIEW_CHARS * 2:
-                    break
-        text = output.getvalue()
-        return {
-            "status": "review_truncated" if len(text) > MAX_REVIEW_CHARS else "reviewed",
-            "characters": len(text), "text": text[:MAX_REVIEW_CHARS],
-        }
-    if suffix == ".pdf":
-        scratch.mkdir(parents=True, exist_ok=True)
-        output = scratch / f"{sha256_file(path)}.txt"
-        if output.exists():
-            text = output.read_text(encoding="utf-8", errors="replace")
-            needs_ocr = len(text.strip()) < 40
-        else:
-            result = extract_pdf(path, output)
-            text = output.read_text(encoding="utf-8", errors="replace")
-            needs_ocr = bool(result["needs_ocr"])
-        return {
-            "status": "needs_ocr" if needs_ocr else "review_truncated" if len(text) > MAX_REVIEW_CHARS else "reviewed",
-            "characters": len(text), "text": text[:MAX_REVIEW_CHARS],
-        }
-    raise ValueError("unsupported review type")
-
-
 def _message_text(message: dict[str, Any]) -> str:
     fields = [message.get(name, "") for name in ("from", "to", "cc", "subject", "snippet", "body")]
     return "\n".join(str(value) for value in fields).casefold()
@@ -451,21 +582,36 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             attachments = raw.get("attachments", [])
             if not isinstance(attachments, list):
                 raise ValueError("message attachments must be a list")
+            body_text = str(raw.get("body", ""))
             item = {
                 "message_id": message_id, "thread_id": thread_id,
                 "status": "reviewed", "untrusted_evidence": True,
-                "body": str(raw.get("body", ""))[:MAX_REVIEW_CHARS],
-                "body_truncated": len(str(raw.get("body", ""))) > MAX_REVIEW_CHARS,
+                "body_preview": body_text[:500],
                 "attachments": [],
             }
             if raw.get("body_complete") is not True:
                 item["status"] = "partial"
                 item["problems"] = ["message body retrieval was incomplete"]
-            if len(str(raw.get("body", ""))) > MAX_REVIEW_CHARS:
-                item["status"] = "partial"
-                item.setdefault("problems", []).append(
-                    f"message body exceeds the {MAX_REVIEW_CHARS}-character review window"
+            else:
+                body_review = _ensure_content_review(
+                    connection,
+                    file_number=file_number,
+                    source=source,
+                    account_fingerprint=account_fingerprint,
+                    message_id=message_id,
+                    content_kind="message-body",
+                    content_id="body",
+                    content_sha256=sha256_bytes(body_text.encode("utf-8")),
+                    original_name="message body",
+                    saved_relative_path="",
+                    extracted=message_review_content(body_text),
                 )
+                item["body_review"] = body_review
+                if body_review["status"] != "reviewed":
+                    item["status"] = "partial"
+                    item.setdefault("problems", []).append(
+                        "message body requires hash-bound host-model review acknowledgements"
+                    )
             seen_attachment_ids: set[str] = set()
             for attachment in attachments:
                 if not isinstance(attachment, dict):
@@ -530,16 +676,33 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                             finally:
                                 os.close(destination_fd)
                             staging.unlink()
-                    review = _review_attachment(saved, suffix, scratch)
+                    extracted = extract_review_content(saved, suffix, scratch)
+                    review = _ensure_content_review(
+                        connection,
+                        file_number=file_number,
+                        source=source,
+                        account_fingerprint=account_fingerprint,
+                        message_id=message_id,
+                        content_kind="attachment",
+                        content_id=attachment_result["attachment_id"],
+                        content_sha256=digest,
+                        original_name=name,
+                        saved_relative_path=str(saved.relative_to(matter_folder)),
+                        extracted=extracted,
+                    )
                     attachment_result.update({
-                        "status": review["status"], "saved_path": str(saved),
+                        "status": "reviewed" if review["status"] == "reviewed" else
+                        "review_required" if review["status"] == "pending" else
+                        "extraction_incomplete",
+                        "saved_path": str(saved),
                         "saved_relative_path": str(saved.relative_to(matter_folder)),
                         "sha256": digest, "byte_size": len(data), "review": review,
                     })
-                    if review["status"] != "reviewed":
+                    if attachment_result["status"] != "reviewed":
                         item["status"] = "partial"
                         item.setdefault("problems", []).append(
-                            f"attachment {name} requires additional review: {review['status']}"
+                            f"attachment {name} requires additional review: "
+                            f"{attachment_result['status']}"
                         )
                 except (ValueError, OSError, zipfile.BadZipFile) as exc:
                     if staging is not None and staging.is_file() and not staging.is_symlink():
@@ -554,7 +717,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                     )
                 item["attachments"].append(attachment_result)
             if item["status"] == "reviewed":
-                body_hash = sha256_bytes(str(raw.get("body", "")).encode("utf-8"))
+                body_hash = sha256_bytes(body_text.encode("utf-8"))
                 provenance = {
                     "source": source, "query": planned["query"], "received_at": received_at,
                     "from": str(raw.get("from", "")), "to": str(raw.get("to", "")),
@@ -603,6 +766,147 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
     }
 
 
+def next_review_chunk(config_path: Path, identifier: str) -> dict[str, Any]:
+    context = orient(config_path, identifier, 20)
+    if not context.get("ok"):
+        return {"ok": False, "status": context.get("status", "matter_unavailable")}
+    config = load_config(config_path)
+    state = state_path(config)
+    if not state.is_file():
+        return {"ok": True, "status": "no_pending_review", "pending": 0}
+    file_number = context["matter"]["file_number"]
+    with _state_connection(state) as connection:
+        row = connection.execute(
+            "SELECT i.review_id, i.content_kind, i.original_name, i.content_sha256, "
+            "i.saved_relative_path, i.total_chunks, c.chunk_index, c.text_sha256, "
+            "c.text, c.locators_json "
+            "FROM content_review_items i JOIN content_review_chunks c "
+            "ON c.review_id=i.review_id "
+            "WHERE i.file_number=? AND i.status='pending' AND c.status='pending' "
+            "ORDER BY i.created_at, i.review_id, c.chunk_index LIMIT 1",
+            (file_number,),
+        ).fetchone()
+        pending = connection.execute(
+            "SELECT COUNT(*) FROM content_review_items i JOIN content_review_chunks c "
+            "ON c.review_id=i.review_id "
+            "WHERE i.file_number=? AND i.status='pending' AND c.status='pending'",
+            (file_number,),
+        ).fetchone()[0]
+    if row is None:
+        return {"ok": True, "status": "no_pending_review", "pending": 0}
+    if row["content_kind"] == "attachment":
+        matter_folder = Path(context["folder"])
+        saved = confined_path(matter_folder, row["saved_relative_path"])
+        if not saved.is_file() or saved.is_symlink() or sha256_file(saved) != row["content_sha256"]:
+            raise ValueError("pending review attachment is missing, replaced, or changed")
+    return {
+        "ok": True,
+        "status": "review_required",
+        "pending": pending,
+        "review_id": row["review_id"],
+        "content_kind": row["content_kind"],
+        "original_name": row["original_name"],
+        "chunk_index": row["chunk_index"],
+        "chunks_total": row["total_chunks"],
+        "text_sha256": row["text_sha256"],
+        "locators": json.loads(row["locators_json"]),
+        "text": row["text"],
+        "untrusted_evidence": True,
+        "acknowledgement_schema": REVIEW_ACK_SCHEMA,
+    }
+
+
+def acknowledge_review_chunk(
+    config_path: Path,
+    identifier: str,
+    review_id: str,
+    chunk_index: int,
+    text_sha256: str,
+    acknowledgement: dict[str, Any],
+) -> dict[str, Any]:
+    context = orient(config_path, identifier, 20)
+    if not context.get("ok"):
+        return {"ok": False, "status": context.get("status", "matter_unavailable")}
+    config = load_config(config_path)
+    state = state_path(config)
+    if not state.is_file():
+        raise ValueError("mail review state is unavailable")
+    normalized_id = review_id.strip().casefold()
+    normalized_sha = text_sha256.strip().casefold()
+    if not re.fullmatch(r"[0-9a-f]{64}", normalized_id):
+        raise ValueError("review_id must be a SHA-256 identifier")
+    if not re.fullmatch(r"[0-9a-f]{64}", normalized_sha):
+        raise ValueError("text_sha256 must be a SHA-256 digest")
+    file_number = context["matter"]["file_number"]
+    connection = _state_connection(state)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            "SELECT c.text_sha256, c.status, c.acknowledgement_sha256, i.status item_status "
+            "FROM content_review_chunks c JOIN content_review_items i "
+            "ON i.review_id=c.review_id "
+            "WHERE c.review_id=? AND c.chunk_index=? AND i.file_number=?",
+            (normalized_id, int(chunk_index), file_number),
+        ).fetchone()
+        if row is None:
+            raise ValueError("pending review chunk was not found for the resolved matter")
+        if row["text_sha256"] != normalized_sha:
+            raise ValueError("pending review chunk hash changed; retrieve it again")
+        normalized_ack = validate_acknowledgement(acknowledgement, normalized_sha)
+        ack_digest = acknowledgement_digest(normalized_ack)
+        if row["status"] == "reviewed":
+            if row["acknowledgement_sha256"] != ack_digest:
+                raise ValueError("review chunk already has a different acknowledgement")
+            connection.rollback()
+            return {
+                "ok": True, "status": "already_acknowledged",
+                "review_id": normalized_id, "chunk_index": int(chunk_index),
+            }
+        if row["item_status"] != "pending":
+            raise ValueError("review item is not pending acknowledgement")
+        connection.execute(
+            "UPDATE content_review_chunks SET status='reviewed', acknowledgement_json=?, "
+            "acknowledgement_sha256=?, reviewed_at=? WHERE review_id=? AND chunk_index=?",
+            (
+                canonical_json(normalized_ack), ack_digest, now(), normalized_id,
+                int(chunk_index),
+            ),
+        )
+        remaining = connection.execute(
+            "SELECT COUNT(*) FROM content_review_chunks "
+            "WHERE review_id=? AND status!='reviewed'", (normalized_id,),
+        ).fetchone()[0]
+        if remaining == 0:
+            connection.execute(
+                "UPDATE content_review_items SET status='reviewed', completed_at=? "
+                "WHERE review_id=?", (now(), normalized_id),
+            )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return {
+        "ok": True,
+        "status": "acknowledged",
+        "review_id": normalized_id,
+        "chunk_index": int(chunk_index),
+        "item_complete": remaining == 0,
+        "remaining_chunks": remaining,
+        "acknowledgement_sha256": ack_digest,
+    }
+
+
+def _load_acknowledgement(path: Path) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_ACK_FILE_BYTES:
+        raise ValueError("review acknowledgement file is unavailable, unsafe, or oversized")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("review acknowledgement file must contain one JSON object")
+    return value
+
+
 def _load_bundle(path: Path) -> dict[str, Any]:
     if not path.is_file() or path.stat().st_size > MAX_BUNDLE_BYTES:
         raise ValueError("mail bundle is unavailable or oversized")
@@ -635,6 +939,29 @@ def _managed_session_bundle(path: Path, config: PracticeConfig) -> Path:
     return candidate
 
 
+def _managed_review_ack(path: Path, config: PracticeConfig) -> Path:
+    scratch_relative = config.scratch.relative_to(config.workspace_root)
+    managed_root = confined_path(config.workspace_root, str(scratch_relative / "mail-review-acks"))
+    if not managed_root.is_dir() or managed_root.is_symlink():
+        raise ValueError("private review-ack scratch must be a regular directory")
+    if stat.S_IMODE(managed_root.stat().st_mode) & 0o077:
+        raise ValueError("private review-ack scratch permissions must be 0700 or stricter")
+    expanded = path.expanduser()
+    if expanded.is_symlink():
+        raise ValueError("review acknowledgement must not be a symlink")
+    absolute = expanded.resolve(strict=False)
+    try:
+        relative = absolute.relative_to(managed_root)
+    except ValueError as exc:
+        raise ValueError("review acknowledgement must be inside private review-ack scratch") from exc
+    candidate = confined_path(managed_root, str(relative))
+    if not candidate.is_file() or candidate.is_symlink():
+        raise ValueError("review acknowledgement must be a regular non-symlink file")
+    if stat.S_IMODE(candidate.stat().st_mode) & 0o077:
+        raise ValueError("review acknowledgement permissions must be 0600 or stricter")
+    return candidate
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan and process bounded matter email intake")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -647,6 +974,17 @@ def main(argv: list[str] | None = None) -> int:
             item.add_argument("--delete-bundle", action="store_true")
         if name in {"rest", "imap"}:
             item.add_argument("--limit", type=int, default=100)
+    review_next = sub.add_parser("review-next")
+    review_next.add_argument("--config", required=True)
+    review_next.add_argument("--identifier", required=True)
+    review_ack = sub.add_parser("review-ack")
+    review_ack.add_argument("--config", required=True)
+    review_ack.add_argument("--identifier", required=True)
+    review_ack.add_argument("--review-id", required=True)
+    review_ack.add_argument("--chunk-index", type=int, required=True)
+    review_ack.add_argument("--text-sha256", required=True)
+    review_ack.add_argument("--ack-file", required=True)
+    review_ack.add_argument("--delete-ack", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
@@ -665,6 +1003,23 @@ def main(argv: list[str] | None = None) -> int:
             finally:
                 if managed_bundle is not None and managed_bundle.is_file():
                     managed_bundle.unlink()
+        elif args.command == "review-next":
+            result = next_review_chunk(Path(args.config), args.identifier)
+        elif args.command == "review-ack":
+            ack_path = Path(args.ack_file)
+            managed_ack: Path | None = None
+            if args.delete_ack:
+                managed_ack = _managed_review_ack(
+                    ack_path, load_config(Path(args.config))
+                )
+            try:
+                result = acknowledge_review_chunk(
+                    Path(args.config), args.identifier, args.review_id, args.chunk_index,
+                    args.text_sha256, _load_acknowledgement(ack_path),
+                )
+            finally:
+                if managed_ack is not None and managed_ack.is_file():
+                    managed_ack.unlink()
         else:
             planned = plan(Path(args.config), args.identifier)
             if not planned.get("ok"):

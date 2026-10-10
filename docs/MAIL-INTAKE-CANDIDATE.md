@@ -24,14 +24,16 @@ Official references: [Claude Google Workspace connectors](https://support.claude
 ## Scripted host-route acceptance
 
 `python scripts/accept_mail_host_routes.py` runs both normalized host routes in
-separate disposable fictional workspaces. For each route it reviews a complete
-message body and PDF, DOCX, XLSX, TXT, Markdown, and CSV attachments; verifies a
-repeat does not duplicate files or reviews; reviews a new message; proves an
-incomplete body and missing attachment bytes hold the prior checkpoint; and
-then completes the same message on retry. The PDF extractor is replaced only in
-this deterministic acceptance script so CI does not claim a platform Poppler
-binary that it did not exercise. The regular setup smoke remains the platform
-dependency gate.
+separate disposable fictional workspaces. For each route it exposes a complete
+message body and PDF, DOCX, XLSX, TXT, Markdown, and CSV attachments through the
+review queue; submits clearly labelled synthetic acknowledgements to test the
+hash/progress plumbing; verifies a repeat does not duplicate files or reviews;
+handles a new message; proves an incomplete body and missing attachment bytes
+hold the prior checkpoint; and then completes the same message on retry. This
+script tests mechanics, not model comprehension. The PDF extractor is replaced
+only in this deterministic acceptance script so CI does not claim a platform
+Poppler binary that it did not exercise. The regular setup smoke remains the
+platform dependency gate.
 
 ## Implemented boundary
 
@@ -53,7 +55,7 @@ remains partial and does not advance the complete checkpoint.
 
 The reviewed source passed:
 
-- 101 LawyeredOS unit, distribution, setup, confinement, and workflow tests;
+- 109 LawyeredOS unit, distribution, setup, confinement, and workflow tests;
 - scripted positive acceptance for both normalized host routes, with complete
   fictional bodies and every supported attachment category;
 - 97 vendored legal-redline tests;
@@ -69,12 +71,14 @@ The reviewed source passed:
 
 A separate, bounded read of one user-created, self-addressed Gmail test thread
 used the authorized connector exposed only in the delegated development
-session. Search, full-message read, and DOCX attachment-byte retrieval reached
-the shared core. The document exceeded the core review-character window, so
-the result correctly remained `review_truncated`, the checkpoint did not
-advance, and the repeat created no duplicate file. No message content or
-attachment bytes were retained in the repository. This is a partial-path test,
-not ordinary-host or portable-IMAP acceptance.
+session. The initial run exposed that extraction beyond one fixed window was
+not full review. After implementing the resumable protocol, the 30,333-character
+DOCX produced 298 paragraph units and three hash-bound chunks. The active model
+read and acknowledged every chunk plus the message body with locator-linked
+evidence; final reconciliation advanced the checkpoint and the repeat returned
+`already_reviewed` without duplicating the file. No message content or
+attachment bytes were retained in the repository. This is delegated-path
+acceptance, not ordinary-host or portable-IMAP acceptance.
 
 Two independent reviews challenged the candidate for security, privacy,
 accuracy, host-boundary wording, and visual claims. Their findings drove
@@ -89,7 +93,8 @@ destination-directory replacement races.
   mutation, or persistent permission change was used. The only live mailbox
   input was the bounded, user-created self-test described above.
 - No ordinary Claude or Codex host session completed live-mail acceptance; the
-  delegated connector self-test remained partial as described above.
+  completed delegated connector self-test does not establish ordinary-host or
+  portable-IMAP acceptance.
 - No background polling is implemented.
 - OCR completion remains unavailable on the tested host.
 - Other operating systems and host versions remain unaccepted.

@@ -75,10 +75,11 @@ tests that remain before public distribution.
 - [ ] Complete ordinary-host acceptance for the configured Claude Gmail
   connector, Codex session-mail route, portable IMAP provider, REST provider,
   and dedicated-calendar operations against purpose-created test accounts.
-  The bounded delegated-session Gmail self-test reached the shared core but
-  stopped safely as `review_truncated`; the local providers otherwise use
-  injected fake transports. No complete live-mail or live-calendar claim is
-  made.
+  The bounded delegated-session Gmail self-test completed actual model review
+  acknowledgements for all three DOCX chunks and the message body, then passed
+  final reconciliation and repeat deduplication. The local providers otherwise
+  use injected fake transports. No ordinary-host, live-IMAP, live-REST, or
+  live-calendar claim is made.
 - [ ] Validate migration against a read-only copy or export of the owner's real
   tracker, reconcile every row and history count, and keep rollback material.
   Fictional SQLite/CSV/JSON/XLSX paths are verified; private tracker

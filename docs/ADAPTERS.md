@@ -20,8 +20,9 @@ checked and continues only with independent work.
 
 The workflow must not substitute a browser session, a different connector, or
 a send-capable action. A session tool must return fully retrieved bodies and
-attachment bytes before the shared intake core can review those items within
-its bounded review window; metadata-only or over-window results are partial.
+attachment bytes before the shared intake core can extract them. Extraction is
+not review: every hash-bound chunk still requires a host-model acknowledgement;
+metadata-only or unacknowledged results are partial.
 The transient normalized bundle uses restrictive private-scratch permissions
 and is deleted by the guarded processor. A provider-prefixed, hashed stable
 account identifier scopes deduplication without storing the raw identifier; if
@@ -66,8 +67,9 @@ caller must supply a token scoped no more broadly than `gmail.readonly`. The
 shared core sanitizes and hashes attachments, refuses active or oversized
 content, external OOXML relationships, embedded objects, and unsafe paths;
 saves without overwrite; extracts supported document text; and advances the
-local checkpoint only after complete coverage and bounded review. Long content,
-inline/unsupported parts, and unexplained provider matches remain partial. This
+local checkpoint only after complete coverage and acknowledged bounded review.
+Long content resumes across chunks; inline/unsupported parts and unexplained
+provider matches remain partial. This
 adapter does not mark read, label, archive, delete, create drafts,
 or send. A result cap or next-page token makes coverage incomplete.
 

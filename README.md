@@ -63,12 +63,15 @@ After setup, normal use is just a natural-language request:
 LawyeredOS then finds the one matching saved matter, reads its recorded state
 and relevant local files, and—when read-only email access is both configured
 and actually available—checks a bounded matter-specific slice for new messages.
-It reviews fully retrieved message bodies and safely retrieved supported
-attachments within bounded review windows before summarizing where things stand
-and proposing the next useful work for lawyer review. Longer content remains
-partial until separately reviewed. Safe attachments are saved to the resolved
-matter folder; their source IDs and SHA-256 hashes are recorded in the local
-review ledger for deduplication.
+It retrieves complete message bodies and safely retrieved supported
+attachments, extracts bounded paragraph/page/sheet-aware chunks, and requires
+the active host to acknowledge every exact chunk with locator-linked review
+evidence before summarizing where things stand. Long content resumes across
+chunks and sessions instead of being silently truncated. Safe attachments are
+saved to the resolved matter folder; source IDs, SHA-256 hashes, extracted
+chunks, and acknowledgement evidence are recorded in the private local review
+ledger for progress and deduplication. See
+[the review protocol](docs/CONTENT-REVIEW.md).
 
 If the matter name is missing or ambiguous, it stops and asks instead of
 guessing. If email access, search coverage, a message body, attachment bytes,
@@ -137,8 +140,9 @@ route based on localized All Mail discovery, stable Gmail IDs, and
 
 Windows, Linux, other Python or host versions, and cloud execution are not
 accepted targets. A bounded connector-to-core read of one user-created Gmail
-self-test ended safely as `review_truncated`; it is not complete ordinary-host
-or portable-IMAP acceptance. Claude's documented Gmail connector reads messages
+self-test completed three hash-bound DOCX chunks plus the message body through
+actual model acknowledgements and repeat deduplication. This is delegated-session
+evidence, not ordinary-host or portable-IMAP acceptance. Claude's documented Gmail connector reads messages
 but directly exposes attachment metadata rather than attachment contents. Codex
 defines MCP/plugin tool discovery but not a built-in Gmail tool contract. Either
 host uses an already-authorized runtime read tool only when one is actually

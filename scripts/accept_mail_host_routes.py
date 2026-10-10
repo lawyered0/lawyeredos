@@ -12,7 +12,14 @@ from unittest.mock import patch
 from docx import Document
 from openpyxl import Workbook
 
-from lawyeredos.mail_intake import SCHEMA, plan, process_bundle
+from lawyeredos.content_review import REVIEW_ACK_SCHEMA
+from lawyeredos.mail_intake import (
+    SCHEMA,
+    acknowledge_review_chunk,
+    next_review_chunk,
+    plan,
+    process_bundle,
+)
 from lawyeredos.tracker_cli import initialize
 
 
@@ -110,6 +117,33 @@ def _fake_pdf_extract(_source: Path, output: Path) -> dict:
     return {"needs_ocr": False}
 
 
+def _acknowledge_all(config: Path, identifier: str) -> list[dict]:
+    reviewed: list[dict] = []
+    while True:
+        pending = next_review_chunk(config, identifier)
+        if pending["status"] == "no_pending_review":
+            return reviewed
+        reviewed.append(pending)
+        acknowledge_review_chunk(
+            config,
+            identifier,
+            pending["review_id"],
+            pending["chunk_index"],
+            pending["text_sha256"],
+            {
+                "schema": REVIEW_ACK_SCHEMA,
+                "reviewed_text_sha256": pending["text_sha256"],
+                "reviewer": "synthetic-host-route-acceptance",
+                "summary": "Synthetic acknowledgement verifies resumable hash-bound review plumbing.",
+                "evidence": [{
+                    "locator": json.dumps(pending["locators"][0], sort_keys=True),
+                    "observation": "The fictional chunk was exposed to the acceptance harness.",
+                }],
+                "limitations": [],
+            },
+        )
+
+
 def _run_route(root: Path, adapter: str, source: str) -> dict:
     workspace = root / adapter
     matter = workspace / "2032-001-northstar"
@@ -160,17 +194,24 @@ external_ai = false
     planned = plan(config, "2032-001")
     assert planned["source"] == source and planned["route"] == source
     all_types = _attachments()
-    with patch("lawyeredos.mail_intake.extract_pdf", _fake_pdf_extract):
+    with patch("lawyeredos.content_review.extract_pdf", _fake_pdf_extract):
         first = process_bundle(
             config, "2032-001", _bundle(planned, source, fingerprint, [_message("all-types", all_types)])
         )
-    assert first["status"] == "complete" and first["checkpoint_advanced"]
-    reviewed = first["messages"][0]["attachments"]
+    assert first["status"] == "partial" and not first["checkpoint_advanced"]
+    exposed = _acknowledge_all(config, "2032-001")
+    exposed_text = "\n".join(item["text"] for item in exposed)
+    with patch("lawyeredos.content_review.extract_pdf", _fake_pdf_extract):
+        completed = process_bundle(
+            config, "2032-001", _bundle(planned, source, fingerprint, [_message("all-types", all_types)])
+        )
+    assert completed["status"] == "complete" and completed["checkpoint_advanced"]
+    reviewed = completed["messages"][0]["attachments"]
     assert {Path(item["saved_path"]).suffix for item in reviewed} == {".pdf", ".docx", ".xlsx", ".txt", ".md", ".csv"}
-    assert all(item["status"] == "reviewed" and item["review"]["text"] for item in reviewed)
-    assert "Northstar fictional PDF evidence" in next(item for item in reviewed if item["original_name"].endswith(".pdf"))["review"]["text"]
-    assert "DOCX evidence" in next(item for item in reviewed if item["original_name"].endswith(".docx"))["review"]["text"]
-    assert "Northstar flour" in next(item for item in reviewed if item["original_name"].endswith(".xlsx"))["review"]["text"]
+    assert all(item["status"] == "reviewed" and item["review"]["acknowledgements"] for item in reviewed)
+    assert "Northstar fictional PDF evidence" in exposed_text
+    assert "DOCX evidence" in exposed_text
+    assert "Northstar flour" in exposed_text
 
     repeated = process_bundle(
         config, "Northstar",
@@ -179,6 +220,12 @@ external_ai = false
     assert repeated["messages"] == [{"message_id": "all-types", "status": "already_reviewed"}]
     assert len(list((matter / "email-attachments").iterdir())) == 6
 
+    new_message = process_bundle(
+        config, "2032-001",
+        _bundle(plan(config, "2032-001"), source, fingerprint, [_message("new-message")]),
+    )
+    assert new_message["status"] == "partial"
+    _acknowledge_all(config, "2032-001")
     new_message = process_bundle(
         config, "2032-001",
         _bundle(plan(config, "2032-001"), source, fingerprint, [_message("new-message")]),
@@ -204,6 +251,12 @@ external_ai = false
         config, "Northstar",
         _bundle(plan(config, "Northstar"), source, fingerprint, [_message("retry-message", [retry_attachment])]),
     )
+    assert retry["status"] == "partial" and not retry["checkpoint_advanced"]
+    _acknowledge_all(config, "Northstar")
+    retry = process_bundle(
+        config, "Northstar",
+        _bundle(plan(config, "Northstar"), source, fingerprint, [_message("retry-message", [retry_attachment])]),
+    )
     assert retry["status"] == "complete" and retry["checkpoint_advanced"]
     assert retry["messages"][0]["attachments"][0]["status"] == "reviewed"
     with sqlite3.connect(state) as connection:
@@ -214,10 +267,10 @@ external_ai = false
     return {
         "adapter": adapter,
         "normalized_source": source,
-        "full_body": "reviewed",
+        "full_body": "synthetic_review_acknowledged",
         "attachment_types": ["pdf", "docx", "xlsx", "txt", "md", "csv"],
         "repeat": "deduplicated",
-        "new_message": "reviewed",
+        "new_message": "synthetic_review_acknowledged",
         "partial": "checkpoint_held",
         "retry": "completed",
         "message_reviews": message_count,

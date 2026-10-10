@@ -5,8 +5,10 @@ installed skill resolves the saved matter and performs local orientation
 automatically without changing the tracker or external accounts. When configured email access is available,
 that workflow also checks the bounded matter-specific email slice and reviews
 fully retrieved new messages and safely retrieved supported attachments within
-bounded review windows. It may write the disclosed local attachment cache and
-review ledger. Partial or unavailable mail coverage is disclosed and held for retry. The commands below
+bounded resumable review chunks. It may write the disclosed local attachment
+cache and private review ledger. Extraction is not review: every chunk requires
+a hash-bound host acknowledgement before the checkpoint can complete. Partial
+or unavailable mail coverage is disclosed and held for retry. The commands below
 are technical examples for maintainers, testing, and troubleshooting; users do
 not need to type them.
 

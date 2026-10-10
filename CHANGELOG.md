@@ -39,9 +39,16 @@ their own reviewed version and checksum boundaries.
 - Added an experimental portable read-only Gmail IMAP provider with localized
   All Mail discovery, stable Gmail IDs, `BODY.PEEK`, bounded MIME acquisition,
   user-selected environment/Keychain credential sources, and comprehensive
-  fake-transport coverage. One delegated-session Gmail self-test reached the
-  shared core but stopped safely as `review_truncated`; ordinary-host and live
-  IMAP acceptance remain pending.
+  fake-transport coverage.
+- Separated acquisition and extraction from semantic review. Long content is
+  now divided into durable paragraph/page/sheet-aware chunks, each requiring a
+  hash-bound host-model acknowledgement with locator-linked evidence before a
+  message or checkpoint can complete. Added interruption/resume, changed-source
+  reset, legacy-state invalidation, and long DOCX/PDF/XLSX regressions.
+- Re-ran the bounded delegated-session Gmail self-test through that protocol:
+  all three DOCX chunks and the message body received actual model review
+  acknowledgements, final reconciliation completed, and repeat deduplication
+  passed. Ordinary-host and live IMAP acceptance remain pending.
 
 ## 0.2.0 beta.2
 

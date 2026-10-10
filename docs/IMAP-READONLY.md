@@ -23,8 +23,10 @@ validation, confinement, no-overwrite, hashing, extraction, deduplication, and
 checkpoint core.
 
 Inline images, attached emails, unnamed parts, unsupported formats, incomplete
-bodies, oversized content, and extraction beyond the bounded review window are
-explicit. They hold the checkpoint rather than being silently treated as read.
+bodies, oversized content, extraction gaps, and unacknowledged review chunks
+are explicit. They hold the checkpoint rather than being silently treated as
+read. Retrieval and extraction never themselves count as semantic review; see
+[the resumable review protocol](CONTENT-REVIEW.md).
 
 ## User-mediated credentials
 
@@ -45,6 +47,13 @@ Choose exactly one runtime source:
    its service name in `gmail_imap_keychain_service`. Leave this value blank
    unless that item was created for LawyeredOS. Setup never creates, probes, or
    imports an existing private service.
+
+An existing generic-password item can be reused only when the user deliberately
+selects it by placing its non-secret service name in
+`gmail_imap_keychain_service`. The normal runtime reads the account and secret
+directly into the local Python process; it does not print either value or pass
+the secret through the model. Setup and validation still do not probe the item.
+Do not select a shared or unrelated service merely because it exists.
 
 The default generated configuration is:
 
@@ -77,9 +86,11 @@ PYTHONPATH=src python3 -m lawyeredos.mail_intake imap \
   --identifier "exact matter identifier" --limit 100
 ```
 
-Run the same exact matter intake again to verify stable-ID and file-hash
-deduplication. A `partial`, `review_truncated`, `needs_ocr`, deferred attachment,
-or incomplete coverage result is a safe stop, not an accepted review.
+Complete the hash-bound `review-next` / `review-ack` loop, then run the same
+exact matter intake again to reconcile the message and verify stable-ID and
+file-hash deduplication. A pending acknowledgement, extraction/OCR/visual gap,
+deferred attachment, or incomplete coverage result is a safe stop, not an
+accepted review.
 
 ## Acceptance status
 
@@ -92,9 +103,11 @@ implementation. Ordinary Claude Desktop and Codex project sessions still need
 separate live-host acceptance.
 
 One user-created, self-addressed Gmail message was also exercised through the
-authorized connector available in the delegated development session. Search,
-full-message read, and attachment-byte retrieval reached the shared core. The
-DOCX exceeded the core's review-character window, so the run correctly ended
-`review_truncated`, did not advance the checkpoint, and did not duplicate the
-saved file on repeat. This is useful partial-path evidence, not complete
-acceptance of this IMAP provider or of an ordinary Claude/Codex host session.
+authorized connector available in the delegated development session. The
+initial fixed-window design stopped on the long DOCX and exposed the need to
+separate extraction from review. After that correction, the same document
+produced three hash-bound paragraph-aware chunks; the active model reviewed and
+acknowledged each chunk plus the body, final reconciliation advanced the
+checkpoint, and the repeat deduplicated. This is delegated connector/core
+evidence, not live acceptance of this IMAP provider or an ordinary Claude/Codex
+host session.

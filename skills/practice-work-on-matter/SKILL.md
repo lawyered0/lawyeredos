@@ -67,6 +67,11 @@ and do not advance its local review checkpoint. There is no background polling.
 - Use document-specific extraction and visual QA for PDFs and DOCX files. Stop
   dependent work when OCR or extraction is unusable. `document_helpers ocr`
   creates a separate copy and a hash-bound report; it never replaces a source.
+- Extraction alone is never a completed mail review. Follow the resumable
+  `review-next` / `review-ack` loop in `references/mail-intake.md`, actually
+  review every returned bounded chunk, and reconcile the same intake again.
+  Never acknowledge unseen content or an unresolved review limitation merely
+  to advance a checkpoint.
 - For a large Markdown brief or decisions log, build a disposable FTS index in
   private scratch and search it with `memory_search`. Treat hits as pointers to
   source passages, not final legal conclusions.
