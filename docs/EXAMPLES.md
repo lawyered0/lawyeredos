@@ -1,5 +1,10 @@
 # Examples
 
+In ordinary use, ask naturally—for example, `Let’s work on Northstar.` The
+installed skill resolves the saved matter and performs the read-only
+orientation workflow automatically. The commands below are technical examples
+for maintainers, testing, and troubleshooting; users do not need to type them.
+
 All names and file numbers below are fictional.
 
 ## Orient to a matter
