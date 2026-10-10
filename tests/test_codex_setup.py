@@ -6,7 +6,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from lawyeredos.codex_setup import apply_plan, build_plan, normalize_answers
+from lawyeredos.codex_setup import (
+    apply_plan,
+    build_plan,
+    dependency_report,
+    normalize_answers,
+)
 from lawyeredos.config import load_config
 from lawyeredos.review_orchestrator import prepare
 from lawyeredos.review_bundle import create_manifest
@@ -17,6 +22,19 @@ class CodexSetupTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.workspace = self.root / "fictional-workspace"
+        def accepted_dependencies(modules):
+            report = dependency_report(modules)
+            for item in report:
+                if item["name"] == "Codex host":
+                    item["available"] = True
+                    item["detail"] = "test fixture"
+            return report
+        self.dependency_patch = patch(
+            "lawyeredos.codex_setup.dependency_report",
+            side_effect=accepted_dependencies,
+        )
+        self.dependency_patch.start()
+        self.addCleanup(self.dependency_patch.stop)
 
     def tearDown(self):
         self.temp.cleanup()

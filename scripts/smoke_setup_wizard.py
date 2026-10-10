@@ -12,6 +12,16 @@ from lawyeredos.config import load_config
 from lawyeredos.setup_wizard import Answers, apply_plan, build_plan, rollback
 
 
+def accepted_test_plan(answers: Answers) -> dict:
+    """Build a plan while treating required host apps as CI test fixtures."""
+    plan = build_plan(answers)
+    for dependency in plan["dependencies"]:
+        if dependency["name"] == "Claude Desktop":
+            dependency["available"] = True
+            dependency["detail"] = "fictional smoke-test fixture"
+    return plan
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="lawyeredos-wizard-smoke-") as temporary:
         workspace = Path(temporary) / "fictional-workspace"
@@ -26,12 +36,12 @@ def main() -> int:
             calendar_id="",
             existing_config="reuse",
         )
-        plan = build_plan(answers)
+        plan = accepted_test_plan(answers)
         if workspace.exists():
             raise RuntimeError("preview unexpectedly changed the workspace")
         first = apply_plan(plan)
         config = load_config(first["config"])
-        second = apply_plan(build_plan(answers))
+        second = apply_plan(accepted_test_plan(answers))
         if not second["idempotent"]:
             raise RuntimeError("repeat application was not idempotent")
         rolled_back = rollback(workspace)
