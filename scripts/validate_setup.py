@@ -70,6 +70,11 @@ def main() -> int:
             "Claude Gmail connector is configured but local validation cannot prove that it is "
             "authorized or available in the active Claude session; a successful bounded read is required"
         )
+    if config.mail_adapter == "codex-session-tools":
+        warnings.append(
+            "Codex session mail tools are configured but local validation cannot prove that a "
+            "supported authorized read/search tool is present; a successful bounded read is required"
+        )
     if config.calendar_adapter == "google-calendar-api" and not os.environ.get(config.calendar_token_env):
         errors.append(f"Calendar token environment variable is not set: {config.calendar_token_env}")
     result = {"ok": not errors, "errors": errors, "warnings": warnings}

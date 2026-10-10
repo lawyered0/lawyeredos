@@ -212,6 +212,11 @@ def main(argv: list[str] | None = None) -> int:
                     "the Claude Gmail connector is available only through an authorized Claude session; "
                     "the local integrations CLI cannot call it"
                 )
+            elif config.mail_adapter == "codex-session-tools":
+                raise ValueError(
+                    "Codex session mail tools are available only when the active session exposes an "
+                    "authorized read/search tool; the local integrations CLI cannot call them"
+                )
             else:
                 raise ValueError("mail is unavailable because setup explicitly skipped a mail connection")
         elif args.command == "calendar-list":

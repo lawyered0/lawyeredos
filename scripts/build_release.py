@@ -10,6 +10,7 @@ ROOT_FILES = {
     ".gitignore",
     "ATTRIBUTION.md",
     "CHANGELOG.md",
+    "CODEX.md",
     "CONTRIBUTING.md",
     "COPYRIGHT",
     "LICENSE",
@@ -30,6 +31,7 @@ ROOT_FILES = {
     "requirements-test.txt",
 }
 ROOT_DIRECTORIES = {
+    ".agents",
     ".claude",
     ".claude-plugin",
     ".github",

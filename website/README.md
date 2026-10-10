@@ -1,8 +1,13 @@
-# LawyeredOS public beta website
+# Historical website snapshot
 
-Static, dependency-free source for `get.lawyered.lawyer`. The versioned public
-download is stored under `downloads/`; the development repository remains
-private.
+This directory is retained as release history. The current public page and
+reviewed host-specific downloads are maintained in
+[`lawyered0/lawyered0.github.io`](https://github.com/lawyered0/lawyered0.github.io)
+and at <https://www.lawyered.lawyer/lawyeredos>.
+
+Do not deploy this snapshot or treat its bundled beta.1 archive as the current
+download. Source contributions belong in `lawyered0/lawyeredos`; publishing a
+source change does not replace a reviewed release ZIP.
 
 ## Local preview
 

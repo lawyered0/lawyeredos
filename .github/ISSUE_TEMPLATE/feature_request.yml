@@ -6,6 +6,17 @@ body:
   - type: markdown
     attributes:
       value: Do not include client data, credentials, private paths, or confidential documents.
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host scope
+      options:
+        - Shared core
+        - Claude integration
+        - Codex integration
+        - Unsure
+    validations:
+      required: true
   - type: textarea
     id: lawyer_task
     attributes:

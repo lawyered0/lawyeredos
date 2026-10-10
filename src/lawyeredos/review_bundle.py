@@ -19,13 +19,20 @@ def bounded_file(path: Path, root: Path | None) -> dict[str, Any]:
     return {"path": str(resolved), "size": resolved.stat().st_size, "sha256": sha256_file(resolved)}
 
 
-def create_manifest(deliverable: Path, sources: list[Path], allowed_root: Path | None) -> dict[str, Any]:
+def create_manifest(
+    deliverable: Path,
+    sources: list[Path],
+    allowed_root: Path | None,
+    host: str = "claude",
+) -> dict[str, Any]:
+    if host not in {"claude", "codex"}:
+        raise ValueError("review host must be claude or codex")
     root = allowed_root.expanduser().resolve() if allowed_root else None
     target = bounded_file(deliverable, root)
     return {
-        "schema": "claude-review-bundle-v1",
+        "schema": f"{host}-review-bundle-v1",
         "created_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
-        "provider_boundary": "Claude only; no external model provider",
+        "provider_boundary": f"{host.title()} only; no external model provider",
         "deliverable": target,
         "sources": [bounded_file(path, root) for path in sources],
         "review_lenses": [
@@ -74,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--deliverable", required=True)
     create.add_argument("--source", action="append", default=[])
     create.add_argument("--allowed-root")
+    create.add_argument("--host", choices=("claude", "codex"), default="claude")
     create.add_argument("--output", required=True)
     verify = sub.add_parser("verify")
     verify.add_argument("--manifest", required=True)
@@ -88,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.deliverable),
                 [Path(item) for item in args.source],
                 Path(args.allowed_root) if args.allowed_root else None,
+                args.host,
             )
             output = Path(args.output).expanduser().resolve()
             if output.exists():

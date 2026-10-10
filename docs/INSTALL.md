@@ -2,21 +2,50 @@
 
 ## Before you start
 
-LawyeredOS targets Claude Code inside the Claude desktop app on macOS. You need:
+LawyeredOS targets Claude Desktop Code Local or a Codex local project on macOS.
+You need:
 
-- the current Claude desktop app for macOS;
+- the current app for the selected host, or the documented optional CLI;
 - Python 3.11 or newer;
 - one private parent folder for the extracted package; and
-- one private workspace containing only the matters you intend Claude Code to
-  access.
+- one private workspace containing only the matters you intend the selected
+  host (Claude or Codex) to access.
 
 LibreOffice and Poppler are recommended for document rendering. OCRmyPDF is
 optional. Setup makes email a required explicit choice: connect through
 Claude's supported Gmail connector, skip email safely, or select the
 experimental local read-only REST adapter. Calendar remains experimental.
 
-Claude Code may transmit selected workspace content to Anthropic under the
-user's account and settings. Do not treat local storage as offline processing.
+The selected host may transmit workspace content to Anthropic or OpenAI under
+the user's account and settings. Do not treat local storage as offline
+processing.
+
+## Codex quick start
+
+Open the extracted Codex package as a local Codex project and paste:
+
+```text
+Set up LawyeredOS for me in a new private workspace. Use fictional data, show me the complete plan, and check with me before changing files.
+```
+
+Codex discovers `.agents/skills/lawyeredos-setup/SKILL.md`. The skill previews
+one exact `scripts/setup_codex.py` argument list and waits for approval before
+repeating it with `--apply --yes`. For the first trial it must use a new empty
+workspace, `--require-new-workspace`, `--existing-config error`, and fictional
+data. It does not change global Codex skills/settings, project
+`.codex/config.toml`, credentials, OAuth state, or connector permissions.
+
+Choose `session-tools` only to permit bounded use of an already-authorized
+read/search tool exposed by the active session; setup cannot install or verify
+one. Choose `skip` to proceed without mail, or `gmail-readonly` only for the
+experimental separately provisioned local REST route. See [CODEX.md](../CODEX.md)
+for the exact terminal preview and accepted host boundary.
+
+The remaining sections describe the released Claude Desktop setup. Shared
+runtime, fictional-first, validation, retention, and professional-review rules
+apply to both hosts.
+
+## Claude Desktop Code Local
 
 ## 1. Extract and retain the package
 

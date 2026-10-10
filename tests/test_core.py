@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from lawyeredos.calendar_plan import plan
@@ -13,7 +15,14 @@ from lawyeredos.matter_context import orient
 from lawyeredos.review_bundle import create_manifest, verify_manifest
 from lawyeredos.safe_output import commit as commit_output
 from lawyeredos.safe_output import preview as preview_output
-from lawyeredos.tracker_cli import commit_mutation, initialize, preview_mutation, read_show, verify
+from lawyeredos.tracker_cli import (
+    commit_mutation,
+    initialize,
+    main as tracker_main,
+    preview_mutation,
+    read_show,
+    verify,
+)
 
 
 def mutation_args(database: Path, command: str, **values):
@@ -66,6 +75,31 @@ class TrackerTests(unittest.TestCase):
         commit_mutation(self.database, "timeline", second, second_preview["confirm_token"])
         with self.assertRaises(ValueError):
             commit_mutation(self.database, "timeline", first, first_preview["confirm_token"])
+
+    def test_conflict_screening_searches_party_fields_and_closed_matters(self):
+        args = mutation_args(
+            self.database,
+            "create",
+            other_parties="Cedar Guarantor Inc.",
+            primary_email="fictional.contact@example.invalid",
+        )
+        preview = preview_mutation(self.database, "create", args)
+        commit_mutation(self.database, "create", args, preview["confirm_token"])
+        close = mutation_args(self.database, "close")
+        preview = preview_mutation(self.database, "close", close)
+        commit_mutation(self.database, "close", close, preview["confirm_token"])
+
+        for query in ("northstar", "harbor paper", "cedar guarantor", "example.invalid"):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = tracker_main([
+                    "find", "--database", str(self.database),
+                    "--query", query, "--status", "all",
+                ])
+            self.assertEqual(result, 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["query"], query)
+            self.assertEqual([row["file_number"] for row in payload["matters"]], ["2030-001"])
 
 
 class WorkflowTests(unittest.TestCase):

@@ -1,18 +1,18 @@
 # Security and privacy reporting
 
+Use GitHub's private vulnerability-reporting form:
+
+<https://github.com/lawyered0/lawyeredos/security/advisories/new>
+
+The repository must not invite public contributions until the **Report a
+vulnerability** control is enabled and verified. If that control is not
+available, do not open a public issue containing security details; wait for the
+private route to be restored.
+
 Do not disclose a vulnerability using real client data, credentials, private
 configuration, personal paths, account identifiers, or confidential documents.
 Use a minimal fictional reproduction and describe sensitive evidence by
-category rather than copying it.
-
-Before publication, there is no public reporting channel. Immediately before
-making the repository public, enable GitHub **Private vulnerability reporting**
-for `lawyered0/lawyeredos`. After publication, security reports should use the
-repository's private advisory form at
-`https://github.com/lawyered0/lawyeredos/security/advisories/new`; ordinary
-sanitized bugs may use GitHub Issues. If private reporting is not enabled and
-verified, publication must stop. No security email address or response SLA is
-offered.
+category rather than copying it. No response-time commitment is made.
 
 If a suspected issue could expose confidential material:
 
@@ -20,9 +20,10 @@ If a suspected issue could expose confidential material:
 2. preserve local evidence privately;
 3. rotate affected credentials through the relevant provider if exposure is
    independently confirmed; and
-4. do not upload the evidence until the repository's private advisory route is
-   available and verified.
+4. submit only a minimal fictional or fully sanitized reproduction through the
+   private advisory route.
 
 LawyeredOS does not store connector token values in its config. Reports about
-Gmail or Calendar should name only the adapter and failure class, never the
-account, calendar identifier, request headers, or token.
+Gmail, Calendar, or session tools should name only the host, adapter, and
+failure class—never the account, calendar identifier, request headers, or
+token.

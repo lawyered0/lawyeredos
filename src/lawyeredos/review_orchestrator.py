@@ -18,17 +18,20 @@ LENSES = {
 SEVERITIES = {"critical", "material", "optional"}
 
 
-def prepare(manifest_path: Path, output: Path, focus: str = "") -> dict[str, Any]:
+def prepare(manifest_path: Path, output: Path, focus: str = "", host: str = "claude") -> dict[str, Any]:
     if output.exists():
         raise ValueError("review task output already exists")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     checks = verify_manifest(manifest_path)
     if not checks["unchanged"]:
         raise ValueError("review sources or deliverable changed before orchestration")
+    if host not in {"claude", "codex"}:
+        raise ValueError("review host must be claude or codex")
+    agent = "lawyeredos-legal-review-lens" if host == "claude" else "independent-codex-reviewer"
     tasks = []
     for lens, instruction in LENSES.items():
         tasks.append({
-            "lens": lens, "agent": "lawyeredos-legal-review-lens",
+            "lens": lens, "agent": agent,
             "read_only": True, "focus": focus, "instruction": instruction,
             "deliverable": manifest["deliverable"], "sources": manifest["sources"],
             "result_schema": {
@@ -39,8 +42,8 @@ def prepare(manifest_path: Path, output: Path, focus: str = "") -> dict[str, Any
             },
         })
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps({"schema": "claude-review-tasks-v1", "manifest": str(manifest_path.resolve()), "tasks": tasks}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {"ok": True, "tasks": str(output), "task_count": len(tasks), "agent": "lawyeredos-legal-review-lens"}
+    output.write_text(json.dumps({"schema": f"{host}-review-tasks-v1", "host": host, "manifest": str(manifest_path.resolve()), "tasks": tasks}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {"ok": True, "tasks": str(output), "task_count": len(tasks), "agent": agent, "host": host}
 
 
 def _validate_result(value: dict[str, Any], lens: str, allowed_sources: set[str]) -> list[dict[str, Any]]:
@@ -88,7 +91,8 @@ def collect(tasks_path: Path, results_dir: Path, output: Path) -> dict[str, Any]
         completed.append(lens)
     findings.sort(key=lambda item: ({"critical": 0, "material": 1, "optional": 2}[item["severity"]], item["title"], item["lens"]))
     report = {
-        "schema": "claude-review-report-v1", "provider_boundary": "Claude only",
+        "schema": f"{task_bundle.get('host', 'claude')}-review-report-v1",
+        "provider_boundary": f"{task_bundle.get('host', 'claude').title()} only",
         "completed_lenses": completed, "coverage_gaps": gaps, "findings": findings,
         "integrity": integrity,
     }
@@ -100,13 +104,13 @@ def collect(tasks_path: Path, results_dir: Path, output: Path) -> dict[str, Any]
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Prepare and validate deterministic Claude-only review jobs")
+    parser = argparse.ArgumentParser(description="Prepare and validate deterministic host-scoped review jobs")
     sub = parser.add_subparsers(dest="command", required=True)
-    prep = sub.add_parser("prepare"); prep.add_argument("--manifest", required=True); prep.add_argument("--output", required=True); prep.add_argument("--focus", default="")
+    prep = sub.add_parser("prepare"); prep.add_argument("--manifest", required=True); prep.add_argument("--output", required=True); prep.add_argument("--focus", default=""); prep.add_argument("--host", choices=("claude", "codex"), default="claude")
     done = sub.add_parser("collect"); done.add_argument("--tasks", required=True); done.add_argument("--results-dir", required=True); done.add_argument("--output", required=True)
     args = parser.parse_args(argv)
     try:
-        result = prepare(Path(args.manifest), Path(args.output), args.focus) if args.command == "prepare" else collect(Path(args.tasks), Path(args.results_dir), Path(args.output))
+        result = prepare(Path(args.manifest), Path(args.output), args.focus, args.host) if args.command == "prepare" else collect(Path(args.tasks), Path(args.results_dir), Path(args.output))
         emit(result); return 0 if result["ok"] else 3
     except (ValueError, OSError, KeyError, json.JSONDecodeError) as exc:
         emit({"ok": False, "error": str(exc)}); return 2

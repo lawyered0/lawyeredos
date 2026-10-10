@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lawyeredos"
 version = "0.2.0"
-description = "Local-first support toolkit for the Claude Code LawyeredOS plugin"
+description = "Local-first shared workflow core for LawyeredOS on Claude and Codex"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE", "vendor/legal-redline-tools/LICENSE"]

@@ -75,7 +75,7 @@ def load_config(path: str | Path) -> PracticeConfig:
         raise ValueError("matter and tracker modules are required")
     external_ai = review.get("external_ai", False)
     if external_ai is not False:
-        raise ValueError("this Claude-only package requires review.external_ai = false")
+        raise ValueError("the bundled review workflow requires review.external_ai = false")
     adapters = {
         "mail_adapter": str(integrations.get("mail_adapter", "unavailable")),
         "calendar_adapter": str(integrations.get("calendar_adapter", "unavailable")),
@@ -83,7 +83,8 @@ def load_config(path: str | Path) -> PracticeConfig:
     }
     allowed = {
         "mail_adapter": {
-            "unavailable", "fixture-json", "claude-gmail-connector", "gmail-api-readonly",
+            "unavailable", "fixture-json", "claude-gmail-connector", "codex-session-tools",
+            "gmail-api-readonly",
         },
         "calendar_adapter": {"unavailable", "google-calendar-api"},
         "practice_manager_adapter": {"unavailable"},
