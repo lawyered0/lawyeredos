@@ -21,6 +21,7 @@ from .common import canonical_json, confined_path, emit, sha256_bytes, sha256_fi
 from .config import PracticeConfig, load_config
 from .document_helpers import extract_pdf
 from .integrations import gmail_from_config
+from .imap_mail import gmail_imap_from_config
 from .matter_context import orient
 
 
@@ -159,6 +160,7 @@ def _source_for_adapter(adapter: str) -> str | None:
         "unavailable": None,
         "fixture-json": "fixture",
         "gmail-api-readonly": "gmail-rest",
+        "gmail-imap-readonly": "gmail-imap",
         "claude-gmail-connector": "claude-session-tool",
         "codex-session-tools": "codex-session-tool",
     }[adapter]
@@ -184,6 +186,7 @@ def plan(config_path: Path, identifier: str) -> dict[str, Any]:
         "unavailable": "unavailable",
         "fixture-json": "fixture",
         "gmail-api-readonly": "gmail-rest",
+        "gmail-imap-readonly": "gmail-imap",
         "claude-gmail-connector": "claude-session-tool",
         "codex-session-tools": "codex-session-tool",
     }
@@ -635,14 +638,14 @@ def _managed_session_bundle(path: Path, config: PracticeConfig) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan and process bounded matter email intake")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("plan", "process", "rest"):
+    for name in ("plan", "process", "rest", "imap"):
         item = sub.add_parser(name)
         item.add_argument("--config", required=True)
         item.add_argument("--identifier", required=True)
         if name == "process":
             item.add_argument("--bundle", required=True)
             item.add_argument("--delete-bundle", action="store_true")
-        if name == "rest":
+        if name in {"rest", "imap"}:
             item.add_argument("--limit", type=int, default=100)
     args = parser.parse_args(argv)
     try:
@@ -666,11 +669,16 @@ def main(argv: list[str] | None = None) -> int:
             planned = plan(Path(args.config), args.identifier)
             if not planned.get("ok"):
                 result = planned
-            elif planned["adapter"] != "gmail-api-readonly":
-                raise ValueError("rest requires the gmail-api-readonly adapter")
             else:
                 config = load_config(Path(args.config))
-                bundle = gmail_from_config(config).intake(planned["query"], args.limit)
+                if args.command == "rest":
+                    if planned["adapter"] != "gmail-api-readonly":
+                        raise ValueError("rest requires the gmail-api-readonly adapter")
+                    bundle = gmail_from_config(config).intake(planned["query"], args.limit)
+                else:
+                    if planned["adapter"] != "gmail-imap-readonly":
+                        raise ValueError("imap requires the gmail-imap-readonly adapter")
+                    bundle = gmail_imap_from_config(config).intake(planned["query"], args.limit)
                 result = process_bundle(Path(args.config), args.identifier, bundle)
         emit(result)
         return 0 if result.get("ok") else 2

@@ -122,6 +122,12 @@ conservative rollback. See [examples](docs/EXAMPLES.md) and the
 between host skills, deterministic Python commands, and authoritative SQLite
 state.
 
+For complete Gmail bodies and attachment bytes independent of host connector
+limitations, the candidate includes an experimental portable read-only IMAP
+route based on localized All Mail discovery, stable Gmail IDs, and
+`BODY.PEEK`. Credential creation remains entirely user-mediated; see
+[Portable Gmail IMAP intake](docs/IMAP-READONLY.md).
+
 ## Tested host boundaries
 
 | Host | Accepted scope |
@@ -130,12 +136,14 @@ state.
 | Codex local project, macOS | Codex beta.1 with Python 3.12.7 and Codex CLI 0.147.0; project-local skills, fictional tracker persistence, and bounded review orchestration were verified. Desktop functional persistence evidence is user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
 
 Windows, Linux, other Python or host versions, and cloud execution are not
-accepted targets. Live Gmail was not tested for either host. Claude's documented
-Gmail connector reads messages but directly exposes attachment metadata rather
-than attachment contents. Codex defines MCP/plugin tool discovery but not a
-built-in Gmail tool contract. Either host uses an already-authorized runtime
-read tool only when one is actually available; setup cannot install or authorize
-it. The local Gmail adapter, Calendar, OCR,
+accepted targets. A bounded connector-to-core read of one user-created Gmail
+self-test ended safely as `review_truncated`; it is not complete ordinary-host
+or portable-IMAP acceptance. Claude's documented Gmail connector reads messages
+but directly exposes attachment metadata rather than attachment contents. Codex
+defines MCP/plugin tool discovery but not a built-in Gmail tool contract. Either
+host uses an already-authorized runtime read tool only when one is actually
+available; setup cannot install or authorize it. The local Gmail adapters,
+Calendar, OCR,
 and other optional capabilities remain experimental or unverified as described
 in the package.
 

@@ -21,6 +21,9 @@ class PracticeConfig:
     calendar_id: str
     mail_fixture: Path | None
     gmail_token_env: str
+    gmail_imap_account_env: str
+    gmail_imap_secret_env: str
+    gmail_imap_keychain_service: str
     calendar_token_env: str
     calendar_api_base: str
     external_ai: bool
@@ -85,6 +88,7 @@ def load_config(path: str | Path) -> PracticeConfig:
         "mail_adapter": {
             "unavailable", "fixture-json", "claude-gmail-connector", "codex-session-tools",
             "gmail-api-readonly",
+            "gmail-imap-readonly",
         },
         "calendar_adapter": {"unavailable", "google-calendar-api"},
         "practice_manager_adapter": {"unavailable"},
@@ -110,6 +114,13 @@ def load_config(path: str | Path) -> PracticeConfig:
         calendar_id=str(calendar.get("calendar_id", "")),
         mail_fixture=mail_fixture,
         gmail_token_env=str(credentials.get("gmail_token_env", "LAWYEREDOS_GMAIL_TOKEN")),
+        gmail_imap_account_env=str(
+            credentials.get("gmail_imap_account_env", "LAWYEREDOS_GMAIL_IMAP_ACCOUNT")
+        ),
+        gmail_imap_secret_env=str(
+            credentials.get("gmail_imap_secret_env", "LAWYEREDOS_GMAIL_IMAP_SECRET")
+        ),
+        gmail_imap_keychain_service=str(credentials.get("gmail_imap_keychain_service", "")).strip(),
         calendar_token_env=str(credentials.get("calendar_token_env", "LAWYEREDOS_CALENDAR_TOKEN")),
         calendar_api_base=str(calendar.get("api_base", "https://www.googleapis.com/calendar/v3")),
         external_ai=False,

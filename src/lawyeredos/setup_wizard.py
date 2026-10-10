@@ -219,10 +219,11 @@ def validate_answers(answers: Answers, source: Path) -> None:
         raise ValueError("matter and tracker are required core modules")
     if answers.mail_adapter not in {
         "unavailable", "claude-gmail-connector", "codex-session-tools", "gmail-api-readonly",
+        "gmail-imap-readonly",
     }:
         raise ValueError(
             "mail adapter must be unavailable, claude-gmail-connector, codex-session-tools, "
-            "or gmail-api-readonly"
+            "gmail-api-readonly, or gmail-imap-readonly"
         )
     if answers.calendar_adapter not in {"unavailable", "google-calendar-api"}:
         raise ValueError("calendar adapter must be unavailable or google-calendar-api")
@@ -276,9 +277,12 @@ def render_config(answers: Answers, plugin_target: Path) -> str:
         f"calendar_adapter = {_toml_string(answers.calendar_adapter)}",
         'practice_manager_adapter = "unavailable"',
         "# Host session connectors/tools are user-authorized; setup cannot verify session access.",
-        "# gmail-api-readonly and the live Calendar adapter are experimental and not live-account accepted.",
+        "# Local Gmail adapters and the live Calendar adapter are experimental and not live-account accepted.",
         "", "[credentials]",
         'gmail_token_env = "LAWYEREDOS_GMAIL_TOKEN"',
+        'gmail_imap_account_env = "LAWYEREDOS_GMAIL_IMAP_ACCOUNT"',
+        'gmail_imap_secret_env = "LAWYEREDOS_GMAIL_IMAP_SECRET"',
+        'gmail_imap_keychain_service = ""',
         'calendar_token_env = "LAWYEREDOS_CALENDAR_TOKEN"',
         "", "[calendar]",
         f"calendar_id = {_toml_string(answers.calendar_id)}",
@@ -434,6 +438,8 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
                 if effective.mail_adapter == "codex-session-tools"
                 else "Gmail was explicitly skipped; email-dependent workflows will disclose that email was not checked."
                 if effective.mail_adapter == "unavailable"
+                else "Experimental portable Gmail IMAP adapter selected: it requires user-provisioned credentials through the named environment variables or an explicitly configured macOS Keychain service."
+                if effective.mail_adapter == "gmail-imap-readonly"
                 else "Experimental Gmail REST adapter selected: it requires a separately provisioned gmail.readonly token in the named environment variable."
             ),
             "LawyeredOS never treats mail access as authority to send, reply, forward, label, archive, or delete.",
@@ -961,7 +967,11 @@ def interactive_answers(args: argparse.Namespace) -> Answers:
         print("  skip           Continue safely without email; workflows will say email was not checked.")
         print("  gmail-readonly Experimental local REST adapter using a separately provisioned gmail.readonly token.")
         print("                 It has only fake-transport acceptance and no live-account acceptance.")
-        mail = _ask_required_choice("Mail choice", ("claude-gmail", "skip", "gmail-readonly"))
+        print("  gmail-imap     Experimental read-only IMAP adapter using user-set account/app-password environment variables.")
+        print("                 Setup never reads Keychain, creates credentials, or stores a password.")
+        mail = _ask_required_choice(
+            "Mail choice", ("claude-gmail", "skip", "gmail-readonly", "gmail-imap")
+        )
     calendar = args.calendar or _ask("Calendar integration (off/google-calendar experimental)", "off")
     calendar_id = args.calendar_id or ""
     if calendar == "google-calendar" and not calendar_id:
@@ -983,6 +993,7 @@ def normalize_answers(workspace: Path, branding_mode: str, branding_label: str, 
             "skip": "unavailable",
             "claude-gmail": "claude-gmail-connector",
             "gmail-readonly": "gmail-api-readonly",
+            "gmail-imap": "gmail-imap-readonly",
         }.get(mail, mail),
         calendar_adapter={"off": "unavailable", "google-calendar": "google-calendar-api"}.get(calendar, calendar),
         calendar_id=calendar_id.strip(), existing_config=existing.strip().lower(),
@@ -997,7 +1008,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--jurisdiction", choices=("none", "ontario"))
     parser.add_argument("--modules")
     parser.add_argument(
-        "--mail", choices=("claude-gmail", "skip", "gmail-readonly", "off"),
+        "--mail", choices=("claude-gmail", "skip", "gmail-readonly", "gmail-imap", "off"),
         help="required explicit mail choice; 'off' is retained only for older scripted invocations",
     )
     parser.add_argument("--calendar", choices=("off", "google-calendar"))

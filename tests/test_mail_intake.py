@@ -4,14 +4,18 @@ import base64
 import io
 import json
 import sqlite3
+import subprocess
 import tempfile
 import unittest
 import zipfile
 from contextlib import redirect_stdout
+from email.message import EmailMessage
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from lawyeredos.integrations import GmailReadonlyAdapter
+from lawyeredos.imap_mail import GmailImapReadonlyAdapter, credentials_from_config
 from lawyeredos.mail_intake import main, plan, process_bundle
 from lawyeredos.tracker_cli import initialize
 
@@ -332,6 +336,36 @@ external_ai = false
         self.assertEqual(result["route"], "unavailable")
         self.assertFalse((self.workspace / ".lawyeredos" / "data" / "mail-intake.sqlite3").exists())
 
+    def test_imap_provider_bundle_processes_and_deduplicates_end_to_end(self):
+        self.write_config("gmail-imap-readonly")
+        client = FakeImapClient({101: (int("1a2b3c", 16), int("4d5e6f", 16), imap_message())})
+        adapter = GmailImapReadonlyAdapter(
+            "fictional@example.invalid", "app-password-fixture", lambda _host: client
+        )
+        planned = plan(self.config, "2032-001")
+        first = process_bundle(
+            self.config, "2032-001", adapter.intake(planned["query"], 5)
+        )
+        self.assertEqual(first["status"], "complete")
+        self.assertEqual(first["messages"][0]["status"], "reviewed")
+        self.assertEqual(first["messages"][0]["attachments"][0]["status"], "reviewed")
+        self.assertEqual(len(list((self.matter / "email-attachments").iterdir())), 1)
+
+        repeated_client = FakeImapClient(
+            {101: (int("1a2b3c", 16), int("4d5e6f", 16), imap_message())}
+        )
+        repeated_adapter = GmailImapReadonlyAdapter(
+            "fictional@example.invalid", "app-password-fixture", lambda _host: repeated_client
+        )
+        repeated = process_bundle(
+            self.config, "Northstar",
+            repeated_adapter.intake(plan(self.config, "Northstar")["query"], 5),
+        )
+        self.assertEqual(
+            repeated["messages"], [{"message_id": "1a2b3c", "status": "already_reviewed"}]
+        )
+        self.assertEqual(len(list((self.matter / "email-attachments").iterdir())), 1)
+
 
 class GmailIntakeTransportTests(unittest.TestCase):
     def test_full_message_and_attachment_use_read_only_fake_transport(self):
@@ -423,6 +457,195 @@ class GmailIntakeTransportTests(unittest.TestCase):
         self.assertTrue(message["attachments"][0]["inline"])
         self.assertIn("bounded", message["attachments"][0]["retrieval_error"])
         self.assertFalse(any("/attachments/image-1" in url for url in calls))
+
+
+class FakeImapClient:
+    def __init__(self, messages: dict[int, tuple[int, int, bytes]]):
+        self.messages = messages
+        self.calls = []
+        self.selected = None
+
+    def login(self, account, password):
+        self.calls.append(("LOGIN", account, bool(password)))
+        return "OK", [b"authenticated"]
+
+    def list(self):
+        self.calls.append(("LIST",))
+        return "OK", [
+            b'(\\HasNoChildren) "/" "INBOX"',
+            b'(\\HasNoChildren \\All) "/" "[Gmail]/Todo el correo"',
+        ]
+
+    def select(self, mailbox, readonly=False):
+        self.calls.append(("SELECT", mailbox, readonly))
+        self.selected = (mailbox, readonly)
+        return "OK", [str(len(self.messages)).encode()]
+
+    def uid(self, command, *args):
+        self.calls.append(("UID", command, *args))
+        if command == "SEARCH":
+            return "OK", [" ".join(str(uid) for uid in self.messages).encode()]
+        if command != "FETCH":
+            return "BAD", []
+        uid = int(args[0])
+        gm_message_id, gm_thread_id, raw = self.messages[uid]
+        query = args[1]
+        if "HEADER.FIELDS" in query:
+            header = raw.split(b"\n\n", 1)[0] + b"\n\n"
+            attributes = (
+                f'{uid} (UID {uid} X-GM-MSGID {gm_message_id} '
+                f'X-GM-THRID {gm_thread_id} INTERNALDATE "01-Feb-2032 12:00:00 +0000" '
+                f'RFC822.SIZE {len(raw)} BODY[HEADER.FIELDS] {{{len(header)}}}'
+            ).encode()
+            return "OK", [(attributes, header), b")"]
+        if "BODY.PEEK[]" in query:
+            return "OK", [(f"{uid} (UID {uid} BODY[] {{{len(raw)}}}".encode(), raw), b")"]
+        return "BAD", []
+
+    def logout(self):
+        self.calls.append(("LOGOUT",))
+        return "BYE", [b"closed"]
+
+
+def imap_message(*, include_complex=False) -> bytes:
+    message = EmailMessage()
+    message["From"] = "Fictional Client <client@example.invalid>"
+    message["To"] = "Fictional Lawyer <lawyer@example.invalid>"
+    message["Subject"] = "Fictional supply dispute"
+    message.set_content("Northstar Bakery complete fictional IMAP message body.")
+    message.add_attachment(
+        b"Northstar fictional attachment.\n",
+        maintype="text", subtype="plain", filename="evidence.txt",
+    )
+    if include_complex:
+        message.add_attachment(
+            b"%PDF-1.4\nfictional unnamed\n",
+            maintype="application", subtype="pdf",
+        )
+        message.add_attachment(
+            b"\x89PNG fictional inline",
+            maintype="image", subtype="png", filename="inline.png",
+            disposition="inline", cid="<inline-fixture>",
+        )
+        nested = EmailMessage()
+        nested["From"] = "witness@example.invalid"
+        nested["To"] = "client@example.invalid"
+        nested["Subject"] = "Fictional nested message"
+        nested.set_content("Nested fictional evidence.")
+        message.add_attachment(nested)
+    return message.as_bytes()
+
+
+class GmailImapTransportTests(unittest.TestCase):
+    def adapter(self, raw: bytes):
+        client = FakeImapClient({101: (int("1a2b3c", 16), int("4d5e6f", 16), raw)})
+        adapter = GmailImapReadonlyAdapter(
+            "fictional@example.invalid", "app-password-fixture", lambda _host: client
+        )
+        self.assertNotIn("app-password-fixture", repr(adapter))
+        return adapter, client
+
+    def test_localized_read_only_body_peek_and_supported_attachment(self):
+        adapter, client = self.adapter(imap_message())
+        result = adapter.intake(
+            '{"2032-001"} newer_than:30d -in:spam -in:trash', 5
+        )
+        self.assertEqual(result["source"], "gmail-imap")
+        self.assertTrue(result["coverage"]["complete"])
+        self.assertTrue(result["coverage"]["localized_all_mail_discovered"])
+        self.assertEqual(result["messages"][0]["id"], "1a2b3c")
+        self.assertEqual(result["messages"][0]["thread_id"], "4d5e6f")
+        self.assertIn("complete fictional IMAP", result["messages"][0]["body"])
+        attachment = result["messages"][0]["attachments"][0]
+        self.assertEqual(attachment["filename"], "evidence.txt")
+        self.assertEqual(base64.b64decode(attachment["content_base64"]), b"Northstar fictional attachment.\n")
+        self.assertEqual(client.selected, ("[Gmail]/Todo el correo", True))
+        calls = repr(client.calls)
+        self.assertIn("X-GM-RAW", calls)
+        self.assertIn("BODY.PEEK[]", calls)
+        self.assertNotIn("STORE", calls)
+        self.assertEqual(
+            {call[0] for call in client.calls},
+            {"LOGIN", "LIST", "SELECT", "UID", "LOGOUT"},
+        )
+        self.assertTrue(
+            all(call[1] in {"SEARCH", "FETCH"} for call in client.calls if call[0] == "UID")
+        )
+
+    def test_nested_unnamed_and_inline_parts_are_explicit(self):
+        adapter, _client = self.adapter(imap_message(include_complex=True))
+        result = adapter.intake(
+            '{"2032-001"} newer_than:30d -in:spam -in:trash', 5
+        )
+        attachments = result["messages"][0]["attachments"]
+        self.assertNotIn("Nested fictional evidence", result["messages"][0]["body"])
+        names = [item["filename"] for item in attachments]
+        self.assertIn("attachment-2.pdf", names)
+        self.assertIn("inline.png", names)
+        self.assertTrue(next(item for item in attachments if item["filename"] == "inline.png")["inline"])
+        self.assertTrue(any(name.endswith(".eml") for name in names))
+        self.assertTrue(all(item.get("content_base64") for item in attachments))
+
+    def test_oversized_raw_message_is_not_downloaded(self):
+        adapter, client = self.adapter(imap_message())
+        with patch("lawyeredos.imap_mail.MAX_RAW_MESSAGE_BYTES", 10):
+            result = adapter.intake(
+                '{"2032-001"} newer_than:30d -in:spam -in:trash', 5
+            )
+        message = result["messages"][0]
+        self.assertFalse(message["body_complete"])
+        self.assertIn("bounded", message["attachments"][0]["retrieval_error"])
+        self.assertFalse(any("BODY.PEEK[]" in repr(call) for call in client.calls))
+
+    def test_unbounded_query_and_missing_localized_all_mail_fail_closed(self):
+        adapter, client = self.adapter(imap_message())
+        with self.assertRaisesRegex(ValueError, "bounded matter query"):
+            adapter.intake("subject:anything", 5)
+        client.list = lambda: ("OK", [b'(\\HasNoChildren) "/" "INBOX"'])
+        with self.assertRaisesRegex(ValueError, "localized"):
+            adapter.intake('{"2032-001"} newer_than:30d -in:spam -in:trash', 5)
+
+    def test_credentials_are_user_selected_and_no_sidecar_is_read(self):
+        config = SimpleNamespace(
+            gmail_imap_account_env="FICTIONAL_IMAP_ACCOUNT",
+            gmail_imap_secret_env="FICTIONAL_IMAP_SECRET",
+            gmail_imap_keychain_service="",
+        )
+        with patch.dict(
+            "os.environ",
+            {"FICTIONAL_IMAP_ACCOUNT": "fictional@example.invalid", "FICTIONAL_IMAP_SECRET": "test-secret"},
+            clear=True,
+        ), patch("lawyeredos.imap_mail.subprocess.run") as keychain:
+            self.assertEqual(
+                credentials_from_config(config),
+                ("fictional@example.invalid", "test-secret"),
+            )
+        keychain.assert_not_called()
+
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "environment variables"):
+                credentials_from_config(config)
+
+        config.gmail_imap_keychain_service = "lawyeredos-fictional-test"
+        responses = [
+            subprocess.CompletedProcess([], 0, '    "acct"<blob>="fictional@example.invalid"\n', ""),
+            subprocess.CompletedProcess([], 0, "test-secret\n", ""),
+        ]
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "lawyeredos.imap_mail.subprocess.run", side_effect=responses
+        ) as keychain:
+            self.assertEqual(
+                credentials_from_config(config),
+                ("fictional@example.invalid", "test-secret"),
+            )
+        self.assertEqual(keychain.call_count, 2)
+        self.assertNotIn(".gmail-imap-credentials", repr(keychain.call_args_list))
+
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "lawyeredos.imap_mail.subprocess.run", side_effect=FileNotFoundError("security")
+        ):
+            with self.assertRaisesRegex(ValueError, "configured macOS Keychain service"):
+                credentials_from_config(config)
 
 
 if __name__ == "__main__":

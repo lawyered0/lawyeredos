@@ -22,6 +22,11 @@ matter. Never broaden the query to unrelated mail.
 - `gmail-rest`: run the same module with `rest` and the identifier. This uses
   only the separately configured `gmail.readonly` token and makes no mailbox
   changes.
+- `gmail-imap`: run the same module with `imap` and the identifier. This uses
+  only a user-configured account/app-password source, localized All Mail
+  discovery, the exact bounded query, stable Gmail IDs, and `BODY.PEEK`. It
+  supplies complete bodies and attachment bytes to the same core without a
+  host connector. Never ask for or expose the credential.
 - `claude-session-tool`: use Claude's Gmail read/search tool only when it is
   actually present and authorized in the active session. Its documented
   connector exposes attachment metadata, not attachment contents, so a message

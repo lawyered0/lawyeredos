@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from .common import emit, preview_token
 from .config import PracticeConfig, load_config
+from .imap_mail import gmail_imap_from_config
 
 
 Transport = Callable[[str, str, dict[str, str], bytes | None], tuple[int, bytes]]
@@ -392,6 +393,21 @@ def main(argv: list[str] | None = None) -> int:
                 result = fixture_mail(config.mail_fixture, args.query, args.limit)
             elif config.mail_adapter == "gmail-api-readonly":
                 result = gmail_from_config(config).search(args.query, args.limit)
+            elif config.mail_adapter == "gmail-imap-readonly":
+                bundle = gmail_imap_from_config(config).intake(args.query, args.limit)
+                result = {
+                    "ok": True,
+                    "read_only": True,
+                    "query": bundle["query"],
+                    "messages": [
+                        {
+                            key: message.get(key)
+                            for key in ("id", "thread_id", "received_at", "from", "to", "subject", "snippet")
+                        }
+                        for message in bundle["messages"]
+                    ],
+                    "coverage": bundle["coverage"],
+                }
             elif config.mail_adapter == "claude-gmail-connector":
                 raise ValueError(
                     "the Claude Gmail connector is available only through an authorized Claude session; "

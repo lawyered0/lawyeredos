@@ -20,7 +20,7 @@ package; it does not mean a live account or real matter was used.
 | Tracker writer, schema, audit history | `tracker_cli.py` | Preserved for the neutral SQLite schema; tested |
 | Matter folder resolver | Tracker mapping plus `matter_context.py` | Preserved for one configured root; tested |
 | Brief index and decision search | `memory_search.py` FTS index/search | Preserved generically for Markdown sources; tested |
-| Mail delta/cache, message extraction, attachment fetch | `mail_intake.py`, `integrations.py` | Stable-ID review ledger and complete bounded-window query; fully retrieved bodies and attachment bytes through configured REST or capable session tools; long, ambiguous, or partial retrieval never advances the complete checkpoint |
+| Mail delta/cache, message extraction, attachment fetch | `mail_intake.py`, `integrations.py`, `imap_mail.py` | Stable-ID review ledger and complete bounded-window query; fully retrieved bodies and attachment bytes through configured REST, portable read-only IMAP, or capable session tools; long, ambiguous, or partial retrieval never advances the complete checkpoint |
 | PDF extraction and OCR | `document_helpers.py` | Text extraction and optional OCR with hash-bound report; tested without live OCR execution |
 | Safe output writer | `safe_output.py` | Preserved with token-bound no-overwrite behavior; tested |
 | Matter-memory writer | `memory_search.py` | Compare-and-swap write preserved; tested |

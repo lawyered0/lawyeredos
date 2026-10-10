@@ -14,7 +14,7 @@
 | Contract redlines | Optional | Vendored engine plus `python-docx`, `lxml`, `fpdf2` |
 | PDF text extraction | Optional | Poppler `pdftotext` |
 | OCR copy | Optional | OCRmyPDF and its platform dependencies |
-| Gmail context | Optional, explicit choice | Claude Gmail connector authorized by the user in Claude (configured state is locally unverifiable), or experimental Gmail REST token in an explicitly named environment variable with `gmail.readonly` |
+| Gmail context | Optional, explicit choice | Claude Gmail connector authorized by the user in Claude; experimental Gmail REST token with `gmail.readonly`; or portable read-only Gmail IMAP with a user-created app-password source, localized All Mail discovery, and `BODY.PEEK` |
 | Calendar reads/writes | Optional | Google Calendar REST token, dedicated calendar ID, explicit mutation approval |
 | Memory/decision search | Optional | SQLite FTS5 in the Python runtime |
 | Voice lint | Optional | Python standard library; optional JSON rules |

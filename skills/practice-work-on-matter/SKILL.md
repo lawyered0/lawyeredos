@@ -58,6 +58,12 @@ and do not advance its local review checkpoint. There is no background polling.
   `lawyeredos.mail_intake rest`. It retrieves only the matter-scoped result set,
   message bodies, and supported attachment bytes needed by this workflow. This
   route is experimental and has only fake-transport acceptance.
+- When `gmail-imap-readonly` is configured, use the exact planned query through
+  `lawyeredos.mail_intake imap`. This host-neutral route retrieves full bodies
+  and attachment bytes with localized All Mail discovery, read-only selection,
+  stable Gmail IDs, and `BODY.PEEK`. Never request, display, persist, or infer a
+  credential; setup and credential creation remain user-mediated. This route is
+  experimental and has comprehensive fake-IMAP but no live-host acceptance.
 - Use document-specific extraction and visual QA for PDFs and DOCX files. Stop
   dependent work when OCR or extraction is unusable. `document_helpers ocr`
   creates a separate copy and a hash-bound report; it never replaces a source.

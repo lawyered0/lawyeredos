@@ -108,7 +108,10 @@ or treated as a contradiction of, the user-created Desktop task.
 
 ## Unaccepted capabilities
 
-- Live Gmail and other live connectors were not tested.
+- A later candidate exercised one bounded, user-created Gmail self-test through
+  the connector exposed in a delegated development session. It reached the
+  shared core but correctly stopped `review_truncated`; ordinary-host live mail
+  and the portable IMAP provider remain unaccepted.
 - Codex session tools are available only when an active, user-authorized tool
   is present; setup alone does not prove availability.
 - OCR creation was unavailable because OCRmyPDF was not installed.

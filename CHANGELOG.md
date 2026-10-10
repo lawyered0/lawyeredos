@@ -28,7 +28,7 @@ their own reviewed version and checksum boundaries.
 - Added a shared bounded matter-mail intake core for Claude and Codex routes:
   exact matter-derived queries, complete-body and attachment retrieval,
   stable-ID deduplication, bounded-window checkpoints, and explicit partial-coverage
-  reporting. No live mailbox acceptance is claimed.
+  reporting. No complete live mailbox acceptance is claimed.
 - Added conservative attachment handling for PDF, DOCX, XLSX, TXT, Markdown,
   and CSV: size, MIME, signature, archive, hash, path-confinement, and
   no-overwrite checks precede local filing and evidence extraction.
@@ -36,6 +36,12 @@ their own reviewed version and checksum boundaries.
   attachment retrieval and covered it using a fake GET-only transport. Session
   tool routes require an actually available authorized tool and remain partial
   when bodies, bytes, or bounded-search coverage are missing.
+- Added an experimental portable read-only Gmail IMAP provider with localized
+  All Mail discovery, stable Gmail IDs, `BODY.PEEK`, bounded MIME acquisition,
+  user-selected environment/Keychain credential sources, and comprehensive
+  fake-transport coverage. One delegated-session Gmail self-test reached the
+  shared core but stopped safely as `review_truncated`; ordinary-host and live
+  IMAP acceptance remain pending.
 
 ## 0.2.0 beta.2
 

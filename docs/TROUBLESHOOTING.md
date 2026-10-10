@@ -109,6 +109,14 @@ the value never belongs in TOML. Missing credentials fail closed. Calendar is
 also experimental. Never substitute a different account, primary calendar, or
 connector.
 
+`gmail-imap-readonly` is the experimental portable full-body and attachment
+route. It requires either both named environment variables or an explicitly
+configured user-created macOS Keychain service. Setup never creates or probes
+that credential, and no sidecar credential file is supported. Confirm IMAP/app
+password availability under the account's Google or Workspace policy, then
+follow [IMAP-READONLY.md](IMAP-READONLY.md). Do not paste the secret into chat,
+TOML, command arguments, or an issue.
+
 For Codex, `codex-session-tools` means setup may inspect the active session for
 a supported authorized read/search tool. It does not prove one exists. If the
 tool is absent or unauthorized, report that email was not checked; do not start

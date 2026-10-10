@@ -74,6 +74,20 @@ or send. A result cap or next-page token makes coverage incomplete.
 For offline demonstrations, `fixture-json` searches a fictional JSON message
 list. It never contacts a service.
 
+### Portable read-only IMAP adapter
+
+`gmail-imap-readonly` supplies the attachment-byte path that a metadata-only
+host connector cannot provide. It uses Gmail's localized IMAP All Mail folder,
+the exact bounded `X-GM-RAW` matter query, stable Gmail IDs, and `BODY.PEEK` in a
+read-only mailbox. It contains no send or mailbox-mutation operation.
+
+Credentials remain user-mediated. The generated configuration names two
+environment variables and leaves the optional macOS Keychain service blank.
+Setup never creates an app password, reads an existing Keychain secret, or
+writes a credential value or sidecar file. See [Portable Gmail IMAP
+intake](IMAP-READONLY.md) for prerequisites, limits, and the exact live-test
+boundary.
+
 ## Google Calendar
 
 `google-calendar-api` requires an exact dedicated calendar ID; `primary` is
@@ -96,6 +110,9 @@ practice_manager_adapter = "unavailable"
 
 [credentials]
 gmail_token_env = "LAWYEREDOS_GMAIL_TOKEN"
+gmail_imap_account_env = "LAWYEREDOS_GMAIL_IMAP_ACCOUNT"
+gmail_imap_secret_env = "LAWYEREDOS_GMAIL_IMAP_SECRET"
+gmail_imap_keychain_service = ""
 calendar_token_env = "LAWYEREDOS_CALENDAR_TOKEN"
 
 [calendar]
@@ -108,6 +125,10 @@ token in the named environment variable. Never place token values in TOML. If
 an adapter or its credential is missing,
 the workflow stops with an unavailable result rather than falling back to a
 different account, calendar, or provider.
+
+For the portable full-body and attachment route, use
+`mail_adapter = "gmail-imap-readonly"`, complete the user-mediated setup in
+[IMAP-READONLY.md](IMAP-READONLY.md), and run `lawyeredos.mail_intake imap`.
 
 Codex setup may instead write `mail_adapter = "codex-session-tools"`; that
 mode uses no token from this config and remains unavailable unless the active

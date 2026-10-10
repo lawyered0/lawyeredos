@@ -65,6 +65,21 @@ def main() -> int:
         errors.append("fixture-json mail adapter requires an existing integrations.mail_fixture")
     if config.mail_adapter == "gmail-api-readonly" and not os.environ.get(config.gmail_token_env):
         errors.append(f"Gmail token environment variable is not set: {config.gmail_token_env}")
+    if config.mail_adapter == "gmail-imap-readonly":
+        account_set = bool(os.environ.get(config.gmail_imap_account_env))
+        secret_set = bool(os.environ.get(config.gmail_imap_secret_env))
+        if account_set != secret_set:
+            errors.append("Gmail IMAP environment credentials are incomplete; set both named variables")
+        elif not account_set and not config.gmail_imap_keychain_service:
+            errors.append(
+                "Gmail IMAP requires both named environment variables or an explicitly configured "
+                "user-created macOS Keychain service"
+            )
+        elif config.gmail_imap_keychain_service and not account_set:
+            warnings.append(
+                "Gmail IMAP Keychain service is configured but validation does not read its secret; "
+                "a bounded live read is required"
+            )
     if config.mail_adapter == "claude-gmail-connector":
         warnings.append(
             "Claude Gmail connector is configured but local validation cannot prove that it is "

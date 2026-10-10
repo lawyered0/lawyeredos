@@ -109,6 +109,7 @@ def normalize_answers(
             "session-tools": "codex-session-tools",
             "skip": "unavailable",
             "gmail-readonly": "gmail-api-readonly",
+            "gmail-imap": "gmail-imap-readonly",
         }.get(mail, mail),
         calendar_adapter={"off": "unavailable", "google-calendar": "google-calendar-api"}.get(calendar, calendar),
         calendar_id=calendar_id.strip(),
@@ -319,7 +320,9 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
             if effective.mail_adapter == "codex-session-tools" else
             "Email was explicitly skipped; email-dependent workflows will disclose that email was not checked."
             if effective.mail_adapter == "unavailable" else
-            "The experimental local Gmail REST adapter requires a separately provisioned gmail.readonly token.",
+            "The experimental portable Gmail IMAP adapter requires user-provisioned credentials through the named environment variables or an explicitly configured macOS Keychain service; setup never retrieves or stores them."
+            if effective.mail_adapter == "gmail-imap-readonly" else
+            "The experimental local Gmail REST adapter requires a separately provisioned gmail.readonly token in the named environment variable; setup never retrieves or stores it.",
         ],
     }
 
@@ -468,7 +471,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--branding-label", default="Organization")
     parser.add_argument("--jurisdiction", choices=("none", "ontario"), default="none")
     parser.add_argument("--modules", default=",".join(MODULES))
-    parser.add_argument("--mail", choices=("session-tools", "skip", "gmail-readonly"), required=True)
+    parser.add_argument(
+        "--mail", choices=("session-tools", "skip", "gmail-readonly", "gmail-imap"),
+        required=True,
+    )
     parser.add_argument("--calendar", choices=("off", "google-calendar"), default="off")
     parser.add_argument("--calendar-id", default="")
     parser.add_argument("--existing-config", choices=("reuse", "error"), default="error")

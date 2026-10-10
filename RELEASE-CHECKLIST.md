@@ -72,10 +72,13 @@ tests that remain before public distribution.
 - [ ] Exercise OCR on a disposable document with OCRmyPDF and its platform
   dependencies installed. OCR remains optional and unavailable on the tested
   host.
-- [ ] Exercise the configured Claude Gmail connector, the local Gmail read-only
-  adapter, and dedicated-calendar operations against purpose-created test
-  accounts. Current local-adapter tests use injected fake transports; setup
-  cannot verify a Claude connector; no real-mail or live-calendar claim is made.
+- [ ] Complete ordinary-host acceptance for the configured Claude Gmail
+  connector, Codex session-mail route, portable IMAP provider, REST provider,
+  and dedicated-calendar operations against purpose-created test accounts.
+  The bounded delegated-session Gmail self-test reached the shared core but
+  stopped safely as `review_truncated`; the local providers otherwise use
+  injected fake transports. No complete live-mail or live-calendar claim is
+  made.
 - [ ] Validate migration against a read-only copy or export of the owner's real
   tracker, reconcile every row and history count, and keep rollback material.
   Fictional SQLite/CSV/JSON/XLSX paths are verified; private tracker

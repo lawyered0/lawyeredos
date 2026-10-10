@@ -31,6 +31,7 @@ workspace's `.claude/` directory.
 Setup must not change global Claude settings, collect credentials, silently
 disable email, authorize integrations for the user, or use real client data for
 the first trial. It prominently asks the user to connect Gmail in Claude, skip
-email safely, or choose the experimental local `gmail.readonly` route. Terminal
-commands in `docs/INSTALL.md` are inspection and fallback instructions, not the
-primary route.
+email safely, choose the experimental local `gmail.readonly` REST route, or
+choose the portable read-only IMAP route after separately arranging a
+user-controlled credential source. Terminal commands in `docs/INSTALL.md` are
+inspection and fallback instructions, not the primary route.

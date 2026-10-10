@@ -13,8 +13,9 @@ You need:
 
 LibreOffice and Poppler are recommended for document rendering. OCRmyPDF is
 optional. Setup makes email a required explicit choice: connect through
-Claude's supported Gmail connector, skip email safely, or select the
-experimental local read-only REST adapter. Calendar remains experimental.
+Claude's supported Gmail connector, skip email safely, select the experimental
+local read-only REST adapter, or select the portable read-only IMAP adapter.
+Calendar remains experimental.
 
 The selected host may transmit workspace content to Anthropic or OpenAI under
 the user's account and settings. Do not treat local storage as offline
@@ -37,9 +38,11 @@ data. It does not change global Codex skills/settings, project
 
 Choose `session-tools` only to permit bounded use of an already-authorized
 read/search tool exposed by the active session; setup cannot install or verify
-one. Choose `skip` to proceed without mail, or `gmail-readonly` only for the
-experimental separately provisioned local REST route. See [CODEX.md](../CODEX.md)
-for the exact terminal preview and accepted host boundary.
+one. Choose `skip` to proceed without mail, `gmail-readonly` only for the
+experimental separately provisioned local REST route, or `gmail-imap` for the
+portable read-only IMAP route after completing its separate user-mediated
+credential setup. See [CODEX.md](../CODEX.md) and
+[Portable Gmail IMAP intake](IMAP-READONLY.md) for the exact boundaries.
 
 The remaining sections describe the released Claude Desktop setup. Shared
 runtime, fictional-first, validation, retention, and professional-review rules

@@ -2,7 +2,7 @@
 
 This record covers the unreleased shared matter-mail intake candidate. It does
 not amend the acceptance scope of the published Claude beta.2 or Codex beta.1
-archives and is not a live-mail acceptance.
+archives and is not a complete live-mail acceptance.
 
 ## Host-tool boundary
 
@@ -14,8 +14,8 @@ archives and is not a live-mail acceptance.
   tool.
 - Both routes feed the same versioned normalized bundle only when a runtime
   tool actually returns complete bodies, complete bounded coverage, stable
-  identifiers, and required attachment bytes. No live-account acceptance is
-  claimed.
+  identifiers, and required attachment bytes. No complete live-account
+  acceptance is claimed.
 
 Official references: [Claude Google Workspace connectors](https://support.claude.com/en/articles/10166901-use-google-workspace-connectors),
 [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), and
@@ -53,7 +53,7 @@ remains partial and does not advance the complete checkpoint.
 
 The reviewed source passed:
 
-- 93 LawyeredOS unit, distribution, setup, confinement, and workflow tests;
+- 101 LawyeredOS unit, distribution, setup, confinement, and workflow tests;
 - scripted positive acceptance for both normalized host routes, with complete
   fictional bodies and every supported attachment category;
 - 97 vendored legal-redline tests;
@@ -67,6 +67,15 @@ The reviewed source passed:
   fictional tracker and matter brief, ran the bounded mail plan, disclosed the
   unavailable adapter, and correctly described the permitted local writes.
 
+A separate, bounded read of one user-created, self-addressed Gmail test thread
+used the authorized connector exposed only in the delegated development
+session. Search, full-message read, and DOCX attachment-byte retrieval reached
+the shared core. The document exceeded the core review-character window, so
+the result correctly remained `review_truncated`, the checkpoint did not
+advance, and the repeat created no duplicate file. No message content or
+attachment bytes were retained in the repository. This is a partial-path test,
+not ordinary-host or portable-IMAP acceptance.
+
 Two independent reviews challenged the candidate for security, privacy,
 accuracy, host-boundary wording, and visual claims. Their findings drove
 fail-closed handling for long content, inline and filename-less parts,
@@ -76,9 +85,11 @@ destination-directory replacement races.
 
 ## Explicit exclusions
 
-- No real mailbox, real matter, credential, OAuth flow, send/draft action,
-  mailbox mutation, or persistent permission change was used.
-- No live Claude connector or Codex session-mail tool acceptance was performed.
+- No real matter, new credential, OAuth flow, send/draft action, mailbox
+  mutation, or persistent permission change was used. The only live mailbox
+  input was the bounded, user-created self-test described above.
+- No ordinary Claude or Codex host session completed live-mail acceptance; the
+  delegated connector self-test remained partial as described above.
 - No background polling is implemented.
 - OCR completion remains unavailable on the tested host.
 - Other operating systems and host versions remain unaccepted.
