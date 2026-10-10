@@ -1,54 +1,56 @@
 # Host support
 
-This package uses Claude Code skills, one read-only agent, local Python
-commands, local SQLite, and local document tools.
+LawyeredOS keeps host discovery and instructions separate while reusing one
+deterministic Python, SQLite, document, redline, and guarded-workflow core.
+The required tested target for the released Claude package is Claude Desktop Code
+Local on macOS; the Codex package has the separate accepted scope below.
 
-| Host | Status |
+| Host | Accepted scope |
 |---|---|
-| Claude Desktop 2.31226.0 Code tab, Local environment, on macOS | Required tested target; configured Python 3.12.7, validator, read-only tracker checks, and fresh-session project discovery are verified |
-| Terminal Claude Code | Optional fallback using the same project-local discovery layer; not a substitute release target |
-| Any other Claude surface | Outside this release's acceptance target; no compatibility claim |
+| Claude Desktop 2.31226.0, Code tab, Local environment, macOS | Claude beta.2 with Python 3.12.7; configured runtime, validator, read-only tracker checks, fresh-session project skill discovery, and the documented fictional workflow were verified. |
+| Codex local project on macOS | Codex beta.1 with Python 3.12.7 and Codex CLI 0.147.0; project-local skill discovery, guarded fictional tracker update, fresh-session persistence, and four-agent review collection were verified. A user-created Desktop task reported the expected read-only persisted state; the evidence boundary is recorded in [CODEX-ACCEPTANCE.md](CODEX-ACCEPTANCE.md). |
+| Terminal Claude Code | Optional fallback using Claude's project-local discovery layer; not a substitute release target. |
+| Other surfaces, operating systems, or versions | Not accepted. No compatibility claim. |
 
-## Platform and capability matrix
+## Capability matrix
 
-| Area | Status | Release treatment |
+| Area | Status | Boundary |
 |---|---|---|
-| macOS Local Code session with Python 3.12 | Core runtime, validator, read-only tracker checks, fresh-session skill/agent discovery, and one bounded current-name source-fidelity agent invocation verified without file changes | Initial Desktop target; complete four-lens orchestration remains experimental |
-| macOS with Python 3.11 or 3.13+ | Declared range or plausible compatibility, not accepted | No release claim beyond `>=3.11` package metadata |
-| Windows or Linux | Not tested | Unsupported for the first release |
-| Local matter register/orientation | Core | Required and fail-closed |
-| DOCX letters/redlines | Optional selected modules | Require Python document packages; visual verification additionally requires LibreOffice and Poppler |
-| Claude Gmail connector | Configurable, not locally verifiable | User authenticates directly in Claude; only a successful bounded read proves connection for that request; no real-mail acceptance claim |
-| Local Gmail read-only / dedicated Calendar REST adapters | Experimental | Explicit opt-in; fake-transport tests only |
-| OCR | Experimental optional | Unverified on the test host |
-| Practice manager | Unavailable | No adapter bundled |
+| Local matter register and orientation | Core | SQLite is authoritative; reads and writes fail closed on missing or ambiguous state. |
+| DOCX letters and redlines | Optional selected modules | Require the pinned Python document packages. Visual verification additionally requires LibreOffice and Poppler. |
+| Claude Gmail connector | Configurable, not live-account accepted | The user authorizes it in Claude. Only a successful bounded read proves availability for that request. LawyeredOS does not send or mutate mail. |
+| Codex session mail tools | Configurable, not assumed available | Setup cannot install or authorize a connector. The workflow uses a supported, already-authorized read/search tool only when the active session exposes one. |
+| Local Gmail read-only and dedicated Calendar REST adapters | Experimental | Explicit opt-in; fake-transport tests only. Token values stay in named environment variables. |
+| OCR | Experimental optional | OCRmyPDF was unavailable on the acceptance host. |
+| Multi-lens review | Host-dependent | Codex four-agent collection was exercised on fictional files. Claude's complete four-lens orchestration remains experimental. If independent agents are unavailable, report the panel unavailable. |
+| Practice manager | Unavailable | No adapter is bundled. |
 
 ## Runtime gate
 
-Before any real matter work, confirm all of the following in the launched
-Desktop Code workspace:
+Before any real matter work, confirm all of the following:
 
-1. `LAWYEREDOS_ROOT` resolves to the versioned private package copy.
-2. `LAWYEREDOS_CONFIG` resolves to a private configuration file.
-3. The configured tracker and matter workspace are visible.
-4. `LAWYEREDOS_PYTHON` is executable and reports Python 3.11 or newer.
-5. Optional DOCX/PDF commands and Python packages pass `validate_setup.py`.
-6. The fictional demo completes without a live connector.
-7. The `lawyeredos-legal-review-lens` agent is available before claiming a
-   full four-lens adversarial review.
-8. Only `lawyeredos-*` project skills are credited as current-package behavior;
+1. `.lawyeredos/config.toml` resolves to the intended workspace, tracker, and
+   current versioned core.
+2. The configured Python is executable and reports Python 3.11 or newer;
+   Python 3.12 is the accepted runtime.
+3. `scripts/validate_setup.py` reports no required-capability error.
+4. The fictional demo completes without a live connector.
+5. Only the current workspace's `lawyeredos-*` project skills are credited;
    similarly named personal or synced skills are not.
+6. Optional render, OCR, mail, calendar, and independent-agent capabilities
+   are claimed only after their own checks succeed.
 
-If any gate fails, the affected workflow is unavailable. Do not substitute a
-different host, connector, or model provider.
+If a gate fails, the affected workflow is unavailable. Do not substitute a
+different host, connector, account, model provider, or matter.
 
-The renamed RC13 build was validated with `claude plugin validate --strict`,
-ZIP-only Python tests, and a genuine Local Desktop session. The configured
-runtime, validator, tracker verification/listing, and unchanged workspace hashes
-passed. A fresh Local session registered the three selected `lawyeredos-*`
-project skills and `lawyeredos-legal-review-lens` agent. Similarly named personal
-skills were present and were not credited. The agent has not yet been invoked
-under its renamed identity. An attempted exact-build Desktop launch also
-established that `claude --desktop --plugin-dir ...` is rejected by CLI 2.1.288;
-the wizard therefore uses project `.claude/` discovery and opens the workspace
-folder directly in the app without requiring a separate terminal CLI login.
+## Host-specific discovery
+
+Claude setup installs project skills under `.claude/skills`, the optional
+review agent under `.claude/agents`, and private runtime paths in
+`.claude/settings.local.json`. The Desktop launcher opens the workspace folder
+directly; `claude --desktop --plugin-dir ...` is not a supported substitute.
+
+Codex setup installs only installer-managed project skills under
+`.agents/skills` and runtime files under `.lawyeredos`. It does not change
+`~/.codex`, `~/.agents`, project `.codex/config.toml`, credentials, OAuth state,
+or connector permissions.

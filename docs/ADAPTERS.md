@@ -6,6 +6,18 @@ Credentials are never written to logs, plans, fixtures, or reports.
 
 ## Gmail
 
+### Codex session tools
+
+`codex-session-tools` records permission to inspect the active Codex session
+for a supported, already-authorized mail read/search tool. It does not install
+an app, start OAuth, request credentials, broaden permissions, or prove a tool
+is connected. Only a successful bounded read establishes availability for that
+request. If no supported tool exists, the workflow reports that email was not
+checked and continues only with independent work.
+
+The workflow must not substitute a browser session, a different connector, or
+a send-capable action. No live Codex mail-tool acceptance is claimed.
+
 ### Claude Gmail connector
 
 `claude-gmail-connector` records that the user chose Claude's supported Gmail
@@ -72,6 +84,10 @@ token in the named environment variable. Never place token values in TOML. If
 an adapter or its credential is missing,
 the workflow stops with an unavailable result rather than falling back to a
 different account, calendar, or provider.
+
+Codex setup may instead write `mail_adapter = "codex-session-tools"`; that
+mode uses no token from this config and remains unavailable unless the active
+session exposes a supported authorized read tool.
 
 ## Commands
 

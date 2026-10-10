@@ -1,1 +1,5 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/lawyered0/lawyeredos/security/advisories/new
+    about: Use GitHub's private vulnerability-reporting form; never disclose security details or confidential data in a public issue.

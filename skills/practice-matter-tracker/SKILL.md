@@ -21,9 +21,12 @@ PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredo
   --file-number "<exact file number>"
 ```
 
-Use names only to locate candidates. Mutate by exact file number. A conflict
-search reports its terms, fields, coverage, and limitations; it is not a legal
-conflict clearance.
+Use names only to locate candidates. For conflict screening, search with
+`--status all` and report that the case-insensitive substring search covers
+file number, client, description, opposing party, other parties, and primary
+email in this local register. It does not do fuzzy or alias matching, query
+external sources, maintain a clearance-status field, or make the lawyer's
+final conflict decision. Mutate by exact file number.
 
 ## Link the first existing matter folder
 

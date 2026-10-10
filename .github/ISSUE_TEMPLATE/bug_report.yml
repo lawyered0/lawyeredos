@@ -15,6 +15,18 @@ body:
     validations:
       required: true
   - type: dropdown
+    id: host
+    attributes:
+      label: Host scope
+      description: Select the surface where the defect occurs.
+      options:
+        - Shared core
+        - Claude Desktop Code Local
+        - Codex local project
+        - Unsure
+    validations:
+      required: true
+  - type: dropdown
     id: area
     attributes:
       label: Area
@@ -47,7 +59,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: macOS, Python, Claude Code, and relevant optional-tool versions only.
+      description: macOS, Python, Claude or Codex version, and relevant optional-tool versions only. Do not include usernames, hostnames, or paths.
     validations:
       required: true
   - type: checkboxes

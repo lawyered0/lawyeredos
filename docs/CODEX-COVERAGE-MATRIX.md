@@ -1,7 +1,9 @@
-# Codex candidate coverage matrix
+# Codex beta.1 coverage matrix
 
-This matrix is the private pre-release gate. `Pass` identifies actual evidence;
-`Pending` is not accepted; and `Excluded` records an intentional boundary.
+This matrix records the private gate completed before Codex 0.2.0 beta.1 was
+published. `Pass` identifies actual evidence; `Pending` is not accepted; and
+`Excluded` records an intentional boundary. Publication rows describe that
+historical checkpoint, not the current visibility of the source repository.
 
 | Area | Layer | Status | Evidence |
 | --- | --- | --- | --- |

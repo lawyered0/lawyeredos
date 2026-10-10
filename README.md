@@ -1,37 +1,57 @@
 # LawyeredOS
 
-**Claude with the right legal-work skills—not another legal SaaS dashboard.**
+**Legal-work skills for Claude or Codex—not another legal SaaS dashboard.**
 
-LawyeredOS is a free, open-source macOS beta for Claude Desktop Code. It works
-with the matter files you choose, records matter history and state in your
-workspace, and helps identify and execute the next step under lawyer oversight.
-It includes guarded workflows for matter orientation and tracking, letters,
+LawyeredOS is a free, open-source macOS beta for Claude Desktop Code and
+Codex local projects. Both hosts use the same Python, SQLite, document,
+redline, and guarded-workflow core. Host-specific setup and discovery files
+stay separate under `.claude/` and `.agents/`.
+
+It works with the matter files you choose, records matter history and state in
+your workspace, and helps identify and execute the next step under lawyer
+oversight. Included workflows cover matter orientation and tracking, letters,
 decided contract redlines, calendar planning, and independent draft review.
 
 ![Fictional LawyeredOS matter flow](docs/images/website-matter-flow.png)
 
-## Try the macOS beta
+## Download a reviewed beta
 
-Download **[LawyeredOS 0.2.0 beta.2](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.2.zip)**.
-Before extracting a downloaded copy, compare its SHA-256 with the checksum
-published alongside the download on the public LawyeredOS site or repository.
+| Host | Download | SHA-256 |
+|---|---|---|
+| Claude Desktop Code Local | [0.2.0 beta.2](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.2.zip) | `0f3eccf6e62e0bcb7ffbb88a6c14dd2f96c8a05acba73b93bb4bff3173af7cd5` |
+| Codex local project | [0.2.0 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-codex-beta.1.zip) | `b468300f81bfdcc88398964a2808f6484c5cd2fb56b44d48e6721ab2d7d6e366` |
 
-1. Extract the ZIP into a private folder you will retain.
-2. Open the extracted `lawyeredos` folder in the Claude desktop app's
-   **Code** tab and choose **Local**.
-3. Paste:
+The versioned release ZIPs remain on the
+[LawyeredOS download site](https://www.lawyered.lawyer/lawyeredos). This source
+repository is the place for review and contributions; building the current
+tree does not replace either published archive. The source branch may be newer
+than those ZIPs; the version and checksum shown above remain the release
+boundary.
+
+## Safe first trial
+
+Extract the package for your host into a private folder you will retain. For
+Claude Desktop, open its folder in the **Code** tab and choose **Local**. For
+Codex, open its folder as a local Codex project. Then paste:
+
+```text
+Set up LawyeredOS for me in a new private workspace. Use fictional data, show me the complete plan, and check with me before changing files.
+```
+
+The released Claude beta also supports its original equivalent prompt:
 
 ```text
 Set up LawyeredOS for me. Follow the setup instructions in this folder, ask me what you need, and check with me before changing existing files.
 ```
 
-Claude gathers your choices, shows the exact setup plan, and asks before the
-bundled deterministic installer writes anything. For a first trial, use a new,
-empty workspace and fictional data. You do not need a terminal or slash command
-for the normal setup flow.
+The setup skill gathers your choices, shows the exact plan, and waits for
+approval before the deterministic installer writes anything. Start with a new,
+empty workspace and fictional data. Claude setup is documented in
+[SETUP.md](SETUP.md); Codex setup and its tested boundaries are in
+[CODEX.md](CODEX.md).
 
-Full instructions: [installation](docs/INSTALL.md) ·
-[setup](docs/SETUP.md) · [host support](docs/HOST-SUPPORT.md) ·
+Additional guidance: [installation](docs/INSTALL.md) ·
+[host support](docs/HOST-SUPPORT.md) ·
 [troubleshooting](docs/TROUBLESHOOTING.md)
 
 ## Pick up a matter where you left it
@@ -44,9 +64,30 @@ request is:
 > current position, what is uncertain, and one recommended next step. Do not
 > change any files.
 
-From there, ask separately for a draft, a decided redline, or a proposed tracker
-update. Material changes are previewed for approval. You remain responsible for
-checking the sources, exercising professional judgment, and deciding what to do.
+From there, ask separately for a draft, a decided redline, or a proposed
+tracker update. Material changes are previewed for approval. You remain
+responsible for checking the sources, exercising professional judgment, and
+deciding what to do.
+
+## Screen the local register for potential conflicts
+
+The matter-tracker skill supports a read-only, case-insensitive name or term
+search across every open and closed matter in the local register. It checks the
+file number, client, description, opposing party, other parties, and primary
+email fields and returns candidate rows for lawyer review. For example:
+
+```bash
+PYTHONPATH=src python3 -m lawyeredos.tracker_cli find \
+  --database /workspace/.lawyeredos/data/matters.sqlite3 \
+  --query "Harbor Paper" --status all
+```
+
+This is conflict **screening**, not final conflict clearance. The register has
+no dedicated clearance-status field and the search does not perform fuzzy or
+alias matching, identify undisclosed relationships, query external systems, or
+decide whether a conflict exists or can be waived. Record the terms, fields,
+register scope, results, and limitations, then apply the lawyer's own conflicts
+procedure and professional judgment.
 
 ## Included skills
 
@@ -57,67 +98,76 @@ checking the sources, exercising professional judgment, and deciding what to do.
 - `lawyeredos-calendar-sync`: preview dedicated-calendar changes; live sync is
   experimental and off by default.
 - `lawyeredos-adversarial-panel`: experimental multi-lens draft review.
-- `/lawyeredos-setup`: guide installation through the deterministic installer.
+- `lawyeredos-setup`: guide installation through the deterministic installer.
 
-The local toolkit also provides an SQLite matter register, collision-safe saved
+The toolkit also provides an SQLite matter register, collision-safe saved
 outputs, PDF extraction, optional OCR and local search, versioned upgrades, and
 conservative rollback. See [examples](docs/EXAMPLES.md) and the
-[lifecycle guide](docs/LIFECYCLE.md).
+[lifecycle guide](docs/LIFECYCLE.md). The
+[architecture and safety model](docs/ARCHITECTURE.md) explains the division
+between host skills, deterministic Python commands, and authoritative SQLite
+state.
 
-## Current platform and limits
+## Tested host boundaries
 
-This beta requires **macOS**, a **Local** session in Claude Desktop Code, and
-Python 3.11 or newer. Python 3.12 is the fully tested runtime. The separate
-terminal launcher is an optional fallback documented in
-[installation](docs/INSTALL.md).
+| Host | Accepted scope |
+|---|---|
+| Claude Desktop Code, Local environment, macOS | Claude beta.2 with Python 3.12; project-local discovery and the documented fictional workflow were verified. |
+| Codex local project, macOS | Codex beta.1 with Python 3.12.7 and Codex CLI 0.147.0; project-local skills, fictional tracker persistence, and bounded review orchestration were verified. Desktop functional persistence evidence is user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
 
-Windows and other operating systems are not currently supported. Setup asks
-whether to configure Claude's Gmail connector, skip email, or use the
-experimental local read-only adapter; it never silently turns email off.
-LawyeredOS does not auto-send email. Google Calendar, OCR, and the complete
-multi-lens review remain experimental or optional; the practice-manager adapter
-is not implemented. See
-[host support](docs/HOST-SUPPORT.md), [dependencies](docs/DEPENDENCIES.md), and
-[the roadmap](ROADMAP.md).
+Windows, Linux, other Python or host versions, and cloud execution are not
+accepted targets. Live Gmail was not tested for either host. Codex uses a
+supported, already-authorized session read tool only when one is available;
+setup cannot install or authorize it. The local Gmail adapter, Calendar, OCR,
+and other optional capabilities remain experimental or unverified as described
+in the package.
 
 ## Confidentiality and professional responsibility
 
 Matter files and recorded state stay in the workspace you choose, but this is
-**not offline inference**. Claude Code may send selected content to Anthropic
-under your account, plan, settings, and applicable terms. Review those controls
-and your professional obligations before using client data.
+**not offline inference**. Selected content may be processed by Anthropic or
+OpenAI under your account, plan, settings, and applicable terms. Review those
+controls and your professional obligations before using client data.
 
 LawyeredOS is software, not legal advice or an autonomous lawyer. It never
 treats reading a file as permission to send, sign, file, serve, or change an
-external account. Claude can make material errors. Independently verify facts,
-authorities, deadlines, calculations, document changes, and final work before
-relying or acting. See the full [safety and use notice](USE-NOTICE.md),
+external account. Independently verify facts, authorities, deadlines,
+calculations, document changes, and final work before relying or acting. See
+the [safety and use notice](USE-NOTICE.md),
 [security policy](SECURITY.md), and [support guidance](SUPPORT.md).
 
-LawyeredOS is an independent project and is not affiliated with, sponsored by,
-or endorsed by Anthropic. Claude access and any Anthropic plan or API usage are
-separate costs governed by Anthropic's terms.
+LawyeredOS is independent and is not affiliated with, sponsored by, or
+endorsed by Anthropic or OpenAI. Access to Claude or Codex and any provider
+charges are separate and governed by the applicable provider's terms.
 
-## Development
+## Contributing
+
+Contributions are welcome for the shared core and for the separately scoped
+Claude and Codex integrations. Use only fictional or fully sanitized examples;
+never submit authentic client data, credentials, private paths, confidential
+documents, or unredacted logs.
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m pytest vendor/legal-redline-tools/tests -q
-.venv/bin/python scripts/smoke_setup_wizard.py
-claude plugin validate --strict .
+python3 -m pip install -r requirements-lock.txt -r requirements-test.txt
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+python3 -m pytest vendor/legal-redline-tools/tests -q
+python3 scripts/smoke_setup_wizard.py
+release_dir="$(mktemp -d)"
+python3 scripts/build_release.py --output "$release_dir/lawyeredos-source.zip"
+python3 scripts/privacy_audit.py "$release_dir/lawyeredos-source.zip"
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), and the
-[release checklist](RELEASE-CHECKLIST.md). Automated tests use fictional files
-and injected connector transports; they do not replace professional review.
+Claude plugin validation and host-specific fictional acceptance remain manual
+release gates. See [CONTRIBUTING.md](CONTRIBUTING.md),
+[CHANGELOG.md](CHANGELOG.md), and the
+[release checklist](RELEASE-CHECKLIST.md).
 
 ## License
 
 Original LawyeredOS material is `GPL-3.0-or-later`; see [LICENSE](LICENSE) and
-[LICENSE-DECISION.md](LICENSE-DECISION.md). The bundled `legal-redline-tools`
-derivative retains its MIT license and attribution. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), [ATTRIBUTION.md](ATTRIBUTION.md),
-and [PROVENANCE.md](PROVENANCE.md).
+[LICENSE-DECISION.md](LICENSE-DECISION.md). The bundled
+`legal-redline-tools` derivative retains its MIT license and attribution. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
+[ATTRIBUTION.md](ATTRIBUTION.md), and [PROVENANCE.md](PROVENANCE.md).
 
-LawyeredOS is the package name, not the name of the Claude assistant or a
-separate assistant persona.
+LawyeredOS is the package name, not an assistant persona.

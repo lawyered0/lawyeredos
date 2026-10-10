@@ -1,16 +1,21 @@
-# LawyeredOS Codex candidate
+# LawyeredOS for Codex
 
-This private candidate reuses the released LawyeredOS Python, SQLite, document,
+The Codex beta reuses the LawyeredOS Python, SQLite, document,
 redline, and guarded workflow core. Its Codex integration is separate from the
 Claude integration: Codex discovers selected project skills under
 `.agents/skills`, while the Claude beta continues to use `.claude/`.
 
+Reviewed release: [Codex 0.2.0 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-codex-beta.1.zip),
+SHA-256
+`b468300f81bfdcc88398964a2808f6484c5cd2fb56b44d48e6721ab2d7d6e366`.
+The source branch may be newer; rebuilding it does not replace that archive.
+
 ## Safe fictional trial
 
-Open this extracted candidate folder as a local Codex project and ask:
+Open the extracted Codex package as a local Codex project and ask:
 
 ```text
-Set up this LawyeredOS Codex candidate in a new disposable workspace. Use only fictional data, show me the exact JSON plan, and wait for approval before applying it.
+Set up LawyeredOS for me in a new private workspace. Use fictional data, show me the complete plan, and check with me before changing files.
 ```
 
 The `lawyeredos-setup` bootstrap skill must use `scripts/setup_codex.py`. For a
@@ -33,7 +38,7 @@ remain experimental or unverified as described in the existing documentation.
 
 ## Verified host boundary
 
-The candidate's core and project-skill discovery target the tested macOS
+The Codex beta's core and project-skill discovery target the tested macOS
 environment with Python 3.12.7 and Codex CLI 0.147.0. In a user-created fresh
 Codex desktop task, the installed fictional matter workflow returned the exact
 saved action, date, revision, unverified date, and unavailable-email boundary.
@@ -48,7 +53,7 @@ the active host. Repository skills cannot technically reduce a delegated
 reviewer's tool set, so the four-lens workflow remains hash-verified and must
 report itself unavailable when independent delegation is absent.
 
-The private acceptance record, including the distinction between Codex CLI
+The acceptance record, including the distinction between Codex CLI
 and Codex desktop coverage, is in [`docs/CODEX-ACCEPTANCE.md`](docs/CODEX-ACCEPTANCE.md).
 The release-gate matrix is in
 [`docs/CODEX-COVERAGE-MATRIX.md`](docs/CODEX-COVERAGE-MATRIX.md).

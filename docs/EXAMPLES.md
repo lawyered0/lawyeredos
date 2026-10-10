@@ -20,6 +20,20 @@ PYTHONPATH=src python3 -m lawyeredos.tracker_cli create \
 
 Repeat the command with `--confirm-token TOKEN` returned by the preview.
 
+## Screen the local register for potential conflicts
+
+```bash
+PYTHONPATH=src python3 -m lawyeredos.tracker_cli find \
+  --database /workspace/matters.sqlite3 \
+  --query "Harbor Paper" --status all
+```
+
+The case-insensitive substring search covers file number, client, description,
+opposing party, other parties, and primary email in both open and closed local
+matters. Report the query, fields, register scope, results, and limitations. It
+does not perform fuzzy or alias matching, query outside systems, populate a
+clearance-status field, or make the lawyer's final conflict decision.
+
 ## Preview a safe output save
 
 ```bash

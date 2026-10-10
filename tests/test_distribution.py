@@ -106,7 +106,7 @@ class DistributionTests(unittest.TestCase):
     def test_host_support_is_explicit(self):
         host_support = (ROOT / "docs" / "HOST-SUPPORT.md").read_text(encoding="utf-8")
         self.assertIn("Claude Desktop 2.31226.0", host_support)
-        self.assertIn("Required tested target", host_support)
+        self.assertIn("required tested target", host_support)
         self.assertIn("Desktop Code", host_support)
         self.assertIn("`claude --desktop --plugin-dir ...`", host_support)
         self.assertNotIn("Cowork", host_support)
@@ -294,6 +294,37 @@ class DistributionTests(unittest.TestCase):
         )
         self.assertIn(prompt, (ROOT / "SETUP.md").read_text(encoding="utf-8"))
         self.assertIn(prompt, (ROOT / "README.md").read_text(encoding="utf-8"))
+
+    def test_public_contribution_surfaces_are_dual_host_and_least_privilege(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Claude Desktop Code Local", readme)
+        self.assertIn("Codex local project", readme)
+        self.assertIn("0f3eccf6e62e0bcb7ffbb88a6c14dd2f96c8a05acba73b93bb4bff3173af7cd5", readme)
+        self.assertIn("b468300f81bfdcc88398964a2808f6484c5cd2fb56b44d48e6721ab2d7d6e366", readme)
+
+        pull_request = (ROOT / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
+        self.assertIn("no authentic client data", pull_request)
+        self.assertIn("published ZIP", pull_request)
+
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("contents: read", workflow)
+        self.assertIn("github.event.repository.private == false", workflow)
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertNotIn("pull_request_target", workflow)
+        self.assertNotIn("secrets.", workflow)
+
+        security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+        self.assertIn("/security/advisories/new", security)
+        self.assertIn("Report a vulnerability", " ".join(security.split()))
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Screen the local register for potential conflicts", readme)
+        self.assertIn("no dedicated clearance-status field", readme)
+        tracker_skill = (
+            ROOT / "skills" / "practice-matter-tracker" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--status all", tracker_skill)
+        self.assertIn("final conflict decision", tracker_skill)
 
 
 if __name__ == "__main__":

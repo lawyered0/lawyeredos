@@ -1,7 +1,9 @@
 # Codex candidate acceptance record
 
-This record applies to the private Codex candidate only. It is not a public
-release claim and does not change the released Claude package or download.
+This is the pre-publication acceptance record for the code packaged as Codex
+0.2.0 beta.1. References below to a private candidate or no public publication
+describe the gate at the time the evidence was collected. They do not change
+the released Claude package or either published download.
 
 ## Accepted host and artifact
 

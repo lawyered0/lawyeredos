@@ -24,6 +24,18 @@ current renamed package loaded. A crowded personal skill catalog can shorten
 skill descriptions. Personal skills with the same name override project skills,
 which is why this package uses collision-safe `lawyeredos-*` names.
 
+## The skill is missing in Codex
+
+Open a new Codex session at the exact installed workspace root. Confirm the
+expected links exist under `.agents/skills/lawyeredos-*` and are recorded in
+`.lawyeredos/codex-project-discovery.json`. Do not copy a personal skill into
+the project or change `~/.codex`, `~/.agents`, or `.codex/config.toml`.
+
+Rerun `scripts/setup_codex.py` as a preview with the same workspace and
+`--existing-config reuse`. An unmanaged collision, modified launcher, symlinked
+managed directory, missing config, or changed module selection is a safety
+stop; inspect it instead of overwriting it.
+
 ## The first orientation says matter not found
 
 The wizard creates an empty register. First link the existing folder through
@@ -77,6 +89,12 @@ separately provisioned `gmail.readonly` token in the named environment variable;
 the value never belongs in TOML. Missing credentials fail closed. Calendar is
 also experimental. Never substitute a different account, primary calendar, or
 connector.
+
+For Codex, `codex-session-tools` means setup may inspect the active session for
+a supported authorized read/search tool. It does not prove one exists. If the
+tool is absent or unauthorized, report that email was not checked; do not start
+OAuth, request a token, open a browser workaround, or substitute another
+account.
 
 ## Asking for help
 

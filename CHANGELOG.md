@@ -1,7 +1,20 @@
 # Changelog
 
-All notable changes will be recorded here. The project has not yet made a public
-release.
+All notable source changes are recorded here. Published host packages retain
+their own reviewed version and checksum boundaries.
+
+## Unreleased source
+
+- Documented one shared core with separate Claude and Codex project
+  integrations and preserved the released host-specific setup prompts.
+- Added dual-host contribution guidance, host-aware issue forms, a pull-request
+  template, and public-only least-privilege CI.
+- Added architecture, lifecycle, mail-boundary, and troubleshooting guidance
+  without changing the published Claude beta.2 or Codex beta.1 archives.
+- Clarified that the shared tracker performs local party/name conflict
+  screening across recorded fields, while final legal clearance, fuzzy/alias
+  matching, external sources, and a clearance-status field remain outside the
+  implementation.
 
 ## 0.2.0 beta.2
 
