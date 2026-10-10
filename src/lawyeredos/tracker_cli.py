@@ -40,6 +40,11 @@ def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
         uri = f"file:{path.as_posix()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=5)
     connection.row_factory = sqlite3.Row
+    connection.create_function(
+        "casefold", 1,
+        lambda value: value.casefold() if isinstance(value, str) else "",
+        deterministic=True,
+    )
     try:
         yield connection
     finally:
@@ -391,11 +396,11 @@ def main(argv: list[str] | None = None) -> int:
                     ).fetchall()
             emit({"ok": True, "matters": [row_dict(row) for row in rows]})
         elif args.command == "find":
-            query = f"%{args.query.casefold()}%"
+            query = args.query.casefold()
             sql = """SELECT * FROM matters WHERE (
-                lower(file_number) LIKE ? OR lower(client) LIKE ? OR
-                lower(description) LIKE ? OR lower(opposing_party) LIKE ? OR
-                lower(other_parties) LIKE ? OR lower(primary_email) LIKE ?
+                instr(casefold(file_number), ?) > 0 OR instr(casefold(client), ?) > 0 OR
+                instr(casefold(description), ?) > 0 OR instr(casefold(opposing_party), ?) > 0 OR
+                instr(casefold(other_parties), ?) > 0 OR instr(casefold(primary_email), ?) > 0
             )"""
             params: list[Any] = [query] * 6
             if args.status != "all":

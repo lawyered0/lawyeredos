@@ -71,8 +71,8 @@ deciding what to do.
 
 ## Screen the local register for potential conflicts
 
-The matter-tracker skill supports a read-only, case-insensitive name or term
-search across every open and closed matter in the local register. It checks the
+The matter-tracker skill supports a read-only, Unicode case-folded literal
+substring search across every open and closed matter in the local register. It checks the
 file number, client, description, opposing party, other parties, and primary
 email fields and returns candidate rows for lawyer review. For example:
 

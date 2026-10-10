@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .common import emit
+from .common import confined_path, emit
 from .config import load_config
 from .tracker_cli import connect, row_dict, verify
 
@@ -40,10 +40,10 @@ def resolve_identifier(database: Path, identifier: str) -> list[dict[str, Any]]:
             return [row_dict(row) for row in exact]
         rows = connection.execute(
             """SELECT * FROM matters WHERE
-            lower(client) LIKE ? OR lower(description) LIKE ? OR
-            lower(opposing_party) LIKE ? OR lower(other_parties) LIKE ?
+            instr(casefold(client), ?) > 0 OR instr(casefold(description), ?) > 0 OR
+            instr(casefold(opposing_party), ?) > 0 OR instr(casefold(other_parties), ?) > 0
             ORDER BY file_number""",
-            tuple([f"%{query}%"] * 4),
+            tuple([query] * 4),
         ).fetchall()
     return [row_dict(row) for row in rows]
 
@@ -65,8 +65,11 @@ def orient(config_path: Path, identifier: str, recent_limit: int) -> dict[str, A
             ],
         }
     matter = matches[0]
-    folder = (config.workspace_root / matter["matter_folder"]).resolve()
-    if config.workspace_root not in folder.parents or not folder.is_dir() or folder.is_symlink():
+    try:
+        folder = confined_path(config.workspace_root, matter["matter_folder"])
+    except ValueError:
+        return {"ok": False, "status": "folder_unavailable", "matter": matter}
+    if not folder.is_dir():
         return {"ok": False, "status": "folder_unavailable", "matter": matter}
     brief_path = next(
         (candidate for candidate in (folder / "_matter-brief.md", folder / "matter-brief.md") if candidate.is_file()),

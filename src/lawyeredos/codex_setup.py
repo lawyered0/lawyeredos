@@ -425,18 +425,36 @@ def apply_plan(plan: dict) -> dict:
         with sqlite3.connect(load_config(config).tracker_database) as connection:
             if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise ValueError("tracker quick_check failed")
-    except Exception:
+    except BaseException as exc:
+        rollback_problems: list[str] = []
         for path, content, mode in reversed(replaced_files):
-            path.write_bytes(content)
-            path.chmod(mode)
+            try:
+                path.write_bytes(content)
+                path.chmod(mode)
+            except OSError as rollback_exc:
+                rollback_problems.append(f"restore {path}: {rollback_exc}")
         for path, previous in reversed(replaced_links):
-            path.unlink(missing_ok=True)
-            path.symlink_to(previous, target_is_directory=True)
-        for path in reversed(created):
-            if path.is_symlink() or path.is_file():
+            try:
                 path.unlink(missing_ok=True)
-            elif path.is_dir():
-                shutil.rmtree(path)
+                path.symlink_to(previous, target_is_directory=True)
+            except OSError as rollback_exc:
+                rollback_problems.append(f"restore {path}: {rollback_exc}")
+        for path in reversed(created):
+            try:
+                if path.is_symlink() or path.is_file():
+                    path.unlink(missing_ok=True)
+                elif path.is_dir():
+                    if path == plugin:
+                        shutil.rmtree(path)
+                    else:
+                        path.rmdir()
+            except OSError as rollback_exc:
+                rollback_problems.append(f"remove {path}: {rollback_exc}")
+        if rollback_problems:
+            raise RuntimeError(
+                "setup failed and automatic rollback was incomplete: "
+                + "; ".join(rollback_problems)
+            ) from exc
         raise
     return {"ok": True, "idempotent": not changed, "changed": changed, "workspace": str(workspace),
             "config": str(config), "plugin": str(plugin), "launcher": str(launcher),

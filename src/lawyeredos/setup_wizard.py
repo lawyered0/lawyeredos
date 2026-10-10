@@ -528,6 +528,92 @@ def _backup(path: Path, backup_root: Path, backups: list[dict[str, str]]) -> Non
     backups.append({"original": str(path), "backup": str(destination), "kind": kind})
 
 
+def _undo_failed_apply(plan: dict) -> list[str]:
+    transaction = plan.get("_active_transaction", {})
+    created = transaction.get("created", [])
+    backups = transaction.get("backups", [])
+    problems: list[str] = []
+    for item in reversed(backups):
+        original = Path(item["original"])
+        backup = Path(item["backup"])
+        try:
+            if original.exists() or original.is_symlink():
+                if original.is_dir() and not original.is_symlink():
+                    shutil.rmtree(original)
+                else:
+                    original.unlink()
+            original.parent.mkdir(parents=True, exist_ok=True)
+            if item.get("kind") == "directory":
+                shutil.copytree(backup, original)
+            elif item.get("kind") == "symlink":
+                original.symlink_to(backup.read_text(encoding="utf-8"), target_is_directory=True)
+            else:
+                shutil.copy2(backup, original)
+        except OSError as exc:
+            problems.append(f"restore {original}: {exc}")
+    state_path = Path(plan["setup_root"]) / "setup-state.json"
+    previous_state = transaction.get("previous_state")
+    try:
+        if previous_state is None:
+            state_path.unlink(missing_ok=True)
+        else:
+            content, mode = previous_state
+            state_path.write_bytes(content)
+            state_path.chmod(mode)
+    except OSError as exc:
+        problems.append(f"restore {state_path}: {exc}")
+    backup_root = transaction.get("backup_root")
+    if backup_root and not problems:
+        try:
+            shutil.rmtree(backup_root, ignore_errors=False)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            problems.append(f"remove {backup_root}: {exc}")
+    elif backup_root and Path(backup_root).exists():
+        problems.append(f"recovery backups preserved at {backup_root}")
+    plugin = Path(plan["plugin"])
+    for raw in reversed(created):
+        path = Path(raw)
+        try:
+            if path.is_symlink() or path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                if path == plugin:
+                    shutil.rmtree(path)
+                else:
+                    path.rmdir()
+        except OSError as exc:
+            problems.append(f"remove {path}: {exc}")
+    return problems
+
+
+def _transactional_apply(function):
+    def wrapped(plan: dict) -> dict:
+        state_path = Path(plan["setup_root"]) / "setup-state.json"
+        previous_state = (
+            (state_path.read_bytes(), state_path.stat().st_mode)
+            if state_path.is_file() else None
+        )
+        plan["_active_transaction"] = {
+            "created": [], "backups": [], "backup_root": None,
+            "previous_state": previous_state,
+        }
+        try:
+            return function(plan)
+        except BaseException as exc:
+            problems = _undo_failed_apply(plan)
+            if problems:
+                raise RuntimeError(
+                    "setup failed and automatic rollback was incomplete: " + "; ".join(problems)
+                ) from exc
+            raise
+        finally:
+            plan.pop("_active_transaction", None)
+    return wrapped
+
+
+@_transactional_apply
 def apply_plan(plan: dict) -> dict:
     required_missing = [item["name"] for item in plan["dependencies"] if item["required"] and not item["available"]]
     if required_missing:
@@ -562,12 +648,16 @@ def apply_plan(plan: dict) -> dict:
             )
     transaction_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
     backup_root = setup_root / "backups" / transaction_id
-    created: list[str] = []
-    backups: list[dict[str, str]] = []
+    transaction = plan["_active_transaction"]
+    created: list[str] = transaction["created"]
+    backups: list[dict[str, str]] = transaction["backups"]
     changed: list[str] = []
+    transaction["backup_root"] = str(backup_root)
+    if not workspace.exists():
+        created.append(str(workspace))
     workspace.mkdir(parents=True, exist_ok=True)
     for directory in (
-        setup_root / "scratch", setup_root / "data", setup_root / "plugins", setup_root / "backups",
+        setup_root, setup_root / "scratch", setup_root / "data", setup_root / "plugins", setup_root / "backups",
         workspace / ".claude", workspace / ".claude" / "skills", workspace / ".claude" / "agents",
     ):
         if not directory.exists():
@@ -576,6 +666,7 @@ def apply_plan(plan: dict) -> dict:
     if plugin.exists():
         pass
     else:
+        created.append(str(plugin))
         shutil.copytree(source, plugin, ignore=_ignored)
         selected = set(plan["answers"]["modules"])
         for module, skill in MODULE_SKILLS.items():
@@ -588,7 +679,6 @@ def apply_plan(plan: dict) -> dict:
             "version": VERSION, "digest": plan["package_digest"],
             "modules": plan["answers"]["modules"],
         }, indent=2) + "\n", encoding="utf-8")
-        created.append(str(plugin))
         changed.append(str(plugin))
 
     project_paths = {Path(path) for path in plan["project_skills"].values()}
@@ -676,8 +766,8 @@ def apply_plan(plan: dict) -> dict:
             config.write_text(new_config, encoding="utf-8")
             changed.append(str(config))
         if not tracker.exists():
-            initialize(tracker)
             created.append(str(tracker))
+            initialize(tracker)
             changed.append(str(tracker))
     launcher_text = render_launcher(plan)
     if launcher.exists() and launcher.read_text(encoding="utf-8") != launcher_text:

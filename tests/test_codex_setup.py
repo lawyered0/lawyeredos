@@ -146,6 +146,28 @@ class CodexSetupTests(unittest.TestCase):
         self.assertFalse((self.workspace / ".lawyeredos").exists())
         self.assertFalse((self.workspace / ".agents").exists())
 
+    def test_cancelled_apply_rolls_back_partial_paths(self):
+        def interrupt_after_partial_tracker(path):
+            path.write_bytes(b"partial")
+            raise KeyboardInterrupt
+
+        with patch("lawyeredos.codex_setup.initialize", side_effect=interrupt_after_partial_tracker):
+            with self.assertRaises(KeyboardInterrupt):
+                apply_plan(build_plan(self.answers()))
+        self.assertFalse(self.workspace.exists())
+
+    def test_cancelled_apply_preserves_concurrently_created_unrelated_file(self):
+        def interrupt_during_plugin_copy(source, destination, *args, **kwargs):
+            unrelated = self.workspace / ".agents" / "skills" / "unrelated-concurrent.txt"
+            unrelated.write_text("preserve", encoding="utf-8")
+            raise KeyboardInterrupt
+
+        with patch("lawyeredos.codex_setup.shutil.copytree", side_effect=interrupt_during_plugin_copy):
+            with self.assertRaisesRegex(RuntimeError, "automatic rollback was incomplete"):
+                apply_plan(build_plan(self.answers()))
+        unrelated = self.workspace / ".agents" / "skills" / "unrelated-concurrent.txt"
+        self.assertEqual(unrelated.read_text(encoding="utf-8"), "preserve")
+
     def test_managed_links_upgrade_to_new_versioned_core(self):
         first = apply_plan(build_plan(self.answers()))
         old_plugin = Path(first["plugin"])
