@@ -3,7 +3,7 @@
 All notable source changes are recorded here. Published host packages retain
 their own reviewed version and checksum boundaries.
 
-## 0.2.1 beta.1 — unreleased
+## 0.2.2 beta.1 — unreleased
 
 - Add normalized, hash-bound From/To/Cc audience reconciliation with explicit
   verified, mismatch, unknown, and ambiguous states. The result never grants
