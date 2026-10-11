@@ -61,10 +61,24 @@ After setup, normal use is just a natural-language request:
 > Let’s work on Northstar.
 
 LawyeredOS then finds the one matching saved matter, reads its recorded state
-and relevant local files, summarizes where things stand, and proposes the next
-useful work for lawyer review. If the name is missing or ambiguous, it stops
-and asks instead of guessing. It does not assume chat memory is complete or
-claim that unavailable inbox, calendar, OCR, or other sources were checked.
+and relevant local files, and—when read-only email access is both configured
+and actually available—checks a bounded matter-specific slice for new messages.
+It retrieves complete message bodies and safely retrieved supported
+attachments, extracts bounded paragraph/page/sheet-aware chunks, and requires
+the active host to acknowledge every exact chunk with locator-linked review
+evidence before summarizing where things stand. Long content resumes across
+chunks and sessions instead of being silently truncated. Safe attachments are
+saved to the resolved matter folder; source IDs, SHA-256 hashes, extracted
+chunks, and acknowledgement evidence are recorded in the private local review
+ledger for progress and deduplication. See
+[the review protocol](docs/CONTENT-REVIEW.md).
+
+If the matter name is missing or ambiguous, it stops and asks instead of
+guessing. If email access, search coverage, a message body, attachment bytes,
+OCR, or document extraction is unavailable or incomplete, it says so and does
+not mark that material fully reviewed. It does not assume chat memory is
+complete, poll in the background, or claim that unavailable sources were
+checked.
 
 From there, say what you want to do next—for example, draft a response, review
 an agreement, or propose a tracker update. LawyeredOS does not send, file,
@@ -111,6 +125,12 @@ conservative rollback. See [examples](docs/EXAMPLES.md) and the
 between host skills, deterministic Python commands, and authoritative SQLite
 state.
 
+For complete Gmail bodies and attachment bytes independent of host connector
+limitations, the candidate includes an experimental portable read-only IMAP
+route based on localized All Mail discovery, stable Gmail IDs, and
+`BODY.PEEK`. Credential creation remains entirely user-mediated; see
+[Portable Gmail IMAP intake](docs/IMAP-READONLY.md).
+
 ## Tested host boundaries
 
 | Host | Accepted scope |
@@ -119,9 +139,15 @@ state.
 | Codex local project, macOS | Codex beta.1 with Python 3.12.7 and Codex CLI 0.147.0; project-local skills, fictional tracker persistence, and bounded review orchestration were verified. Desktop functional persistence evidence is user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
 
 Windows, Linux, other Python or host versions, and cloud execution are not
-accepted targets. Live Gmail was not tested for either host. Codex uses a
-supported, already-authorized session read tool only when one is available;
-setup cannot install or authorize it. The local Gmail adapter, Calendar, OCR,
+accepted targets. A bounded connector-to-core read of one user-created Gmail
+self-test completed three hash-bound DOCX chunks plus the message body through
+actual model acknowledgements and repeat deduplication. This is delegated-session
+evidence, not ordinary-host or portable-IMAP acceptance. Claude's documented Gmail connector reads messages
+but directly exposes attachment metadata rather than attachment contents. Codex
+defines MCP/plugin tool discovery but not a built-in Gmail tool contract. Either
+host uses an already-authorized runtime read tool only when one is actually
+available; setup cannot install or authorize it. The local Gmail adapters,
+Calendar, OCR,
 and other optional capabilities remain experimental or unverified as described
 in the package.
 

@@ -69,6 +69,9 @@ class SetupWizardTests(unittest.TestCase):
         self.assertNotIn("password", plan["config_preview"].lower())
         self.assertNotIn("api_key", plan["config_preview"].lower())
         self.assertIn("LAWYEREDOS_GMAIL_TOKEN", plan["config_preview"])
+        self.assertIn("LAWYEREDOS_GMAIL_IMAP_ACCOUNT", plan["config_preview"])
+        self.assertIn("LAWYEREDOS_GMAIL_IMAP_SECRET", plan["config_preview"])
+        self.assertIn('gmail_imap_keychain_service = ""', plan["config_preview"])
         self.assertEqual(plan["runtime_python"], os.path.abspath(sys.executable))
         launcher = render_launcher(plan)
         self.assertIn("exec open -a Claude", launcher)
@@ -88,9 +91,11 @@ class SetupWizardTests(unittest.TestCase):
         connector = normalize_answers(mail="claude-gmail", **common)
         skipped = normalize_answers(mail="skip", **common)
         experimental = normalize_answers(mail="gmail-readonly", **common)
+        imap = normalize_answers(mail="gmail-imap", **common)
         self.assertEqual(connector.mail_adapter, "claude-gmail-connector")
         self.assertEqual(skipped.mail_adapter, "unavailable")
         self.assertEqual(experimental.mail_adapter, "gmail-api-readonly")
+        self.assertEqual(imap.mail_adapter, "gmail-imap-readonly")
         connector_plan = build_plan(connector)
         self.assertTrue(any("Gmail connector selected" in note for note in connector_plan["notes"]))
         self.assertTrue(any("never treats mail access" in note for note in connector_plan["notes"]))
@@ -109,6 +114,22 @@ class SetupWizardTests(unittest.TestCase):
         )
         self.assertEqual(validation.returncode, 2)
         self.assertIn("Gmail token environment variable is not set", validation.stdout)
+
+    def test_imap_route_requires_user_configured_credential_source(self):
+        result = apply_plan(build_plan(self.answers(mail_adapter="gmail-imap-readonly")))
+        environment = os.environ.copy()
+        environment.pop("LAWYEREDOS_GMAIL_IMAP_ACCOUNT", None)
+        environment.pop("LAWYEREDOS_GMAIL_IMAP_SECRET", None)
+        validation = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parents[1] / "scripts" / "validate_setup.py"),
+                "--config", result["config"],
+            ],
+            capture_output=True, text=True, check=False, env=environment,
+        )
+        self.assertEqual(validation.returncode, 2)
+        self.assertIn("user-created macOS Keychain service", validation.stdout)
 
     def test_dependency_requirements_follow_selected_modules(self):
         core = {item["name"]: item for item in dependency_report(("matter", "tracker"))}

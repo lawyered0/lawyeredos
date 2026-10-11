@@ -64,7 +64,9 @@ Code even though files are stored locally. Then obtain and repeat back:
 6. one explicit mail choice (there is no default):
    - `claude-gmail` to use Claude's supported Gmail connector after the user
      authenticates directly with Google in Claude;
-   - `skip` to continue safely without email; or
+   - `skip` to continue safely without email;
+   - `gmail-imap` for the experimental host-neutral read-only IMAP provider,
+     with credentials created and configured separately by the user; or
    - `gmail-readonly` for the experimental local REST adapter, which requires a
      separately provisioned `gmail.readonly` token and has not had live-account
      acceptance;
@@ -84,8 +86,11 @@ after the user confirms completing the UI flow, and describe it as
 **configured, not verified connected** until a bounded Gmail read succeeds in
 the active session. If the connector is unavailable, the user declines the
 permissions, or they do not want Anthropic-hosted connector retrieval, offer
-`skip` or the narrower but experimental `gmail-readonly` route. Never request a
-token value. Google Calendar also requires the exact dedicated calendar
+`skip`, the experimental `gmail-imap` route for complete bodies and attachment
+bytes, or the narrower experimental `gmail-readonly` REST route. Never request
+an account secret or token value. The IMAP choice requires a separately
+user-created credential source; setup writes only environment-variable names
+and a blank optional Keychain service name. Google Calendar also requires the exact dedicated calendar
 identifier and must not use a primary calendar.
 
 ## Prepare the runtime
@@ -122,7 +127,7 @@ meaning the exact interpreter selected above:
   --branding-label '<label>' \
   --jurisdiction '<profile>' \
   --modules '<comma-separated-modules>' \
-  --mail '<claude-gmail|skip|gmail-readonly>' \
+  --mail '<claude-gmail|skip|gmail-readonly|gmail-imap>' \
   --calendar 'off' \
   --existing-config '<policy>' \
   --json

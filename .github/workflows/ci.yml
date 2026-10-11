@@ -38,6 +38,11 @@ jobs:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
 
+      - name: Run fictional host-route mail acceptance
+        env:
+          PYTHONPATH: src
+        run: python scripts/accept_mail_host_routes.py
+
       - name: Run vendored redline tests
         run: python -m pytest vendor/legal-redline-tools/tests -q
 

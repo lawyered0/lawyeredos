@@ -37,8 +37,9 @@ The wizard asks for:
 2. neutral, individual, or firm branding and one local display label;
 3. no jurisdiction profile or the bundled Ontario workflow-boundary profile;
 4. optional letters, redline, calendar, and review modules;
-5. one explicit email choice: Claude Gmail connector, safe skip, or the
-   experimental local `gmail.readonly` REST adapter; and
+5. one explicit email choice: Claude Gmail connector, safe skip, the
+   experimental local `gmail.readonly` REST adapter, or the experimental
+   host-neutral read-only IMAP adapter; and
 6. an optional experimental dedicated Google Calendar adapter.
 
 Matter orientation and the tracker are required core modules. Selecting a
@@ -53,7 +54,11 @@ auto-send and does not treat connection as approval to draft, send, reply,
 forward, label, archive, or delete. The experimental REST route is narrower
 (`gmail.readonly`) but requires the user to provision a token independently and
 has only fake-transport acceptance. Token values remain environment-only. The
-wizard asks only for an exact dedicated calendar identifier, never a token.
+portable IMAP route supplies complete bodies and attachment bytes through
+localized All Mail discovery and `BODY.PEEK`; setup writes only credential
+source names and never creates or reads a credential. See
+[IMAP-READONLY.md](IMAP-READONLY.md). The wizard asks only for an exact dedicated
+calendar identifier, never a token.
 
 ## Preview and apply
 
@@ -164,6 +169,8 @@ tools are reported with fixes but are never installed automatically.
 The Claude Gmail connector is a supported Claude feature, but LawyeredOS cannot
 verify its authorization locally and has not completed a real-mail acceptance
 run. The bundled Gmail REST and Google Calendar adapters remain experimental
-and fail closed when their named environment variables are absent. Email is
+and fail closed when their named credential source is absent. The portable IMAP
+route has comprehensive fake-transport coverage but no live-IMAP or ordinary
+host acceptance. Email is
 never silently disabled: `skip` is an explicit, safe choice. The
 practice-manager adapter is unavailable.

@@ -38,12 +38,21 @@ practice_manager_adapter = "unavailable"
 # mail_adapter = "claude-gmail-connector"
 # For the experimental local read-only Gmail REST adapter:
 # mail_adapter = "gmail-api-readonly"
+# Experimental portable read-only IMAP route. Runtime credentials come from
+# the named environment variables or an explicitly configured macOS Keychain
+# service; setup never reads Keychain or writes a password.
+# mail_adapter = "gmail-imap-readonly"
 # For an explicitly approved dedicated-calendar connection:
 # calendar_adapter = "google-calendar-api"
 
 [credentials]
 # Store tokens only in the named environment variables, never in this file.
 gmail_token_env = "LAWYEREDOS_GMAIL_TOKEN"
+gmail_imap_account_env = "LAWYEREDOS_GMAIL_IMAP_ACCOUNT"
+gmail_imap_secret_env = "LAWYEREDOS_GMAIL_IMAP_SECRET"
+# Optional macOS alternative. Leave blank unless the user has deliberately
+# created this Keychain item; setup never creates or probes it.
+gmail_imap_keychain_service = ""
 calendar_token_env = "LAWYEREDOS_CALENDAR_TOKEN"
 
 [calendar]

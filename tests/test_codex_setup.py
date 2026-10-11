@@ -109,6 +109,12 @@ class CodexSetupTests(unittest.TestCase):
         self.assertNotIn("${LAWYEREDOS_ROOT}", text)
         self.assertEqual(load_config(result["config"]).mail_adapter, "codex-session-tools")
 
+    def test_codex_setup_maps_portable_imap_without_storing_a_secret(self):
+        plan = build_plan(self.answers(mail="gmail-imap"))
+        self.assertEqual(plan["answers"]["mail_adapter"], "gmail-imap-readonly")
+        self.assertIn("LAWYEREDOS_GMAIL_IMAP_SECRET", plan["config_preview"])
+        self.assertNotIn("app-password-fixture", plan["config_preview"])
+
     def test_review_jobs_are_codex_namespaced_without_changing_sources(self):
         matter = self.root / "matter"
         matter.mkdir()

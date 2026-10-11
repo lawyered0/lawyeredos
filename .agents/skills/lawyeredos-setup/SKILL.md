@@ -19,14 +19,20 @@ Collect and repeat back:
 2. branding mode and a non-identifying display label;
 3. jurisdiction profile (`none` or `ontario`);
 4. modules (`matter,tracker` are required);
-5. one explicit mail choice: `session-tools`, `skip`, or experimental
-   `gmail-readonly`; and
+5. one explicit mail choice: `session-tools`, `skip`, experimental
+   `gmail-readonly`, or experimental host-neutral `gmail-imap`; and
 6. existing config policy.
 
 `session-tools` does not install or authorize Gmail. It means the workflow must
 inspect the active session for a supported authorized mail read/search tool and
 report mail unavailable if none exists. Never request credentials, enable an
 app, broaden permissions, or run a real-inbox acceptance test during setup.
+
+`gmail-imap` retrieves complete bodies and attachment bytes through read-only
+IMAP independently of session tools. Credential creation and configuration are
+separate user actions: setup writes no secret, creates no app password, and
+leaves the optional Keychain service blank. Never ask the user to paste a
+credential into the chat.
 
 Preview with one exact argument list and `--json`. For a first trial include
 `--require-new-workspace --existing-config error`. Show the complete JSON plan

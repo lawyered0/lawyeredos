@@ -2,27 +2,39 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
+import html
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from .common import emit, preview_token
 from .config import PracticeConfig, load_config
+from .imap_mail import gmail_imap_from_config
 
 
 Transport = Callable[[str, str, dict[str, str], bytes | None], tuple[int, bytes]]
+MAX_MAIL_BODY_CHARS = 200_000
+MAX_HTTP_RESPONSE_BYTES = 40 * 1024 * 1024
+MAX_MAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
+MAX_MAIL_RUN_ATTACHMENT_BYTES = 50 * 1024 * 1024
 
 
 def url_transport(method: str, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, bytes]:
     request = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            return response.status, response.read()
+            payload = response.read(MAX_HTTP_RESPONSE_BYTES + 1)
+            if len(payload) > MAX_HTTP_RESPONSE_BYTES:
+                raise ValueError("integration response exceeded the bounded read limit")
+            return response.status, payload
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
 
@@ -42,6 +54,8 @@ def _json_call(transport: Transport, method: str, url: str, token: str, payload:
     if body is not None:
         headers["Content-Type"] = "application/json"
     status, data = transport(method, url, headers, body)
+    if len(data) > MAX_HTTP_RESPONSE_BYTES:
+        raise ValueError("integration response exceeded the bounded read limit")
     if status < 200 or status >= 300:
         raise ValueError(f"remote adapter request failed with HTTP {status}")
     value = json.loads(data.decode("utf-8")) if data else {}
@@ -91,6 +105,178 @@ class GmailReadonlyAdapter:
             })
         return {"ok": True, "read_only": True, "query": query, "messages": records,
                 "coverage": "bounded", "next_page_token": listing.get("nextPageToken")}
+
+    @staticmethod
+    def _decode(value: str) -> bytes:
+        try:
+            return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("Gmail returned malformed base64 content") from exc
+
+    @staticmethod
+    def _headers(payload: dict[str, Any]) -> dict[str, str]:
+        return {
+            str(item.get("name", "")).casefold(): str(item.get("value", ""))
+            for item in payload.get("headers", []) if isinstance(item, dict)
+        }
+
+    def _full_message(self, message_id: str, attachment_budget: int) -> dict[str, Any]:
+        message = _json_call(
+            self.transport, "GET",
+            f"{self.api_base}/messages/{urllib.parse.quote(message_id)}?format=full",
+            self.token,
+        )
+        payload = message.get("payload", {})
+        if not isinstance(payload, dict):
+            raise ValueError("Gmail message payload is unavailable")
+        headers = self._headers(payload)
+        bodies: list[str] = []
+        html_bodies: list[str] = []
+        attachments: list[dict[str, Any]] = []
+        attachment_bytes = 0
+
+        def walk(part: dict[str, Any], index: list[int]) -> None:
+            nonlocal attachment_bytes
+            part_headers = self._headers(part)
+            disposition = part_headers.get("content-disposition", "").casefold()
+            mime_type = str(part.get("mimeType", "application/octet-stream")).casefold()
+            filename = str(part.get("filename", "")).strip()
+            body = part.get("body", {}) if isinstance(part.get("body", {}), dict) else {}
+            encoded = str(body.get("data", ""))
+            attachment_id = str(body.get("attachmentId", ""))
+            declared_size = int(body.get("size", 0) or 0)
+            is_body = not filename and mime_type in {"text/plain", "text/html"}
+            is_attachment = bool(filename) or bool(attachment_id and not is_body)
+            if is_attachment and (
+                declared_size > MAX_MAIL_ATTACHMENT_BYTES
+                or declared_size > attachment_budget - attachment_bytes
+            ):
+                attachments.append({
+                    "id": attachment_id or f"part-{index[0]}",
+                    "filename": filename or f"unnamed-part-{index[0]}",
+                    "mime_type": mime_type, "size": declared_size,
+                    "inline": "inline" in disposition,
+                    "retrieval_error": "attachment exceeds the bounded intake byte limit",
+                })
+                index[0] += 1
+            else:
+                if attachment_id:
+                    fetched = _json_call(
+                        self.transport, "GET",
+                        f"{self.api_base}/messages/{urllib.parse.quote(message_id)}/attachments/"
+                        f"{urllib.parse.quote(attachment_id)}",
+                        self.token,
+                    )
+                    encoded = str(fetched.get("data", ""))
+                if is_attachment and not encoded:
+                    attachments.append({
+                        "id": attachment_id or f"part-{index[0]}",
+                        "filename": filename or f"unnamed-part-{index[0]}",
+                        "mime_type": mime_type, "size": body.get("size"),
+                        "inline": "inline" in disposition,
+                        "retrieval_error": "attachment bytes unavailable",
+                    })
+                    index[0] += 1
+                elif is_attachment:
+                    raw = self._decode(encoded)
+                    if (
+                        len(raw) > MAX_MAIL_ATTACHMENT_BYTES
+                        or len(raw) > attachment_budget - attachment_bytes
+                    ):
+                        attachments.append({
+                            "id": attachment_id or f"part-{index[0]}",
+                            "filename": filename or f"unnamed-part-{index[0]}",
+                            "mime_type": mime_type, "size": len(raw),
+                            "inline": "inline" in disposition,
+                            "retrieval_error": "attachment exceeds the bounded intake byte limit",
+                        })
+                    else:
+                        attachment_bytes += len(raw)
+                        attachments.append({
+                            "id": attachment_id or f"part-{index[0]}",
+                            "filename": filename or f"unnamed-part-{index[0]}",
+                            "mime_type": mime_type, "size": len(raw),
+                            "inline": "inline" in disposition,
+                            "sha256": hashlib.sha256(raw).hexdigest(),
+                            "content_base64": base64.b64encode(raw).decode("ascii"),
+                        })
+                    index[0] += 1
+                elif encoded and mime_type == "text/plain":
+                    bodies.append(self._decode(encoded).decode("utf-8", errors="replace"))
+                elif encoded and mime_type == "text/html":
+                    html_bodies.append(self._decode(encoded).decode("utf-8", errors="replace"))
+            for child in part.get("parts", []):
+                if isinstance(child, dict):
+                    walk(child, index)
+
+        walk(payload, [1])
+        if bodies:
+            body_text = "\n".join(bodies)
+        else:
+            body_text = html.unescape(re.sub(r"<[^>]+>", " ", "\n".join(html_bodies)))
+            body_text = re.sub(r"\s+", " ", body_text).strip()
+        body_complete = len(body_text) <= MAX_MAIL_BODY_CHARS
+        internal = str(message.get("internalDate", ""))
+        received_at = ""
+        if internal.isdigit():
+            received_at = datetime.fromtimestamp(int(internal) / 1000, UTC).replace(microsecond=0).isoformat()
+        return {
+            "id": message_id, "thread_id": str(message.get("threadId", "")),
+            "received_at": received_at, "from": headers.get("from", ""),
+            "to": headers.get("to", ""), "cc": headers.get("cc", ""),
+            "subject": headers.get("subject", ""), "snippet": str(message.get("snippet", ""))[:500],
+            "body": body_text[:MAX_MAIL_BODY_CHARS], "body_complete": body_complete,
+            "attachments": attachments,
+        }
+
+    def intake(self, query: str, limit: int = 100) -> dict[str, Any]:
+        if not query.strip():
+            raise ValueError("Gmail query is required")
+        profile = _json_call(
+            self.transport, "GET", f"{self.api_base}/profile", self.token
+        )
+        account = str(profile.get("emailAddress", "")).strip().casefold()
+        if not account:
+            raise ValueError("Gmail account identity is unavailable")
+        account_fingerprint = hashlib.sha256(f"gmail:{account}".encode("utf-8")).hexdigest()
+        limit = min(max(int(limit), 1), 500)
+        messages: list[dict[str, Any]] = []
+        attachment_bytes = 0
+        page_token = ""
+        while len(messages) < limit:
+            params: dict[str, Any] = {"q": query, "maxResults": min(100, limit - len(messages))}
+            if page_token:
+                params["pageToken"] = page_token
+            listing = _json_call(
+                self.transport, "GET", f"{self.api_base}/messages?{urllib.parse.urlencode(params)}",
+                self.token,
+            )
+            for item in listing.get("messages", []):
+                message_id = str(item.get("id", ""))
+                if message_id:
+                    message = self._full_message(
+                        message_id, max(0, MAX_MAIL_RUN_ATTACHMENT_BYTES - attachment_bytes)
+                    )
+                    messages.append(message)
+                    attachment_bytes += sum(
+                        int(attachment.get("size", 0))
+                        for attachment in message["attachments"]
+                        if attachment.get("content_base64")
+                    )
+                    if len(messages) >= limit:
+                        break
+            page_token = str(listing.get("nextPageToken", ""))
+            if not page_token:
+                break
+        return {
+            "schema": "lawyeredos-mail-bundle-v1", "source": "gmail-rest",
+            "account_fingerprint": account_fingerprint,
+            "query": query, "messages": messages,
+            "coverage": {
+                "complete": not bool(page_token), "completed_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
+                "result_cap": limit, "next_page_token_present": bool(page_token),
+            },
+        }
 
 
 @dataclass
@@ -207,6 +393,21 @@ def main(argv: list[str] | None = None) -> int:
                 result = fixture_mail(config.mail_fixture, args.query, args.limit)
             elif config.mail_adapter == "gmail-api-readonly":
                 result = gmail_from_config(config).search(args.query, args.limit)
+            elif config.mail_adapter == "gmail-imap-readonly":
+                bundle = gmail_imap_from_config(config).intake(args.query, args.limit)
+                result = {
+                    "ok": True,
+                    "read_only": True,
+                    "query": bundle["query"],
+                    "messages": [
+                        {
+                            key: message.get(key)
+                            for key in ("id", "thread_id", "received_at", "from", "to", "subject", "snippet")
+                        }
+                        for message in bundle["messages"]
+                    ],
+                    "coverage": bundle["coverage"],
+                }
             elif config.mail_adapter == "claude-gmail-connector":
                 raise ValueError(
                     "the Claude Gmail connector is available only through an authorized Claude session; "

@@ -32,9 +32,14 @@ Choose one mail mode explicitly:
 - `skip`: continue without email and disclose that email was not checked.
 - `gmail-readonly`: experimental local REST adapter using a separately
   provisioned `gmail.readonly` token; no live-account acceptance is claimed.
+- `gmail-imap`: experimental portable read-only IMAP adapter for complete
+  bodies and attachment bytes. The user separately provisions the named
+  environment variables or an explicitly configured macOS Keychain service;
+  setup never creates, retrieves, or stores a credential.
 
-Do not use a real inbox or matter for acceptance. Calendar, OCR, and live Gmail
-remain experimental or unverified as described in the existing documentation.
+Do not use a real inbox or matter for installation acceptance. Calendar, OCR,
+and live Gmail remain experimental or unverified as described in the existing
+documentation.
 
 ## Verified host boundary
 
