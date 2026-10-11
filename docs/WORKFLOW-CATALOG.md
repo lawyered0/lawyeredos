@@ -1,8 +1,9 @@
 # Portable instruction workflow catalog
 
-This unreleased candidate adds instructions and reference contracts. It adds no
+Released 0.2.3 beta.1 adds instructions and reference contracts. It adds no
 Python behavior, schema field, adapter, legal calculator or native setup option.
 The published 0.2.2 beta.1 archives and acceptance boundaries remain unchanged.
+See the [release record](RELEASE-0.2.3.md) for exact artifact and installation checks.
 
 ## Entry and discovery
 
@@ -33,7 +34,7 @@ installed capability is absent, report the dependent operation unavailable.
 
 Native installation of additional modules requires a separately scoped change
 to installer mappings, configuration selection, host projectization and their
-acceptance. That runtime work is not part of this candidate. The declared release
+acceptance. That runtime work is not part of this release. The declared release
 input directories include `skills` and `docs`; the manual modules and contracts
 travel inside the complete documentation tree. Initial static review established
 the declared route; exact archive and installed-path checks are separate

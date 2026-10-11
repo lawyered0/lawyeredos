@@ -7,15 +7,16 @@ Codex local projects. Both hosts use the same Python, SQLite, document,
 redline, and guarded-workflow core. Host-specific setup and discovery files
 stay separate under `.claude/` and `.agents/`.
 
-This branch contains an **unreleased 0.2.3 beta.1 instruction candidate** based on
-published [0.2.2 beta.1](https://github.com/lawyered0/lawyeredos/releases/tag/v0.2.2-beta.1).
-It adds shared review/record contracts and nine manually loaded specialist or
-practice-attention modules. It changes no Python behavior or published download.
+Released [0.2.3 beta.1](https://github.com/lawyered0/lawyeredos/releases/tag/v0.2.3-beta.1)
+adds shared review/record contracts and nine manually loaded specialist or
+practice-attention modules. The existing matter skill reads the catalog and
+selected module; there are still six native installer options. Runtime behavior
+and existing optional jurisdiction profiles are unchanged.
 Read the [workflow catalog](docs/WORKFLOW-CATALOG.md),
 [gap dispositions](docs/WORKFLOW-COMPLETENESS.md) and
-[candidate release plan](docs/WORKFLOW-RELEASE-PLAN.md) for availability and limits.
-Historical download and acceptance records below are retained; they do not
-establish acceptance of these additions.
+[release record](docs/RELEASE-0.2.3.md) for availability, checksums and limits.
+Packaging and installed-reference checks passed; these do not establish new
+substantive model behavior, legal correctness or live-connector coverage.
 
 It works with the matter files you choose, records matter history and state in
 your workspace, and helps identify and execute the next step under lawyer
@@ -28,8 +29,8 @@ decided contract redlines, calendar planning, and independent draft review.
 
 | Host | Download | SHA-256 |
 |---|---|---|
-| Claude Desktop Code Local | [0.2.2 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.2-beta.1/lawyeredos-0.2.2-macos-beta.1.zip) | `b9bb69afde0b62d4a4a4211cad8ff08e98d1d376f688c149d10a5805b2e640ee` |
-| Codex local project | [0.2.2 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.2-beta.1/lawyeredos-0.2.2-macos-codex-beta.1.zip) | `b9bb69afde0b62d4a4a4211cad8ff08e98d1d376f688c149d10a5805b2e640ee` |
+| Claude Desktop Code Local | [0.2.3 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.3-beta.1/lawyeredos-0.2.3-macos-beta.1.zip) | `c5b28fb086f18dc09c2ec89062a578e06469036538d71953cb8134f59312ce35` |
+| Codex local project | [0.2.3 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.3-beta.1/lawyeredos-0.2.3-macos-codex-beta.1.zip) | `c5b28fb086f18dc09c2ec89062a578e06469036538d71953cb8134f59312ce35` |
 
 The versioned release ZIPs remain on the
 [LawyeredOS download site](https://www.lawyered.lawyer/lawyeredos). This source
@@ -132,7 +133,7 @@ in [docs/EXAMPLES.md](docs/EXAMPLES.md).
 - `lawyeredos-adversarial-panel`: experimental multi-lens draft review.
 - `lawyeredos-setup`: guide installation through the deterministic installer.
 
-The candidate's [manual workflow catalog](docs/WORKFLOW-CATALOG.md) also covers
+The [manual workflow catalog](docs/WORKFLOW-CATALOG.md) also covers
 contract review, demands and inbound triage, sourced advocacy, chronologies,
 daily attention, inbox workup, overdue triage and orientation claim checks.
 These source instruction modules are read through the existing matter entrypoint;

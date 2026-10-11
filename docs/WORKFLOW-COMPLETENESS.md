@@ -1,11 +1,11 @@
 # Instruction completeness dispositions
 
-Unreleased source candidate based on published `v0.2.2-beta.1`, commit
+Released `v0.2.3-beta.1` extends published `v0.2.2-beta.1`, commit
 `39343295b2b296987bf751e5afb99a50d575f746`. "Added" below means prescribed
 instruction coverage. It does not mean a new executable capability, automatic
 enforcement, host discovery or successful runtime acceptance.
 
-| Area | Candidate disposition | Evidence and remaining dependency |
+| Area | Release disposition | Evidence and remaining dependency |
 |---|---|---|
 | 1. Ordinary advice review and complete delivery | Added shared owner/source-trace and copy-ready delivery contract | [Client advice](workflows/client-advice.md); independent same-provider delegation must actually exist; threshold is adjustable practice policy, not config/runtime enforcement |
 | 2. Retainer-change preparation | Added commitment, availability, date and conflicting-instruction preflight | [Client advice](workflows/client-advice.md); current professional rules and legal decisions still require verification/lawyer judgment |
@@ -31,7 +31,7 @@ supported mail/attachment review and contiguous checkpoints, transmission versus
 delivery, normalized audience checks, guarded saves, preview/commit recovery,
 genuine tracked changes, marked/clean rendering, proportional review modes,
 source hashes, countervailing evidence and unresolved-finding readiness.
-The candidate invokes these foundations without changing their Python behavior.
+The release invokes these foundations without changing their Python behavior.
 
 ## Deliberate exclusions
 
@@ -52,7 +52,7 @@ tracker concepts stay in proposals or approved ordinary matter records.
 
 The source inventory covered twenty personal legal-workflow families and directly
 relevant reference prose, with independent reviewers assigned distinct sections.
-Only neutral generic behavior was rewritten for this candidate. Private source
+Only neutral generic behavior was rewritten for this release. Private source
 locators and examples are not included in the repository.
 
 Initial candidate checks were editorial, identity/text review and static
@@ -61,4 +61,5 @@ The separate `0.2.3 beta.1` release gate uses the existing unchanged CI/build/in
 acceptance procedure. Outcomes and exact artifact evidence must be reported,
 not inferred from prose coverage. No live-account, client-matter, browser or
 website result is claimed. Declared interface inspection alone is not runtime
-acceptance. See [release plan](WORKFLOW-RELEASE-PLAN.md).
+acceptance. See the [release record](RELEASE-0.2.3.md) for completed checks and the
+[release plan](WORKFLOW-RELEASE-PLAN.md) for historical preparation scope.

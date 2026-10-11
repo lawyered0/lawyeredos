@@ -1,13 +1,13 @@
 # Installation
 
-For this unreleased instruction candidate, setup still accepts only the existing
+For released 0.2.3 beta.1, setup still accepts only the existing
 six modules. After opening the installed workspace, use the matter entrypoint
 and [workflow catalog](WORKFLOW-CATALOG.md) to read one requested manual module.
 Do not add new setup flags, TOML module keys or global skills to discover it.
 An instruction module does not enable an unselected renderer, reviewer, adapter
 or broad mailbox route. Exact archive and installed-reference checks are
 reported separately; substantive instruction behavior and broader host/account
-coverage remain unverified.
+coverage remain unverified. See the [release record](RELEASE-0.2.3.md) for completed checks.
 
 ## Before you start
 
