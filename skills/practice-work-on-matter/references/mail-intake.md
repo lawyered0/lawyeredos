@@ -80,6 +80,26 @@ scratch subtree and removes the transient body/attachment copy after processing,
 including after a processing error. Without that flag, the core never deletes a
 caller-supplied file.
 
+When a draft, response, filing, or other proposed deliverable depends on the
+current audience, freeze that proposed complete `from`, `to`, and `cc` audience
+as a JSON object and reconcile it against the exact current normalized message:
+
+```bash
+PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredos.audience_reconciliation \
+  --message "<private normalized bundle>" --message-id "<stable message id>" \
+  --expected "<private proposed-audience JSON>"
+```
+
+Continue only on `state: verified`. Treat `mismatch` as a changed audience that
+must be resolved, `unknown` as absent or incomplete retrieved headers, and
+`ambiguous` as unparseable retrieved or proposed addresses. Display names,
+case, order, and duplicate copies of the same address do not change identity;
+From, To, and Cc roles remain distinct. Never fill a missing header from the
+body, signature, quoted history, subject, thread name, or provider label. The
+result binds retrieved header evidence separately from the proposal and always
+reports authorization, delivery, and service as not established. A verified
+audience is not authority to send, file, serve, sign, or mutate an account.
+
 ## 3. Complete the hash-bound review queue
 
 Extraction is not review. A first successful intake normally returns `partial`

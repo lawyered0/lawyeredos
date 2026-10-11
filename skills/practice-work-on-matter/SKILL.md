@@ -118,6 +118,10 @@ and do not advance its local review checkpoint. There is no background polling.
   the review ledger records processing rather than reply or delivery state. Do
   not call a thread unanswered, replied to, delivered, or complete unless the
   active route supplies reliable current evidence for that exact claim.
+- When an outbound deliverable depends on the current recipients, follow the
+  audience-reconciliation step in `references/mail-intake.md`. Only an exact
+  full From/To/Cc match is verified; missing or ambiguous header evidence fails
+  closed. Verification records retrieved evidence, not authority or delivery.
 - Use document-specific extraction and visual QA for PDFs and DOCX files. Stop
   dependent work when OCR or extraction is unusable. `document_helpers ocr`
   creates a separate copy and a hash-bound report; it never replaces a source.
