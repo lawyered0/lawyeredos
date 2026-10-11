@@ -28,6 +28,10 @@ MAX_RAW_MESSAGE_BYTES = 40 * 1024 * 1024
 MAX_RUN_RAW_MESSAGE_BYTES = 80 * 1024 * 1024
 MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 MAX_RUN_ATTACHMENT_BYTES = 50 * 1024 * 1024
+MAX_TRACKED_THREADS = 100
+MAX_MESSAGES_PER_TRACKED_THREAD = 100
+REPLY_TAIL_DEPTH = 3
+MAX_TRACKED_RECORDS = 500
 
 
 ClientFactory = Callable[[str], Any]
@@ -105,6 +109,24 @@ def _addresses(message: Message, name: str) -> str:
         f"{_decode_header(display)} <{address}>" if display else address
         for display, address in getaddresses(values)
         if address
+    )
+
+
+AUTO_REPLY_SUBJECT = re.compile(
+    r"^\s*(?:automatic reply|auto(?:matic)?[- ]?(?:reply|response)|autoreply|"
+    r"out of (?:the )?office|ooo)\b", re.IGNORECASE,
+)
+
+
+def _auto_reply(headers: Message) -> bool:
+    auto_submitted = str(headers.get("Auto-Submitted", "")).strip().casefold()
+    precedence = str(headers.get("Precedence", "")).strip().casefold()
+    return (
+        (bool(auto_submitted) and auto_submitted != "no")
+        or bool(headers.get("X-Autoreply"))
+        or bool(headers.get("X-Autorespond"))
+        or precedence == "auto_reply"
+        or bool(AUTO_REPLY_SUBJECT.match(str(headers.get("Subject", ""))))
     )
 
 
@@ -248,6 +270,54 @@ def _internal_date(attributes: bytes) -> str:
         return ""
 
 
+def _imap_list_tokens(attributes: bytes, name: str) -> list[bytes] | None:
+    match = re.search(rb"\b" + re.escape(name.encode("ascii")) + rb"\s+\(", attributes)
+    if not match:
+        return None
+    tokens: list[bytes] = []
+    token = bytearray()
+    quoted = False
+    escaped = False
+    for value in attributes[match.end():]:
+        if escaped:
+            token.append(value)
+            escaped = False
+        elif quoted and value == ord("\\"):
+            escaped = True
+        elif value == ord('"'):
+            quoted = not quoted
+        elif not quoted and value == ord(")"):
+            if token:
+                tokens.append(bytes(token))
+            break
+        elif not quoted and value in b" \r\n\t":
+            if token:
+                tokens.append(bytes(token))
+                token.clear()
+        else:
+            token.append(value)
+    else:
+        return None
+    return tokens
+
+
+def _gmail_system_labels(attributes: bytes) -> tuple[list[str], bool]:
+    tokens = _imap_list_tokens(attributes, "X-GM-LABELS")
+    if tokens is None:
+        return [], False
+    normalized = {value.lower() for value in tokens}
+    labels = []
+    if b"\\draft" in normalized:
+        labels.append("\\Draft")
+    if b"\\sent" in normalized:
+        labels.append("\\Sent")
+    return labels, True
+
+
+def _mailbox_system_flags(attributes: bytes) -> set[bytes]:
+    return {value.lower() for value in (_imap_list_tokens(attributes, "FLAGS") or [])}
+
+
 def _literal(data: list[Any] | tuple[Any, ...] | None) -> tuple[bytes, bytes]:
     for item in data or []:
         if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[0], bytes):
@@ -303,8 +373,9 @@ class GmailImapReadonlyAdapter:
 
     def _message(self, client: Any, uid: int, raw_budget: int, attachment_budget: int) -> tuple[dict[str, Any], int, int]:
         metadata_query = (
-            "(UID X-GM-MSGID X-GM-THRID INTERNALDATE RFC822.SIZE "
-            "BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE)])"
+            "(UID X-GM-MSGID X-GM-THRID X-GM-LABELS FLAGS INTERNALDATE RFC822.SIZE "
+            "BODY.PEEK[HEADER.FIELDS (FROM TO CC SUBJECT DATE AUTO-SUBMITTED "
+            "X-AUTOREPLY X-AUTORESPOND PRECEDENCE)])"
         )
         status, metadata_data = client.uid("FETCH", str(uid), metadata_query)
         if status != "OK":
@@ -316,6 +387,10 @@ class GmailImapReadonlyAdapter:
         if message_id_number is None or thread_id_number is None or declared_size is None:
             raise ValueError(f"Gmail IMAP metadata was incomplete for UID {uid}")
         headers = BytesParser(policy=policy.default).parsebytes(header_bytes)
+        labels, labels_known = _gmail_system_labels(attributes)
+        if b"\\draft" in _mailbox_system_flags(attributes) and "\\Draft" not in labels:
+            labels.append("\\Draft")
+        senders = {address.casefold() for _display, address in getaddresses(headers.get_all("From", []))}
         base = {
             "id": f"{message_id_number:x}",
             "thread_id": f"{thread_id_number:x}",
@@ -324,6 +399,11 @@ class GmailImapReadonlyAdapter:
             "to": _addresses(headers, "To"),
             "cc": _addresses(headers, "Cc"),
             "subject": _decode_header(headers.get("Subject")),
+            "header_date": str(headers.get("Date", "")),
+            "provider_labels": labels,
+            "provider_labels_known": labels_known,
+            "from_account": self.account.strip().casefold() in senders,
+            "auto_reply": _auto_reply(headers),
             "snippet": "",
         }
         if declared_size > MAX_RAW_MESSAGE_BYTES or declared_size > raw_budget:
@@ -386,7 +466,8 @@ class GmailImapReadonlyAdapter:
             "attachments": attachments,
         }, len(raw), used_attachment_bytes
 
-    def intake(self, query: str, limit: int = 100) -> dict[str, Any]:
+    def intake(self, query: str, limit: int = 100,
+               tracked_threads: list[dict[str, str]] | None = None) -> dict[str, Any]:
         query = " ".join(query.split()).strip()
         if not query or len(query) > MAX_QUERY_CHARS:
             raise ValueError("bounded Gmail IMAP query is missing or oversized")
@@ -398,6 +479,21 @@ class GmailImapReadonlyAdapter:
         raw_bytes = 0
         attachment_bytes = 0
         failures: list[dict[str, Any]] = []
+        tracked = list(tracked_threads or [])[:MAX_TRACKED_THREADS]
+        tracked_report: dict[str, Any] = {
+            "requested": [str(item.get("thread_id", "")) for item in tracked],
+            "request": [
+                {"thread_id": str(item.get("thread_id", "")),
+                 "marker_message_id": str(item.get("marker_message_id", ""))}
+                for item in tracked
+            ],
+            "complete": len(tracked_threads or []) <= MAX_TRACKED_THREADS,
+            "failures": [],
+            "details": [],
+            "per_thread_cap": MAX_MESSAGES_PER_TRACKED_THREAD,
+            "total_record_cap": MAX_TRACKED_RECORDS,
+        }
+        tracked_selected = 0
         try:
             status, search_data = client.uid("SEARCH", None, "X-GM-RAW", _imap_quote(query))
             if status != "OK":
@@ -426,7 +522,94 @@ class GmailImapReadonlyAdapter:
                     continue
                 raw_bytes += used_raw
                 attachment_bytes += used_attachments
+                message["acquisition_basis"] = "matched_messages"
                 messages.append(message)
+            seen = {str(message["id"]): message for message in messages}
+            for item in tracked:
+                thread_id = str(item.get("thread_id", "")).strip().casefold()
+                marker = str(item.get("marker_message_id", "")).strip().casefold()
+                detail: dict[str, Any] = {
+                    "thread_id": thread_id, "marker_before": marker,
+                    "ordered_candidate_ids": [], "complete": True,
+                }
+                tracked_report["details"].append(detail)
+                if not re.fullmatch(r"[0-9a-f]+", thread_id):
+                    detail["complete"] = False
+                    tracked_report["complete"] = False
+                    tracked_report["failures"].append({"thread_id": thread_id, "reason": "invalid stable thread id"})
+                    continue
+                status, blocks = client.uid("SEARCH", None, "X-GM-THRID", str(int(thread_id, 16)))
+                if status != "OK":
+                    detail["complete"] = False
+                    tracked_report["complete"] = False
+                    tracked_report["failures"].append({"thread_id": thread_id, "reason": "exact thread search failed"})
+                    continue
+                thread_uids = sorted({
+                    int(token) for block in blocks or [] if isinstance(block, bytes)
+                    for token in block.split() if token.isdigit()
+                })
+                if len(thread_uids) > MAX_MESSAGES_PER_TRACKED_THREAD:
+                    detail["complete"] = False
+                    tracked_report["complete"] = False
+                    tracked_report["failures"].append({"thread_id": thread_id, "reason": "per-thread cap reached"})
+                    thread_uids = thread_uids[-MAX_MESSAGES_PER_TRACKED_THREAD:]
+                candidates: list[int] = []
+                uid_to_id: dict[int, str] = {}
+                marker_seen = not marker
+                for uid in thread_uids:
+                    status, data = client.uid("FETCH", str(uid), "(UID X-GM-MSGID X-GM-THRID)")
+                    attrs, _literal_bytes = _literal(data)
+                    message_number = _attribute_number(attrs, "X-GM-MSGID") if status == "OK" else None
+                    if message_number is None:
+                        detail["complete"] = False
+                        tracked_report["complete"] = False
+                        tracked_report["failures"].append({"thread_id": thread_id, "reason": "thread index fetch failed"})
+                        continue
+                    stable_id = f"{message_number:x}"
+                    uid_to_id[uid] = stable_id
+                    if stable_id == marker:
+                        marker_seen = True
+                        candidates = []
+                    elif marker_seen:
+                        candidates.append(uid)
+                if marker and not marker_seen:
+                    detail["complete"] = False
+                    tracked_report["complete"] = False
+                    tracked_report["failures"].append({"thread_id": thread_id, "reason": "marker not found; conservative replay"})
+                    candidates = thread_uids
+                basis = "thread_probe"
+                if not candidates and thread_uids:
+                    candidates = thread_uids[-REPLY_TAIL_DEPTH:]
+                    basis = "thread_tail"
+                remaining = max(0, MAX_TRACKED_RECORDS - tracked_selected)
+                if len(candidates) > remaining:
+                    candidates = candidates[:remaining]
+                    detail["complete"] = False
+                    tracked_report["complete"] = False
+                    tracked_report["failures"].append({
+                        "thread_id": thread_id, "reason": "global tracked-record cap reached"
+                    })
+                tracked_selected += len(candidates)
+                detail["ordered_candidate_ids"] = [uid_to_id[uid] for uid in candidates if uid in uid_to_id]
+                for uid in candidates:
+                    try:
+                        message, used_raw, used_attachments = self._message(
+                            client, uid, max(0, MAX_RUN_RAW_MESSAGE_BYTES - raw_bytes),
+                            max(0, MAX_RUN_ATTACHMENT_BYTES - attachment_bytes),
+                        )
+                    except (ValueError, OSError, imaplib.IMAP4.error) as exc:
+                        detail["complete"] = False
+                        tracked_report["complete"] = False
+                        tracked_report["failures"].append({"thread_id": thread_id, "reason": str(exc)})
+                        continue
+                    raw_bytes += used_raw
+                    attachment_bytes += used_attachments
+                    message["acquisition_basis"] = basis
+                    if message["id"] not in seen:
+                        messages.append(message)
+                        seen[message["id"]] = message
+                    else:
+                        seen[message["id"]]["acquisition_basis"] = basis
         finally:
             try:
                 client.logout()
@@ -446,6 +629,7 @@ class GmailImapReadonlyAdapter:
                 "matched": len(uids),
                 "localized_all_mail_discovered": bool(mailbox),
                 "failed_messages": failures,
+                "tracked_threads": tracked_report,
             },
         }
 

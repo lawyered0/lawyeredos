@@ -92,13 +92,38 @@ def _message(message_id: str, attachments: list[dict] | None = None) -> dict:
 
 
 def _bundle(planned: dict, source: str, fingerprint: str, messages: list[dict]) -> dict:
+    tracked = {item["thread_id"] for item in planned["tracked_threads"]}
+    normalized = [
+        {**message, "acquisition_basis": "thread_probe"}
+        if message.get("thread_id") in tracked else message
+        for message in messages
+    ]
     return {
         "schema": SCHEMA,
         "source": source,
         "account_fingerprint": fingerprint,
         "query": planned["query"],
-        "coverage": {"complete": True, "completed_at": "2032-02-01T13:00:00+00:00"},
-        "messages": messages,
+        "coverage": {
+            "complete": True, "completed_at": "2032-02-01T13:00:00+00:00",
+            "tracked_threads": {
+                "complete": True,
+                "requested": [item["thread_id"] for item in planned["tracked_threads"]],
+                "request": planned["tracked_threads"],
+                "details": [
+                    {
+                        "thread_id": item["thread_id"],
+                        "marker_before": item["marker_message_id"],
+                        "ordered_candidate_ids": [
+                            message["id"] for message in messages
+                            if message.get("thread_id") == item["thread_id"]
+                        ],
+                        "complete": True,
+                    }
+                    for item in planned["tracked_threads"]
+                ],
+            },
+        },
+        "messages": normalized,
     }
 
 
