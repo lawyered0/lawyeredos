@@ -10,13 +10,17 @@ import tempfile
 import unittest
 import zipfile
 from contextlib import redirect_stdout
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from lawyeredos.integrations import GmailReadonlyAdapter
-from lawyeredos.imap_mail import GmailImapReadonlyAdapter, credentials_from_config
+from lawyeredos.imap_mail import (
+    GmailImapReadonlyAdapter, _gmail_system_labels, _mailbox_system_flags,
+    credentials_from_config,
+)
 from lawyeredos.content_review import REVIEW_ACK_SCHEMA
 from lawyeredos.mail_intake import (
     acknowledge_review_chunk,
@@ -24,6 +28,7 @@ from lawyeredos.mail_intake import (
     next_review_chunk,
     plan,
     process_bundle,
+    _transmission_state,
 )
 from lawyeredos.tracker_cli import initialize
 
@@ -98,10 +103,35 @@ external_ai = false
         return value
 
     def bundle(self, planned: dict, messages: list[dict], *, complete: bool = True) -> dict:
+        tracked = {item["thread_id"] for item in planned["tracked_threads"]}
+        normalized = [
+            {**message, "acquisition_basis": "thread_probe"}
+            if message.get("thread_id") in tracked else message
+            for message in messages
+        ]
         return {
             "schema": "lawyeredos-mail-bundle-v1", "source": "fixture",
-            "query": planned["query"], "messages": messages,
-            "coverage": {"complete": complete, "completed_at": "2032-02-01T13:00:00+00:00"},
+            "query": planned["query"], "messages": normalized,
+            "coverage": {
+                "complete": complete, "completed_at": "2032-02-01T13:00:00+00:00",
+                "tracked_threads": {
+                    "complete": complete,
+                    "requested": [item["thread_id"] for item in planned["tracked_threads"]],
+                    "request": planned["tracked_threads"],
+                    "details": [
+                        {
+                            "thread_id": item["thread_id"],
+                            "marker_before": item["marker_message_id"],
+                            "ordered_candidate_ids": [
+                                message["id"] for message in messages
+                                if message.get("thread_id") == item["thread_id"]
+                            ],
+                            "complete": complete,
+                        }
+                        for item in planned["tracked_threads"]
+                    ],
+                },
+            },
         }
 
     def acknowledge_all(self, identifier: str = "Northstar", limit: int | None = None) -> list[dict]:
@@ -170,6 +200,246 @@ external_ai = false
         self.assertEqual(len(self.acknowledge_all()), 1)
         newest = process_bundle(self.config, "Northstar", self.bundle(third_plan, [new_message]))
         self.assertEqual(newest["messages"][0]["status"], "reviewed")
+
+    def test_tracked_old_thread_reply_and_mail_state_reconcile_across_restart(self):
+        initial_plan = plan(self.config, "Northstar")
+        first = process_bundle(self.config, "Northstar", self.bundle(initial_plan, [self.message()]))
+        self.assertEqual(first["status"], "partial")
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", self.bundle(initial_plan, [self.message()]))
+
+        tracked_plan = plan(self.config, "Northstar")
+        self.assertEqual(tracked_plan["tracked_threads"], [
+            {"thread_id": "thread-1", "marker_message_id": ""}
+        ])
+        reply = self.message("m2")
+        reply.update({
+            "received_at": "2032-02-03T12:00:00+00:00",
+            "subject": "Re: earlier conversation", "body": "Thanks, understood.",
+            "snippet": "Thanks", "provider_labels": [],
+            "provider_labels_known": True, "from_account": False,
+        })
+        found = process_bundle(self.config, "Northstar", self.bundle(tracked_plan, [reply]))
+        self.assertEqual(found["messages"][0]["status"], "partial")
+        self.assertEqual(found["thread_states"][0]["verdict"], "they_replied_last")
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", self.bundle(tracked_plan, [reply]))
+        self.assertEqual(
+            plan(self.config, "Northstar")["tracked_threads"][0]["marker_message_id"], "m2"
+        )
+
+        # State reconciliation is independent of evidence dedupe and survives a
+        # fresh plan/connection. Missing provider labels never become "sent".
+        unknown = dict(reply)
+        unknown.update({"from_account": True, "provider_labels_known": False})
+        unknown_result = process_bundle(
+            self.config, "Northstar", self.bundle(plan(self.config, "Northstar"), [unknown])
+        )
+        state = next(item for item in unknown_result["thread_states"] if item["thread_id"] == "thread-1")
+        self.assertEqual(state["verdict"], "unknown_delivery_state")
+
+        current_plan = plan(self.config, "Northstar")
+        draft = dict(reply)
+        draft.update({
+            "from_account": True, "provider_labels_known": True,
+            "provider_labels": ["DRAFT"],
+        })
+        draft_result = process_bundle(self.config, "Northstar", self.bundle(current_plan, [draft]))
+        state = next(item for item in draft_result["thread_states"] if item["thread_id"] == "thread-1")
+        self.assertEqual(state["verdict"], "draft_not_sent")
+
+        sent = dict(reply)
+        sent.update({
+            "from_account": True, "provider_labels_known": True,
+            "provider_labels": ["SENT"], "header_date": "2020-02-01T12:00:00+00:00",
+        })
+        sent_result = process_bundle(self.config, "Northstar", self.bundle(current_plan, [sent]))
+        state = next(item for item in sent_result["thread_states"] if item["thread_id"] == "thread-1")
+        self.assertEqual(state["verdict"], "we_sent_last_delivery_unproven")
+        self.assertEqual(sent_result["messages"], [{"message_id": "m2", "status": "already_reviewed"}])
+
+    def test_mail_state_parses_rfc_date_and_imap_labels_fail_closed(self):
+        future = _transmission_state({
+            "provider_labels_known": True, "provider_labels": ["SENT"],
+            "from_account": True, "header_date": "Tue, 01 Jan 2035 12:00:00 +0000",
+        }, datetime(2034, 1, 1, tzinfo=UTC))
+        self.assertEqual(future["transmission_state"], "scheduled")
+        labels, known = _gmail_system_labels(
+            b'1 (X-GM-LABELS ("Client (old)" \\Sent Important) UID 1)'
+        )
+        self.assertTrue(known)
+        self.assertEqual(labels, ["\\Sent"])
+        self.assertEqual(_gmail_system_labels(b'1 (X-GM-LABELS ("unterminated)'), ([], False))
+        self.assertIn(b"\\draft", _mailbox_system_flags(b"1 (FLAGS (\\Seen \\Draft))"))
+        self.assertFalse(GmailReadonlyAdapter._auto_reply({"precedence": "list", "subject": "Update"}))
+        self.assertTrue(GmailReadonlyAdapter._auto_reply({"subject": "Automatic reply: away"}))
+
+    def test_ambiguous_query_hit_does_not_pollute_thread_state(self):
+        planned = plan(self.config, "Northstar")
+        unrelated = self.message("unrelated")
+        unrelated.update({"subject": "Other", "body": "No matching matter evidence", "snippet": "Other"})
+        result = process_bundle(self.config, "Northstar", self.bundle(planned, [unrelated]))
+        self.assertEqual(result["messages"][0]["status"], "held_ambiguous")
+        self.assertEqual(result["thread_states"], [])
+
+    def test_quiet_tail_excludes_draft_and_auto_reply_from_delivered_state(self):
+        delivered = self.message()
+        delivered.update({
+            "provider_labels_known": True, "provider_labels": [], "from_account": False,
+        })
+        initial = plan(self.config, "Northstar")
+        process_bundle(self.config, "Northstar", self.bundle(initial, [delivered]))
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", self.bundle(initial, [delivered]))
+        tracked = plan(self.config, "Northstar")
+
+        draft = self.message("draft-2")
+        draft.update({
+            "received_at": "2032-02-02T12:00:00+00:00", "from_account": True,
+            "provider_labels_known": True, "provider_labels": ["DRAFT"],
+            "body": "Unsaved proposed response.", "subject": "Re: earlier",
+        })
+        result = process_bundle(
+            self.config, "Northstar", self.bundle(tracked, [delivered, draft])
+        )
+        state = result["thread_states"][0]
+        self.assertEqual(state["verdict"], "they_replied_last")
+        self.assertIn(
+            {"message_id": "draft-2", "reason": "draft"},
+            state["excluded_from_reply_state"],
+        )
+
+        auto = self.message("auto-3")
+        auto.update({
+            "received_at": "2032-02-03T12:00:00+00:00", "auto_reply": True,
+            "provider_labels_known": True, "provider_labels": [], "from_account": False,
+            "body": "Automatic out of office response.", "subject": "Automatic reply",
+        })
+        result = process_bundle(
+            self.config, "Northstar", self.bundle(tracked, [delivered, auto])
+        )
+        state = result["thread_states"][0]
+        self.assertEqual(state["verdict"], "they_replied_last")
+        self.assertIn(
+            {"message_id": "auto-3", "reason": "auto_reply"},
+            state["excluded_from_reply_state"],
+        )
+
+    def test_stable_message_dedupe_rejects_changed_thread_or_body(self):
+        initial = plan(self.config, "Northstar")
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        current = plan(self.config, "Northstar")
+        changed_thread = self.message()
+        changed_thread["thread_id"] = "different-thread"
+        with self.assertRaisesRegex(ValueError, "changed thread"):
+            process_bundle(self.config, "Northstar", self.bundle(current, [changed_thread]))
+        changed_body = self.message()
+        changed_body["body"] = "Northstar changed provider body"
+        with self.assertRaisesRegex(ValueError, "body changed"):
+            process_bundle(self.config, "Northstar", self.bundle(current, [changed_body]))
+
+    def test_tracked_marker_mismatch_rejected_and_missing_capability_is_unknown(self):
+        initial = plan(self.config, "Northstar")
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        tracked = plan(self.config, "Northstar")
+        reply = self.message("m2")
+        reply.update({
+            "body": "Reply on the old thread.", "subject": "Re: earlier",
+            "received_at": "2032-02-02T12:00:00+00:00",
+        })
+        wrong = self.bundle(tracked, [reply])
+        wrong["coverage"]["tracked_threads"]["request"][0]["marker_message_id"] = "wrong"
+        with self.assertRaisesRegex(ValueError, "marker request"):
+            process_bundle(self.config, "Northstar", wrong)
+
+        unavailable = self.bundle(tracked, [reply])
+        unavailable["coverage"].pop("tracked_threads")
+        result = process_bundle(self.config, "Northstar", unavailable)
+        self.assertFalse(result["tracked_thread_coverage"]["complete"])
+        self.assertEqual(result["thread_states"][0]["verdict"], "unknown_coverage")
+        self.assertFalse(result["checkpoint_advanced"])
+
+    def test_pre_feature_mail_state_database_migrates_additively(self):
+        state = self.workspace / ".lawyeredos" / "data" / "mail-intake.sqlite3"
+        state.parent.mkdir(parents=True)
+        with sqlite3.connect(state) as connection:
+            connection.execute(
+                "CREATE TABLE message_mail_state ("
+                "file_number TEXT NOT NULL, source TEXT NOT NULL, "
+                "account_fingerprint TEXT NOT NULL, message_id TEXT NOT NULL, "
+                "thread_id TEXT NOT NULL, received_at TEXT NOT NULL, from_account INTEGER, "
+                "transmission_state TEXT NOT NULL, state_known INTEGER NOT NULL, "
+                "observed_at TEXT NOT NULL, "
+                "PRIMARY KEY(file_number, source, account_fingerprint, message_id))"
+            )
+        planned = plan(self.config, "Northstar")
+        self.assertTrue(planned["ok"])
+        with sqlite3.connect(state) as connection:
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(message_mail_state)")}
+            tables = {row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )}
+        self.assertTrue({"acquisition_basis", "is_auto_reply"}.issubset(columns))
+        self.assertIn("tracked_thread_frontier", tables)
+
+    def test_exact_candidates_must_exist_and_belong_to_declared_thread(self):
+        initial = plan(self.config, "Northstar")
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        tracked = plan(self.config, "Northstar")
+
+        unreviewed = self.message("unreviewed")
+        unreviewed.update({"body_complete": False, "body": "Unreviewed exact thread record."})
+        partial = process_bundle(self.config, "Northstar", self.bundle(tracked, [unreviewed]))
+        self.assertFalse(partial["checkpoint_advanced"])
+        omitted = self.bundle(tracked, [])
+        omitted["coverage"]["tracked_threads"]["details"][0]["ordered_candidate_ids"] = ["unreviewed"]
+        result = process_bundle(self.config, "Northstar", omitted)
+        self.assertFalse(result["checkpoint_advanced"])
+        self.assertEqual(result["status"], "partial")
+
+        cross = self.message("cross")
+        cross.update({
+            "thread_id": "other-thread", "acquisition_basis": "thread_probe",
+            "body": "Northstar relevant but on another thread.",
+        })
+        bundle = self.bundle(tracked, [cross])
+        bundle["messages"][0]["acquisition_basis"] = "thread_probe"
+        bundle["coverage"]["tracked_threads"]["details"][0]["ordered_candidate_ids"] = ["cross"]
+        result = process_bundle(self.config, "Northstar", bundle)
+        self.assertFalse(result["checkpoint_advanced"])
+
+    def test_stale_bundle_cannot_downgrade_newer_mail_state(self):
+        initial = plan(self.config, "Northstar")
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        tracked = plan(self.config, "Northstar")
+
+        sent = self.message()
+        sent.update({
+            "provider_labels_known": True, "provider_labels": ["SENT"],
+            "from_account": True, "header_date": "2020-01-01T00:00:00+00:00",
+        })
+        newer = self.bundle(tracked, [sent])
+        newer["coverage"]["completed_at"] = "2032-02-03T00:00:00+00:00"
+        result = process_bundle(self.config, "Northstar", newer)
+        self.assertEqual(result["thread_states"][0]["verdict"], "we_sent_last_delivery_unproven")
+
+        draft = self.message()
+        draft.update({
+            "provider_labels_known": True, "provider_labels": ["DRAFT"],
+            "from_account": True,
+        })
+        older = self.bundle(plan(self.config, "Northstar"), [draft])
+        older["coverage"]["completed_at"] = "2032-02-02T00:00:00+00:00"
+        result = process_bundle(self.config, "Northstar", older)
+        self.assertEqual(result["thread_states"][0]["verdict"], "we_sent_last_delivery_unproven")
 
     def test_partial_attachment_retry_does_not_advance_checkpoint(self):
         first_plan = plan(self.config, "Northstar")
@@ -647,7 +917,10 @@ external_ai = false
             self.config, "2032-001",
             GmailImapReadonlyAdapter(
                 "fictional@example.invalid", "app-password-fixture", lambda _host: completed_client
-            ).intake(plan(self.config, "2032-001")["query"], 5),
+            ).intake(
+                plan(self.config, "2032-001")["query"], 5,
+                plan(self.config, "2032-001")["tracked_threads"],
+            ),
         )
         self.assertEqual(completed["status"], "complete")
         self.assertEqual(completed["messages"][0]["attachments"][0]["status"], "reviewed")
@@ -661,7 +934,10 @@ external_ai = false
         )
         repeated = process_bundle(
             self.config, "Northstar",
-            repeated_adapter.intake(plan(self.config, "Northstar")["query"], 5),
+            repeated_adapter.intake(
+                plan(self.config, "Northstar")["query"], 5,
+                plan(self.config, "Northstar")["tracked_threads"],
+            ),
         )
         self.assertEqual(
             repeated["messages"], [{"message_id": "1a2b3c", "status": "already_reviewed"}]
@@ -670,6 +946,73 @@ external_ai = false
 
 
 class GmailIntakeTransportTests(unittest.TestCase):
+    def test_tracked_thread_per_thread_and_global_caps_are_explicit(self):
+        encoded = base64.urlsafe_b64encode(b"bounded reply").decode().rstrip("=")
+
+        def transport(method, url, headers, request_body):
+            if url.endswith("/profile"):
+                return 200, b'{"emailAddress":"fictional@example.invalid"}'
+            if "/threads/t1?format=metadata" in url:
+                return 200, b'{"messages":[{"id":"m1"},{"id":"m2"},{"id":"m3"}]}'
+            if "/messages?" in url:
+                return 200, b'{"messages":[]}'
+            if "format=full" in url:
+                message_id = url.split("/messages/", 1)[1].split("?", 1)[0]
+                return 200, json.dumps({
+                    "id": message_id, "threadId": "t1", "internalDate": "1950000000000",
+                    "labelIds": ["INBOX"], "payload": {
+                        "headers": [{"name": "From", "value": "client@example.invalid"}],
+                        "mimeType": "text/plain", "body": {"data": encoded},
+                    },
+                }).encode()
+            raise AssertionError(url)
+
+        with (
+            patch("lawyeredos.integrations.MAX_MESSAGES_PER_TRACKED_THREAD", 2),
+            patch("lawyeredos.integrations.MAX_TRACKED_RECORDS", 1),
+        ):
+            result = GmailReadonlyAdapter("fake-token", transport).intake(
+                "Northstar newer_than:30d", 5,
+                [{"thread_id": "t1", "marker_message_id": ""}],
+            )
+        tracked = result["coverage"]["tracked_threads"]
+        self.assertFalse(tracked["complete"])
+        self.assertFalse(tracked["details"][0]["complete"])
+        self.assertEqual(len(tracked["details"][0]["ordered_candidate_ids"]), 1)
+        reasons = {item["reason"] for item in tracked["failures"]}
+        self.assertIn("per-thread cap reached", reasons)
+        self.assertIn("global tracked-record cap reached", reasons)
+
+    def test_exact_tracked_thread_probe_uses_stable_id_and_marker(self):
+        calls = []
+        encoded = base64.urlsafe_b64encode(b"A reply without matter terms.").decode().rstrip("=")
+
+        def transport(method, url, headers, request_body):
+            calls.append(url)
+            if url.endswith("/profile"):
+                return 200, b'{"emailAddress":"fictional@example.invalid"}'
+            if "/threads/t1?format=metadata" in url:
+                return 200, b'{"messages":[{"id":"old"},{"id":"new"}]}'
+            if "/messages/new?format=full" in url:
+                return 200, json.dumps({
+                    "id": "new", "threadId": "t1", "internalDate": "1950000000000",
+                    "labelIds": ["INBOX"], "payload": {
+                        "headers": [{"name": "From", "value": "client@example.invalid"}],
+                        "mimeType": "text/plain", "body": {"data": encoded},
+                    },
+                }).encode()
+            if "/messages?" in url:
+                return 200, b'{"messages":[]}'
+            raise AssertionError(url)
+
+        result = GmailReadonlyAdapter("fake-token", transport).intake(
+            "Northstar newer_than:30d -in:spam -in:trash", 5,
+            [{"thread_id": "t1", "marker_message_id": "old"}],
+        )
+        self.assertTrue(result["coverage"]["tracked_threads"]["complete"])
+        self.assertEqual([item["id"] for item in result["messages"]], ["new"])
+        self.assertEqual(result["messages"][0]["provider_labels"], ["INBOX"])
+        self.assertEqual(sum("/threads/" in url for url in calls), 1)
     def test_full_message_and_attachment_use_read_only_fake_transport(self):
         calls = []
         body = base64.urlsafe_b64encode(b"Northstar body").decode("ascii").rstrip("=")
@@ -792,11 +1135,17 @@ class FakeImapClient:
         uid = int(args[0])
         gm_message_id, gm_thread_id, raw = self.messages[uid]
         query = args[1]
+        if "X-GM-MSGID" in query and "HEADER.FIELDS" not in query:
+            attributes = (
+                f"{uid} (UID {uid} X-GM-MSGID {gm_message_id} X-GM-THRID {gm_thread_id})"
+            ).encode()
+            return "OK", [(attributes, b""), b")"]
         if "HEADER.FIELDS" in query:
             header = raw.split(b"\n\n", 1)[0] + b"\n\n"
             attributes = (
                 f'{uid} (UID {uid} X-GM-MSGID {gm_message_id} '
-                f'X-GM-THRID {gm_thread_id} INTERNALDATE "01-Feb-2032 12:00:00 +0000" '
+                f'X-GM-THRID {gm_thread_id} X-GM-LABELS () FLAGS () '
+                f'INTERNALDATE "01-Feb-2032 12:00:00 +0000" '
                 f'RFC822.SIZE {len(raw)} BODY[HEADER.FIELDS] {{{len(header)}}}'
             ).encode()
             return "OK", [(attributes, header), b")"]
@@ -893,6 +1242,43 @@ class GmailImapTransportTests(unittest.TestCase):
         )
         self.assertNotIn("app-password-fixture", repr(adapter))
         return adapter, client
+
+    def test_exact_thread_search_finds_no_term_reply_outside_raw_query(self):
+        reply = EmailMessage()
+        reply["From"] = "client@example.invalid"
+        reply["To"] = "lawyer@example.invalid"
+        reply["Subject"] = "Re: earlier"
+        reply.set_content("Thanks, understood.")
+
+        class ExactThreadClient(FakeImapClient):
+            def uid(self, command, *args):
+                if command == "SEARCH" and "X-GM-RAW" in args:
+                    self.calls.append(("UID", command, *args))
+                    return "OK", [b"101"]
+                if command == "SEARCH" and "X-GM-THRID" in args:
+                    self.calls.append(("UID", command, *args))
+                    return "OK", [b"101 102"]
+                return super().uid(command, *args)
+
+        thread_number = int("4d5e6f", 16)
+        client = ExactThreadClient({
+            101: (int("1a2b3c", 16), thread_number, imap_message()),
+            102: (int("1a2b3d", 16), thread_number, reply.as_bytes()),
+        })
+        result = GmailImapReadonlyAdapter(
+            "fictional@example.invalid", "app-password-fixture", lambda _host: client
+        ).intake(
+            '"Northstar" newer_than:30d -in:spam -in:trash', 5,
+            [{"thread_id": "4d5e6f", "marker_message_id": "1a2b3c"}],
+        )
+        exact = result["coverage"]["tracked_threads"]
+        self.assertTrue(exact["complete"])
+        self.assertEqual(exact["details"][0]["ordered_candidate_ids"], ["1a2b3d"])
+        by_id = {message["id"]: message for message in result["messages"]}
+        self.assertEqual(by_id["1a2b3d"]["acquisition_basis"], "thread_probe")
+        thread_search = [call for call in client.calls if call[:2] == ("UID", "SEARCH") and "X-GM-THRID" in call]
+        self.assertEqual(len(thread_search), 1)
+        self.assertNotIn("newer_than", " ".join(str(value) for value in thread_search[0]))
 
     def test_localized_read_only_body_peek_and_supported_attachment(self):
         adapter, client = self.adapter(imap_message())

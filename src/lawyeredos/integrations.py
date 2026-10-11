@@ -13,6 +13,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from email.utils import getaddresses
 from typing import Any, Callable
 
 from .common import emit, preview_token
@@ -25,6 +26,14 @@ MAX_MAIL_BODY_CHARS = 200_000
 MAX_HTTP_RESPONSE_BYTES = 40 * 1024 * 1024
 MAX_MAIL_ATTACHMENT_BYTES = 25 * 1024 * 1024
 MAX_MAIL_RUN_ATTACHMENT_BYTES = 50 * 1024 * 1024
+MAX_TRACKED_THREADS = 100
+MAX_MESSAGES_PER_TRACKED_THREAD = 100
+REPLY_TAIL_DEPTH = 3
+MAX_TRACKED_RECORDS = 500
+AUTO_REPLY_SUBJECT = re.compile(
+    r"^\s*(?:automatic reply|auto(?:matic)?[- ]?(?:reply|response)|autoreply|"
+    r"out of (?:the )?office|ooo)\b", re.IGNORECASE,
+)
 
 
 def url_transport(method: str, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, bytes]:
@@ -120,7 +129,19 @@ class GmailReadonlyAdapter:
             for item in payload.get("headers", []) if isinstance(item, dict)
         }
 
-    def _full_message(self, message_id: str, attachment_budget: int) -> dict[str, Any]:
+    @staticmethod
+    def _auto_reply(headers: dict[str, str]) -> bool:
+        auto_submitted = headers.get("auto-submitted", "").strip().casefold()
+        return (
+            (bool(auto_submitted) and auto_submitted != "no")
+            or bool(headers.get("x-autoreply"))
+            or bool(headers.get("x-autorespond"))
+            or headers.get("precedence", "").strip().casefold() == "auto_reply"
+            or bool(AUTO_REPLY_SUBJECT.match(headers.get("subject", "")))
+        )
+
+    def _full_message(self, message_id: str, attachment_budget: int,
+                      account: str = "") -> dict[str, Any]:
         message = _json_call(
             self.transport, "GET",
             f"{self.api_base}/messages/{urllib.parse.quote(message_id)}?format=full",
@@ -225,11 +246,19 @@ class GmailReadonlyAdapter:
             "received_at": received_at, "from": headers.get("from", ""),
             "to": headers.get("to", ""), "cc": headers.get("cc", ""),
             "subject": headers.get("subject", ""), "snippet": str(message.get("snippet", ""))[:500],
+            "header_date": headers.get("date", ""),
+            "provider_labels": [str(value) for value in message.get("labelIds", [])],
+            "provider_labels_known": isinstance(message.get("labelIds"), list),
+            "from_account": bool(account) and account in {
+                address.casefold() for _display, address in getaddresses([headers.get("from", "")])
+            },
+            "auto_reply": self._auto_reply(headers),
             "body": body_text[:MAX_MAIL_BODY_CHARS], "body_complete": body_complete,
             "attachments": attachments,
         }
 
-    def intake(self, query: str, limit: int = 100) -> dict[str, Any]:
+    def intake(self, query: str, limit: int = 100,
+               tracked_threads: list[dict[str, str]] | None = None) -> dict[str, Any]:
         if not query.strip():
             raise ValueError("Gmail query is required")
         profile = _json_call(
@@ -255,8 +284,9 @@ class GmailReadonlyAdapter:
                 message_id = str(item.get("id", ""))
                 if message_id:
                     message = self._full_message(
-                        message_id, max(0, MAX_MAIL_RUN_ATTACHMENT_BYTES - attachment_bytes)
+                        message_id, max(0, MAX_MAIL_RUN_ATTACHMENT_BYTES - attachment_bytes), account
                     )
+                    message["acquisition_basis"] = "matched_messages"
                     messages.append(message)
                     attachment_bytes += sum(
                         int(attachment.get("size", 0))
@@ -268,6 +298,89 @@ class GmailReadonlyAdapter:
             page_token = str(listing.get("nextPageToken", ""))
             if not page_token:
                 break
+        tracked = list(tracked_threads or [])[:MAX_TRACKED_THREADS]
+        tracked_report: dict[str, Any] = {
+            "requested": [str(item.get("thread_id", "")) for item in tracked],
+            "request": [
+                {"thread_id": str(item.get("thread_id", "")),
+                 "marker_message_id": str(item.get("marker_message_id", ""))}
+                for item in tracked
+            ],
+            "complete": len(tracked_threads or []) <= MAX_TRACKED_THREADS,
+            "failures": [], "details": [],
+            "per_thread_cap": MAX_MESSAGES_PER_TRACKED_THREAD,
+            "total_record_cap": MAX_TRACKED_RECORDS,
+        }
+        tracked_selected = 0
+        seen = {str(message["id"]): message for message in messages}
+        for item in tracked:
+            thread_id = str(item.get("thread_id", "")).strip()
+            marker = str(item.get("marker_message_id", "")).strip()
+            detail: dict[str, Any] = {
+                "thread_id": thread_id, "marker_before": marker,
+                "ordered_candidate_ids": [], "complete": True,
+            }
+            tracked_report["details"].append(detail)
+            try:
+                thread = _json_call(
+                    self.transport, "GET",
+                    f"{self.api_base}/threads/{urllib.parse.quote(thread_id)}?format=metadata",
+                    self.token,
+                )
+            except ValueError as exc:
+                detail["complete"] = False
+                tracked_report["complete"] = False
+                tracked_report["failures"].append({"thread_id": thread_id, "reason": str(exc)})
+                continue
+            entries = [value for value in thread.get("messages", []) if isinstance(value, dict)]
+            if len(entries) > MAX_MESSAGES_PER_TRACKED_THREAD:
+                detail["complete"] = False
+                tracked_report["complete"] = False
+                tracked_report["failures"].append({"thread_id": thread_id, "reason": "per-thread cap reached"})
+                entries = entries[-MAX_MESSAGES_PER_TRACKED_THREAD:]
+            ids = [str(value.get("id", "")) for value in entries if value.get("id")]
+            if marker in ids:
+                candidates = ids[ids.index(marker) + 1:]
+            else:
+                candidates = ids
+                if marker:
+                    detail["complete"] = False
+                    tracked_report["complete"] = False
+                    tracked_report["failures"].append({"thread_id": thread_id, "reason": "marker not found; conservative replay"})
+            basis = "thread_probe"
+            if not candidates and ids:
+                candidates = ids[-REPLY_TAIL_DEPTH:]
+                basis = "thread_tail"
+            remaining = max(0, MAX_TRACKED_RECORDS - tracked_selected)
+            if len(candidates) > remaining:
+                candidates = candidates[:remaining]
+                detail["complete"] = False
+                tracked_report["complete"] = False
+                tracked_report["failures"].append({
+                    "thread_id": thread_id, "reason": "global tracked-record cap reached"
+                })
+            tracked_selected += len(candidates)
+            detail["ordered_candidate_ids"] = list(candidates)
+            for message_id in candidates:
+                try:
+                    message = self._full_message(
+                        message_id, max(0, MAX_MAIL_RUN_ATTACHMENT_BYTES - attachment_bytes), account
+                    )
+                except ValueError as exc:
+                    detail["complete"] = False
+                    tracked_report["complete"] = False
+                    tracked_report["failures"].append({"thread_id": thread_id, "reason": str(exc)})
+                    continue
+                attachment_bytes += sum(
+                    int(attachment.get("size", 0)) for attachment in message["attachments"]
+                    if attachment.get("content_base64")
+                )
+                message["acquisition_basis"] = basis
+                if message_id not in seen:
+                    messages.append(message)
+                    seen[message_id] = message
+                else:
+                    seen[message_id]["acquisition_basis"] = basis
         return {
             "schema": "lawyeredos-mail-bundle-v1", "source": "gmail-rest",
             "account_fingerprint": account_fingerprint,
@@ -275,6 +388,7 @@ class GmailReadonlyAdapter:
             "coverage": {
                 "complete": not bool(page_token), "completed_at": datetime.now(UTC).replace(microsecond=0).isoformat(),
                 "result_cap": limit, "next_page_token_present": bool(page_token),
+                "tracked_threads": tracked_report,
             },
         }
 
