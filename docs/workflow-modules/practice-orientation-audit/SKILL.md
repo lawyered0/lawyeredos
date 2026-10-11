@@ -8,8 +8,8 @@ description: On explicit request, check a matter-orientation account against aut
 This optional instruction module is read through the workflow catalog. It is a
 conversational/document procedure, not an installed host skill or executable
 audit. Use only when the lawyer expressly requests an orientation claim check.
-Read [scope and authority](../../docs/workflows/scope-and-authority.md) and
-[source verification](../../docs/workflows/source-verification.md).
+Read [scope and authority](../../workflows/scope-and-authority.md) and
+[source verification](../../workflows/source-verification.md).
 
 For bounded source retrieval, follow the active host's installed owning skill
 and installed references after the catalog's dependency check. Shared source

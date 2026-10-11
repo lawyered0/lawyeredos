@@ -14,11 +14,11 @@ Sibling skill links identify the shared workflow prose. Actual operations use
 the active host's installed owning skill and installed references after the
 catalog's dependency check; an absent dependency remains unavailable.
 
-Read [scope and authority](../../docs/workflows/scope-and-authority.md) and
-[source verification](../../docs/workflows/source-verification.md). Before
-drafting, read [client advice](../../docs/workflows/client-advice.md); for
+Read [scope and authority](../../workflows/scope-and-authority.md) and
+[source verification](../../workflows/source-verification.md). Before
+drafting, read [client advice](../../workflows/client-advice.md); for
 proposed records and completion, read
-[records and handoffs](../../docs/workflows/records-and-handoffs.md).
+[records and handoffs](../../workflows/records-and-handoffs.md).
 
 ## Select and identify
 
@@ -34,7 +34,7 @@ Match using exact file/thread identity or corroborated participants and
 matter-specific references. A name alone is insufficient. List ambiguous items
 individually with what would identify them; leave them unfiled and undrafted.
 Process high-confidence matters one at a time through
-[work on matter](../practice-work-on-matter/SKILL.md).
+[work on matter](../../../skills/practice-work-on-matter/SKILL.md).
 
 ## Work each matter
 
@@ -44,7 +44,7 @@ Process high-confidence matters one at a time through
    state. Read only the matter sources needed for this thread.
 2. For supported per-matter acquisition, follow the exact plan and resumable
    review loop in the active host's **installed mail-intake reference**. The
-   canonical [mail-intake source](../practice-work-on-matter/references/mail-intake.md)
+   canonical [mail-intake source](../../../skills/practice-work-on-matter/references/mail-intake.md)
    owns the shared prose contract; take actual commands and configured paths
    from the installed reference, not untransformed source examples. Honor
    stable-ID deduplication without treating a review

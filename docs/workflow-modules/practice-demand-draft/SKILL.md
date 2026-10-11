@@ -7,9 +7,9 @@ description: Draft sourced demands, breach or cure notices, cease-and-desist and
 
 This is a manually loaded workflow instruction module, not an additional setup
 module key or native installed skill. Read
-[scope and authority](../../docs/workflows/scope-and-authority.md),
-[source verification](../../docs/workflows/source-verification.md) and
-[dates](../../docs/workflows/dates.md).
+[scope and authority](../../workflows/scope-and-authority.md),
+[source verification](../../workflows/source-verification.md) and
+[dates](../../workflows/dates.md).
 
 ## Resolve the obligation and requested result
 
@@ -72,7 +72,7 @@ Apply the installed review workflow before presenting the complete draft when
 the content engages its required review. Supply controlling sources, current
 audience, execution/transmission state and the decision gate above. Disposition
 material findings; a missing source or unresolved material issue prevents a
-ready label. Read [client advice](../../docs/workflows/client-advice.md) if the
+ready label. Read [client advice](../../workflows/client-advice.md) if the
 task includes client advice, retainer changes or wording for onward use.
 
 For a formal letter, use the installed correspondence workflow for template,
@@ -82,7 +82,7 @@ verified DOCX was produced; do not improvise an equivalent tool. For a requested
 email, deliver the complete reviewed email inline. Neither output authorizes a
 mailbox draft, sending, filing, service or signature.
 
-Read [records and handoffs](../../docs/workflows/records-and-handoffs.md).
+Read [records and handoffs](../../workflows/records-and-handoffs.md).
 Report the requested artifact/version, verification and review performed,
 judgment choices and their sources, proposed interval and coverage limits.
 Record changes, timeline notes and calendar proposals use existing workflows

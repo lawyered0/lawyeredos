@@ -15,7 +15,8 @@ selected module defines its own bounded sources and per-matter resolution.
 The existing six native installed skills remain matter work, tracker,
 correspondence, redline, calendar and panel. Both host installers have six fixed
 module/name mappings; the configuration declares those same six module keys.
-New source folders have descriptive skill frontmatter but are **manual catalog
+The additional folders live under `docs/workflow-modules/`, outside the native
+`skills/` tree. They have descriptive frontmatter but are **manual catalog
 modules**, not new `lawyeredos-*` native skills or accepted setup flags.
 
 To use one, read the selected `SKILL.md` at its package-relative location below.
@@ -33,22 +34,24 @@ installed capability is absent, report the dependent operation unavailable.
 Native installation of additional modules requires a separately scoped change
 to installer mappings, configuration selection, host projectization and their
 acceptance. That runtime work is not part of this candidate. The declared release
-input directories include `skills` and `docs`; static inclusion is established
-by reading those declarations, not by executing a build or install here.
+input directories include `skills` and `docs`; the manual modules and contracts
+travel inside the complete documentation tree. Initial static review established
+the declared route; exact archive and installed-path checks are separate
+release-validation evidence, not proof of new model behavior.
 
 ## Choose only the requested workflow
 
 | Request | Manual source entry | Needed installed capabilities |
 |---|---|---|
-| Review an agreement and develop positions | [Contract review](../skills/practice-contract-review/SKILL.md) | Matter/tracker; redline only when requested and selected; panel when required |
-| Draft demand, cure, cease-and-desist or preservation language | [Demand drafting](../skills/practice-demand-draft/SKILL.md) | Matter/tracker; letters for formal DOCX; review when required |
-| Assess an inbound demand and response options | [Inbound demand](../skills/practice-demand-received/SKILL.md) | Matter/tracker; actual source extraction; no merits calculation tool |
-| Draft sourced submissions or argument | [Advocacy drafting](../skills/practice-brief-drafter/SKILL.md) | Matter/tracker; authorized primary-text research; review when required |
-| Build an evidence chronology or facts/witness variant | [Chronology](../skills/practice-chronology/SKILL.md) | Matter/tracker; source extraction; guarded save when requested |
-| Identify practice-wide attention items | [Daily triage](../skills/practice-daily-triage/SKILL.md) | Explicit source/window scope; supplied mail or actual authorized broad read route |
-| Work a defined mail selection into matters and replies | [Inbox workup](../skills/practice-inbox-workup/SKILL.md) | Explicit scope; per-matter intake where supported; independent review when required |
-| Investigate overdue/stale items | [Overdue triage](../skills/practice-overdue-triage/SKILL.md) | Explicit register/source scope; exact approved changes only |
-| Check an orientation account against evidence | [Orientation audit](../skills/practice-orientation-audit/SKILL.md) | Express read-only claim-check scope; same-provider independence only if available/authorized |
+| Review an agreement and develop positions | [Contract review](workflow-modules/practice-contract-review/SKILL.md) | Matter/tracker; redline only when requested and selected; panel when required |
+| Draft demand, cure, cease-and-desist or preservation language | [Demand drafting](workflow-modules/practice-demand-draft/SKILL.md) | Matter/tracker; letters for formal DOCX; review when required |
+| Assess an inbound demand and response options | [Inbound demand](workflow-modules/practice-demand-received/SKILL.md) | Matter/tracker; actual source extraction; no merits calculation tool |
+| Draft sourced submissions or argument | [Advocacy drafting](workflow-modules/practice-brief-drafter/SKILL.md) | Matter/tracker; authorized primary-text research; review when required |
+| Build an evidence chronology or facts/witness variant | [Chronology](workflow-modules/practice-chronology/SKILL.md) | Matter/tracker; source extraction; guarded save when requested |
+| Identify practice-wide attention items | [Daily triage](workflow-modules/practice-daily-triage/SKILL.md) | Explicit source/window scope; supplied mail or actual authorized broad read route |
+| Work a defined mail selection into matters and replies | [Inbox workup](workflow-modules/practice-inbox-workup/SKILL.md) | Explicit scope; per-matter intake where supported; independent review when required |
+| Investigate overdue/stale items | [Overdue triage](workflow-modules/practice-overdue-triage/SKILL.md) | Explicit register/source scope; exact approved changes only |
+| Check an orientation account against evidence | [Orientation audit](workflow-modules/practice-orientation-audit/SKILL.md) | Express read-only claim-check scope; same-provider independence only if available/authorized |
 
 The final four are optional, explicitly requested practice workflows. No source
 module installs a broad mailbox adapter, background task or standing permission.

@@ -9,8 +9,8 @@ This is a manually loaded workflow instruction module. It is not a setup module
 key or a separately installed host skill. Use the available installed matter,
 tracker, correspondence, redline and review workflows for their operations.
 
-Read [scope and authority](../../docs/workflows/scope-and-authority.md) and
-[source verification](../../docs/workflows/source-verification.md). A request
+Read [scope and authority](../../workflows/scope-and-authority.md) and
+[source verification](../../workflows/source-verification.md). A request
 for a review does not authorize negotiation, signature, acceptance of terms or
 external delivery.
 
@@ -84,13 +84,13 @@ Keep internal rationale and fallback positions out of marked and clean files.
 
 Save only the requested artifact through the installed matter policy; an
 unresolved or closed matter follows that policy's conversation-only boundary.
-Read [records and handoffs](../../docs/workflows/records-and-handoffs.md) for
+Read [records and handoffs](../../workflows/records-and-handoffs.md) for
 completion. Report the versions and verification performed, unresolved decisions
 and coverage limits. Timeline, memory or calendar changes require exact current
 approval; a factual completion note is a proposal unless already approved.
 
-Read [dates](../../docs/workflows/dates.md) when renewal, notice, cure or response
-dates matter. Read [client advice](../../docs/workflows/client-advice.md) before
+Read [dates](../../workflows/dates.md) when renewal, notice, cure or response
+dates matter. Read [client advice](../../workflows/client-advice.md) before
 turning the analysis into a client communication or onward-use wording. Deliver
 a requested email as one complete inline version after its required review,
 with source/review notes outside the copyable body.

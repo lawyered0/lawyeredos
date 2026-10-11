@@ -14,10 +14,10 @@ Sibling skill links identify the shared workflow prose. For actual operations,
 follow the active host's installed owning skill and installed references after
 the catalog's dependency check. An absent dependency remains unavailable.
 
-Read [scope and authority](../../docs/workflows/scope-and-authority.md),
-[source verification](../../docs/workflows/source-verification.md) and
+Read [scope and authority](../../workflows/scope-and-authority.md),
+[source verification](../../workflows/source-verification.md) and
 [matching and reporting](references/matching-and-reporting.md). Load
-[dates](../../docs/workflows/dates.md) when a date affects the recommendation.
+[dates](../../workflows/dates.md) when a date affects the recommendation.
 
 ## Establish scope
 
@@ -36,7 +36,7 @@ establish their own contents, not the current state or completeness of an inbox.
 ## Review and rank
 
 1. Read the selected open register rows through
-   [matter tracker](../practice-matter-tracker/SKILL.md); record snapshot time and
+   [matter tracker](../../../skills/practice-matter-tracker/SKILL.md); record snapshot time and
    scope. Read mail metadata first, then complete relevant bodies and needed
    attachments. Paginate the agreed query and report every cap or interruption.
 2. Match threads using the reference. Preserve ambiguity and multi-matter

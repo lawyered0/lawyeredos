@@ -7,7 +7,7 @@ Codex local projects. Both hosts use the same Python, SQLite, document,
 redline, and guarded-workflow core. Host-specific setup and discovery files
 stay separate under `.claude/` and `.agents/`.
 
-This branch contains an **unreleased instruction-workflow candidate** based on
+This branch contains an **unreleased 0.2.3 beta.1 instruction candidate** based on
 published [0.2.2 beta.1](https://github.com/lawyered0/lawyeredos/releases/tag/v0.2.2-beta.1).
 It adds shared review/record contracts and nine manually loaded specialist or
 practice-attention modules. It changes no Python behavior or published download.

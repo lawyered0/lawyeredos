@@ -6,8 +6,8 @@ description: Build or update sourced matter chronologies, statements of facts an
 # Chronology
 
 This manually loaded instruction module is not a new setup module key or native
-installed skill. Read [scope and authority](../../docs/workflows/scope-and-authority.md)
-and [source verification](../../docs/workflows/source-verification.md).
+installed skill. Read [scope and authority](../../workflows/scope-and-authority.md)
+and [source verification](../../workflows/source-verification.md).
 
 ## Resolve and collect
 
@@ -18,7 +18,7 @@ policy; do not create or replace canonical memory implicitly.
 
 Use supplied sources first. Expand to the resolved folder or current correspondence
 only when the requested chronology needs it. Before expansion read
-[intake and lifecycle](../../docs/workflows/intake-and-lifecycle.md), then use
+[intake and lifecycle](../../workflows/intake-and-lifecycle.md), then use
 actually available installed intake/extraction routes. Establish the source set,
 date range, versions, supported formats and coverage limits. Unreadable material
 goes to gaps, not guessed events. Stop dependent analysis when missing text could
@@ -66,7 +66,7 @@ assessment, not a finding of fact or a deadline determination.
 
 Read [chronology format](references/chronology-format.md) for a canonical artifact
 or requested variant. A short conversational answer can omit the full format,
-but every event still has a source. Read [dates](../../docs/workflows/dates.md)
+but every event still has a source. Read [dates](../../workflows/dates.md)
 when an event suggests a live obligation; flag the candidate separately rather
 than promoting an extracted event date to a legal deadline.
 
@@ -79,7 +79,7 @@ Replacing canonical memory, timeline notes and other records requires exact
 current approval. A requested new versioned chronology artifact follows existing
 matter save policy. Never rename around a protected target or overwrite newer work.
 
-Read [records and handoffs](../../docs/workflows/records-and-handoffs.md).
+Read [records and handoffs](../../workflows/records-and-handoffs.md).
 Report the sources actually reviewed, entries/changes, verification performed,
 remaining contradictions, privilege decisions and coverage gaps. Offer a requested
 variant without implying authority for external use. Completion never authorizes

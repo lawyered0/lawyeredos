@@ -6,8 +6,9 @@ skills remain the only native installed entries. New modules are read at their
 source paths through the current matter entrypoint; their frontmatter is not
 evidence of `.agents/skills` discovery. Resolve manual references from
 `.lawyeredos/current-codex` and use installed Codex instructions for commands.
-No installer/configuration or Python behavior changes, host run, or expanded
-acceptance claim accompanies these additions.
+No installer/configuration or Python behavior changes accompany these additions.
+Exact archive and installed-reference checks are separate release evidence;
+they do not establish new substantive model behavior or live-connector coverage.
 
 The Codex beta reuses the LawyeredOS Python, SQLite, document,
 redline, and guarded workflow core. Its Codex integration is separate from the

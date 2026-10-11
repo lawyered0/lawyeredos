@@ -13,18 +13,18 @@ Sibling skill links identify the shared workflow prose. Actual operations use
 the active host's installed owning skill and installed references after the
 catalog's dependency check; an absent dependency remains unavailable.
 
-Read [scope and authority](../../docs/workflows/scope-and-authority.md),
-[source verification](../../docs/workflows/source-verification.md),
-[dates](../../docs/workflows/dates.md) and
+Read [scope and authority](../../workflows/scope-and-authority.md),
+[source verification](../../workflows/source-verification.md),
+[dates](../../workflows/dates.md) and
 [dispositions](references/dispositions.md). Load
-[records and handoffs](../../docs/workflows/records-and-handoffs.md) for proposed
+[records and handoffs](../../workflows/records-and-handoffs.md) for proposed
 writeback. An old date is an alarm, not proof of completion or abandonment.
 
 ## Detect and investigate
 
 1. State the agreed register scope, date/timezone, review horizon and source
    limits. Read current rows and available revision/history through
-   [matter tracker](../practice-matter-tracker/SKILL.md).
+   [matter tracker](../../../skills/practice-matter-tracker/SKILL.md).
 2. Flag separately: a supported dated next action past due; possible expired or
    imminent limitation; passed fixed court/order date; missing or malformed
    protective data; missing ownership/next action; and unexplained staleness.
@@ -61,7 +61,7 @@ report drift. Use existing guarded tracker/memory workflows. Inspect uncertain
 commit outcomes through their recovery procedures before considering retry.
 Verify canonical rows afterward. Calendar is a separate downstream proposal
 from final approved tracker state, through
-[calendar reconciliation](../practice-calendar-sync/SKILL.md); missing calendar
+[calendar reconciliation](../../../skills/practice-calendar-sync/SKILL.md); missing calendar
 access does not conceal or reverse a register result.
 
 ## Completion

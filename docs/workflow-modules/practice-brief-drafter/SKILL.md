@@ -7,8 +7,8 @@ description: Draft sourced advocacy submissions from a proposition map and fact/
 
 This manually loaded instruction module is not a new setup module key or native
 installed skill. It produces an internal advocacy draft, not filing or service.
-Read [scope and authority](../../docs/workflows/scope-and-authority.md),
-[source verification](../../docs/workflows/source-verification.md) and
+Read [scope and authority](../../workflows/scope-and-authority.md),
+[source verification](../../workflows/source-verification.md) and
 [proposition ledgers](references/proposition-ledgers.md) before substantive
 facts or law are drafted.
 
@@ -82,10 +82,10 @@ current rules/statutes, practice directions, case orders, form/length/layout,
 hyperlinks/bookmarks/naming/platform requirements, record citations, confidentiality
 or sealing requirements, and lawyer approval of discretionary arguments and relief.
 
-Read [records and handoffs](../../docs/workflows/records-and-handoffs.md) for
+Read [records and handoffs](../../workflows/records-and-handoffs.md) for
 requested saves and completion. Existing matter policy controls artifact saves;
 timeline, memory and calendar changes require exact current approval. Read
-[dates](../../docs/workflows/dates.md) for material procedural dates and
-[client advice](../../docs/workflows/client-advice.md) for a retainer change,
+[dates](../../workflows/dates.md) for material procedural dates and
+[client advice](../../workflows/client-advice.md) for a retainer change,
 client communication or onward-use wording. No draft or review authorizes filing,
 service, sending or signature.

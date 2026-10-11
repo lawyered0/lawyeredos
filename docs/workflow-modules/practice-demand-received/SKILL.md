@@ -7,9 +7,9 @@ description: Triage an incoming demand or breach notice against the matter recor
 
 This is a manually loaded instruction module, not a new setup module key or
 separately installed skill. Read
-[scope and authority](../../docs/workflows/scope-and-authority.md),
-[source verification](../../docs/workflows/source-verification.md) and
-[dates](../../docs/workflows/dates.md).
+[scope and authority](../../workflows/scope-and-authority.md),
+[source verification](../../workflows/source-verification.md) and
+[dates](../../workflows/dates.md).
 
 ## Read and route
 
@@ -79,7 +79,7 @@ letter. Apply required source/review gates before delivering a complete email
 inline. A triage recommendation never supplies authority to send, concede,
 settle, waive, accept service or otherwise communicate externally.
 
-Read [records and handoffs](../../docs/workflows/records-and-handoffs.md) for
+Read [records and handoffs](../../workflows/records-and-handoffs.md) for
 completion. Save only the requested artifact under existing matter policy;
 timeline, memory, matter creation/reopening and calendar changes require exact
 current approval through their owning workflows. Report coverage limits and
