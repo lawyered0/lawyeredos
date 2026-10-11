@@ -10,6 +10,7 @@ import shlex
 import shutil
 import sqlite3
 import sys
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -122,6 +123,149 @@ def managed_fingerprint(path: Path) -> str:
         digest.update(len(content).to_bytes(8, "big"))
         digest.update(content)
     return digest.hexdigest()
+
+
+def _validate_managed_paths(directories: tuple[Path, ...], files: tuple[Path, ...]) -> None:
+    """Reject path substitutions before any setup write or backup operation."""
+    for path in directories:
+        if path.is_symlink():
+            raise ValueError(f"managed directory must not be a symlink: {path}")
+        if path.exists() and not path.is_dir():
+            raise ValueError(f"managed directory path is not a directory: {path}")
+    for path in files:
+        if path.is_symlink():
+            raise ValueError(f"managed file must not be a symlink: {path}")
+        if path.exists() and not path.is_file():
+            raise ValueError(f"managed file path is not a file: {path}")
+
+
+def path_snapshot(path: Path) -> dict[str, str]:
+    if path.is_symlink():
+        return {"kind": "symlink", "target": os.readlink(path)}
+    if path.is_file():
+        return {"kind": "file", "fingerprint": managed_fingerprint(path)}
+    if path.is_dir():
+        return {"kind": "directory", "fingerprint": managed_fingerprint(path)}
+    return {"kind": "absent"}
+
+
+def assert_preflight_paths(expected: dict[str, dict[str, str]]) -> None:
+    for raw, snapshot in expected.items():
+        path = Path(raw)
+        if path_snapshot(path) != snapshot:
+            raise ValueError(f"managed path changed after preview; build a new plan: {path}")
+
+
+def initialize_tracker_exclusive(path: Path) -> None:
+    """Build off-path, then claim the final tracker name without overwriting."""
+    temporary_root = Path(tempfile.mkdtemp(prefix=".lawyeredos-tracker-", dir=path.parent))
+    temporary_tracker = temporary_root / path.name
+    try:
+        initialize(temporary_tracker)
+        os.link(temporary_tracker, path)
+    except FileExistsError as exc:
+        raise ValueError(f"tracker path appeared after preview; refusing to overwrite: {path}") from exc
+    finally:
+        shutil.rmtree(temporary_root)
+
+
+def _load_project_discovery(
+    discovery: Path,
+    allowed_paths: set[Path],
+    state_path: Path,
+) -> tuple[set[str], dict[str, str]]:
+    """Load only provenance-backed paths from the exact Claude project namespace."""
+    if discovery.is_symlink():
+        raise ValueError(f"managed discovery file must not be a symlink: {discovery}")
+    if not discovery.exists():
+        return set(), {}
+    if not discovery.is_file():
+        raise ValueError(f"managed discovery path is not a file: {discovery}")
+    data = json.loads(discovery.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("schema_version") not in {1, 2}:
+        raise ValueError(f"unsupported LawyeredOS discovery schema: {discovery}")
+    package_digest_value = data.get("package_digest")
+    if not isinstance(package_digest_value, str) or len(package_digest_value) != 64 or any(
+        character not in "0123456789abcdef" for character in package_digest_value
+    ):
+        raise ValueError(f"invalid package digest in LawyeredOS discovery: {discovery}")
+    raw_paths = data.get("managed_paths")
+    if not isinstance(raw_paths, list) or not all(isinstance(item, str) for item in raw_paths):
+        raise ValueError(f"invalid managed_paths in LawyeredOS discovery: {discovery}")
+    if len(raw_paths) != len(set(raw_paths)):
+        raise ValueError(f"duplicate managed_paths in LawyeredOS discovery: {discovery}")
+    allowed = {str(path.absolute()) for path in allowed_paths}
+    managed: set[str] = set()
+    for raw in raw_paths:
+        candidate = Path(raw)
+        if not candidate.is_absolute() or str(candidate.absolute()) != raw or raw not in allowed:
+            raise ValueError(f"discovery path is outside the LawyeredOS Claude namespace: {raw}")
+        managed.add(raw)
+    raw_fingerprints = data.get("managed_fingerprints", {})
+    if not isinstance(raw_fingerprints, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+        for key, value in raw_fingerprints.items()
+    ):
+        raise ValueError(f"invalid managed_fingerprints in LawyeredOS discovery: {discovery}")
+    if not set(raw_fingerprints).issubset(managed):
+        raise ValueError(f"discovery fingerprints include an unmanaged path: {discovery}")
+    fingerprints = dict(raw_fingerprints)
+    # Released schema-v1 installs recorded ownership hashes in setup-state.json.
+    # Use those only for the already confined discovery paths; never infer ownership
+    # from a filename or from discovery alone.
+    if managed - set(fingerprints):
+        if state_path.is_symlink():
+            raise ValueError(f"managed setup state must not be a symlink: {state_path}")
+        if state_path.is_file():
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state_fingerprints = state.get("managed_fingerprints", {})
+            if isinstance(state_fingerprints, dict):
+                for raw in managed - set(fingerprints):
+                    value = state_fingerprints.get(raw)
+                    if isinstance(value, str):
+                        fingerprints[raw] = value
+    if managed - set(fingerprints):
+        plugin_root = discovery.parent / "plugins"
+        package_digest_value = data["package_digest"]
+        matching_plugins = []
+        if plugin_root.is_dir() and not plugin_root.is_symlink():
+            for candidate in plugin_root.iterdir():
+                marker = candidate / ".lawyeredos-package.json"
+                if candidate.is_symlink() or not marker.is_file():
+                    continue
+                marker_data = json.loads(marker.read_text(encoding="utf-8"))
+                if marker_data.get("digest") == package_digest_value:
+                    matching_plugins.append(candidate)
+        for raw in managed - set(fingerprints):
+            path = Path(raw)
+            if not path.exists() and not path.is_symlink():
+                continue
+            trusted = False
+            if path.is_symlink():
+                target = path.resolve(strict=True)
+                trusted = any(
+                    target == (plugin / ".lawyeredos-project" / "skills" / path.name).resolve()
+                    for plugin in matching_plugins
+                )
+            elif path.name == f"{PROJECT_AGENT}.md" and path.is_file():
+                trusted = any(
+                    (plugin / ".lawyeredos-project" / "agents" / path.name).is_file()
+                    and path.read_bytes() == (plugin / ".lawyeredos-project" / "agents" / path.name).read_bytes()
+                    for plugin in matching_plugins
+                )
+            if trusted:
+                fingerprints[raw] = managed_fingerprint(path)
+    for raw in managed:
+        path = Path(raw)
+        if not path.exists() and not path.is_symlink():
+            continue
+        expected = fingerprints.get(raw)
+        if expected is None:
+            raise ValueError(f"managed discovery path has no trusted fingerprint: {path}")
+        if managed_fingerprint(path) != expected:
+            raise ValueError(f"managed discovery path fingerprint changed: {path}")
+    return managed, fingerprints
 
 
 def _projectize_skill(source: Path, destination: Path, project_name: str) -> None:
@@ -345,14 +489,10 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         claude_root / "skills",
         claude_root / "agents",
     )
-    for path in managed_directories:
-        if path.is_symlink():
-            raise ValueError(f"managed directory must not be a symlink: {path}")
-        if path.exists() and not path.is_dir():
-            raise ValueError(f"managed directory path is not a directory: {path}")
-    for path in (config_path, launcher, terminal_launcher, setup_root / "project-discovery.json"):
-        if path.is_symlink():
-            raise ValueError(f"managed file must not be a symlink: {path}")
+    _validate_managed_paths(
+        managed_directories,
+        (config_path, launcher, terminal_launcher, setup_root / "project-discovery.json"),
+    )
     project_skill_paths = {
         module: claude_root / "skills" / PROJECT_SKILLS[module]
         for module in effective.modules
@@ -362,10 +502,13 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     if settings_local.is_symlink():
         raise ValueError(f"Claude project settings must not be a symlink: {settings_local}")
     discovery_state = setup_root / "project-discovery.json"
-    prior_discovery = {}
-    if discovery_state.is_file():
-        prior_discovery = json.loads(discovery_state.read_text(encoding="utf-8"))
-    prior_managed = set(prior_discovery.get("managed_paths", []))
+    all_project_paths = {
+        *(claude_root / "skills" / name for name in PROJECT_SKILLS.values()),
+        project_agent,
+    }
+    prior_managed, prior_fingerprints = _load_project_discovery(
+        discovery_state, all_project_paths, setup_root / "setup-state.json"
+    )
     candidate_paths = set(str(path) for path in project_skill_paths.values())
     if "review" in effective.modules:
         candidate_paths.add(str(project_agent))
@@ -380,7 +523,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         if "env" in settings_data and not isinstance(settings_data["env"], dict):
             raise ValueError(f"Claude project settings env must contain a JSON object: {settings_local}")
         managed_env = {"LAWYEREDOS_ROOT", "LAWYEREDOS_CONFIG", "LAWYEREDOS_PYTHON"}
-        if managed_env.intersection(settings_data.get("env", {})) and not prior_discovery:
+        if managed_env.intersection(settings_data.get("env", {})) and not prior_managed:
             raise ValueError("Claude project settings already define LawyeredOS variables without managed state")
     # Preserve the virtual-environment entrypoint itself. Resolving the final
     # symlink would bypass pyvenv.cfg and lose the packages checked above.
@@ -423,6 +566,11 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "settings_local": str(settings_local),
         "discovery_state": str(discovery_state),
         "prior_managed": sorted(prior_managed),
+        "prior_fingerprints": prior_fingerprints,
+        "preflight_paths": {
+            str(path): path_snapshot(path)
+            for path in (config_path, tracker, launcher, terminal_launcher, settings_local)
+        },
         "runtime_python": str(runtime_python),
         "answers": {**asdict(effective), "workspace": str(workspace), "modules": list(effective.modules)},
         "dependencies": dependency_report(effective.modules),
@@ -596,7 +744,12 @@ def _undo_failed_apply(plan: dict) -> list[str]:
 
 def _transactional_apply(function):
     def wrapped(plan: dict) -> dict:
-        state_path = Path(plan["setup_root"]) / "setup-state.json"
+        workspace = Path(plan["workspace"])
+        setup_root = Path(plan["setup_root"])
+        _validate_managed_paths((workspace, setup_root), ())
+        state_path = setup_root / "setup-state.json"
+        if state_path.is_symlink():
+            raise ValueError(f"managed setup state must not be a symlink: {state_path}")
         previous_state = (
             (state_path.read_bytes(), state_path.stat().st_mode)
             if state_path.is_file() else None
@@ -636,8 +789,31 @@ def apply_plan(plan: dict) -> dict:
     settings_local = Path(plan["settings_local"])
     discovery_state = Path(plan["discovery_state"])
     tracker = setup_root / "data" / "matters.sqlite3"
-    if workspace.exists() and not workspace.is_dir():
-        raise ValueError(f"workspace exists but is not a directory: {workspace}")
+    managed_directories = (
+        workspace, setup_root, setup_root / "scratch", setup_root / "data",
+        setup_root / "plugins", setup_root / "backups", workspace / ".claude",
+        workspace / ".claude" / "skills", workspace / ".claude" / "agents", plugin,
+    )
+    _validate_managed_paths(
+        managed_directories,
+        (config, launcher, terminal_launcher, discovery_state, settings_local),
+    )
+    assert_preflight_paths(plan.get("preflight_paths", {}))
+    allowed_project_paths = {
+        *(workspace / ".claude" / "skills" / name for name in PROJECT_SKILLS.values()),
+        workspace / ".claude" / "agents" / f"{PROJECT_AGENT}.md",
+    }
+    current_managed, current_fingerprints = _load_project_discovery(
+        discovery_state, allowed_project_paths, setup_root / "setup-state.json"
+    )
+    if current_managed != set(plan.get("prior_managed", [])) or current_fingerprints != plan.get("prior_fingerprints", {}):
+        raise ValueError("LawyeredOS discovery state changed after preview; build a new plan")
+    planned_project_paths = {Path(raw) for raw in plan["project_skills"].values()}
+    if plan["project_agent"]:
+        planned_project_paths.add(Path(plan["project_agent"]))
+    for path in planned_project_paths:
+        if (path.exists() or path.is_symlink()) and str(path) not in current_managed:
+            raise ValueError(f"Claude discovery target appeared after preview and is not managed: {path}")
     marker = plugin / ".lawyeredos-package.json"
     if plugin.exists() and (
         not marker.is_file()
@@ -750,9 +926,13 @@ def apply_plan(plan: dict) -> dict:
         changed.append(str(settings_local))
 
     discovery = {
-        "schema_version": 1,
+        "schema_version": 2,
         "package_digest": plan["package_digest"],
         "managed_paths": sorted(str(path) for path in project_paths),
+        "managed_fingerprints": {
+            str(path): managed_fingerprint(path)
+            for path in sorted(project_paths)
+        },
     }
     discovery_text = json.dumps(discovery, indent=2, sort_keys=True) + "\n"
     if not discovery_state.exists() or discovery_state.read_text(encoding="utf-8") != discovery_text:
@@ -772,8 +952,8 @@ def apply_plan(plan: dict) -> dict:
             config.write_text(new_config, encoding="utf-8")
             changed.append(str(config))
         if not tracker.exists():
+            initialize_tracker_exclusive(tracker)
             created.append(str(tracker))
-            initialize(tracker)
             changed.append(str(tracker))
     launcher_text = render_launcher(plan)
     if launcher.exists() and launcher.read_text(encoding="utf-8") != launcher_text:
@@ -827,16 +1007,92 @@ def apply_plan(plan: dict) -> dict:
 
 
 def rollback(workspace: Path) -> dict:
-    workspace = workspace.expanduser().resolve()
+    requested_workspace = workspace.expanduser().absolute()
+    if requested_workspace.is_symlink():
+        raise ValueError(f"workspace must not be a symlink for rollback: {requested_workspace}")
+    workspace = requested_workspace.resolve()
     setup_root = workspace / ".lawyeredos"
+    _validate_managed_paths(
+        (
+            workspace, setup_root, setup_root / "data", setup_root / "scratch",
+            setup_root / "plugins", setup_root / "backups", workspace / ".claude",
+            workspace / ".claude" / "skills", workspace / ".claude" / "agents",
+        ),
+        (),
+    )
     state_path = setup_root / "setup-state.json"
+    if state_path.is_symlink():
+        raise ValueError(f"managed setup state must not be a symlink: {state_path}")
     if not state_path.is_file():
         raise ValueError(f"no rollback state found: {state_path}")
     state = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(state, dict) or state.get("schema_version") != 1:
+        raise ValueError(f"unsupported rollback state schema: {state_path}")
+    plugin = Path(state.get("plugin", ""))
+    plugins_root = setup_root / "plugins"
+    if (
+        not plugin.is_absolute()
+        or plugin.parent != plugins_root
+        or not plugin.name.startswith("lawyeredos-")
+    ):
+        raise ValueError(f"rollback plugin path is outside the managed namespace: {plugin}")
+    allowed_files = {
+        setup_root / "config.toml",
+        setup_root / "launch-lawyeredos.sh",
+        setup_root / "launch-lawyeredos-terminal.sh",
+        setup_root / "project-discovery.json",
+        setup_root / "data" / "matters.sqlite3",
+        workspace / ".claude" / "settings.local.json",
+        workspace / ".claude" / "agents" / f"{PROJECT_AGENT}.md",
+        *(workspace / ".claude" / "skills" / name for name in PROJECT_SKILLS.values()),
+        plugin,
+    }
+    allowed_created = {
+        workspace, setup_root, setup_root / "scratch", setup_root / "data",
+        setup_root / "plugins", setup_root / "backups", workspace / ".claude",
+        workspace / ".claude" / "skills", workspace / ".claude" / "agents",
+        *allowed_files,
+    }
+
+    def require_allowed(raw: str, allowed: set[Path], label: str) -> Path:
+        if not isinstance(raw, str):
+            raise ValueError(f"rollback {label} path is invalid")
+        path = Path(raw)
+        if not path.is_absolute() or str(path.absolute()) != raw or path not in allowed:
+            raise ValueError(f"rollback {label} path is outside the managed namespace: {raw}")
+        return path
+
+    for raw in state.get("created", []):
+        require_allowed(raw, allowed_created, "created")
+    for raw in state.get("changed", []):
+        require_allowed(raw, allowed_files, "changed")
+    fingerprints = state.get("managed_fingerprints", {})
+    if fingerprints and not isinstance(fingerprints, dict):
+        raise ValueError(f"invalid managed fingerprints in rollback state: {state_path}")
+    for raw in fingerprints:
+        require_allowed(raw, allowed_files, "fingerprint")
+    backups_root = setup_root / "backups"
+    for item in state.get("backups", []):
+        if not isinstance(item, dict):
+            raise ValueError(f"invalid backup record in rollback state: {state_path}")
+        require_allowed(item.get("original"), allowed_files, "backup original")
+        backup = Path(item.get("backup", ""))
+        if (
+            not backup.is_absolute()
+            or str(backup.absolute()) != str(backup)
+            or not _inside(backup, backups_root)
+        ):
+            raise ValueError(f"rollback backup path is outside the managed namespace: {backup}")
+        cursor = backup.parent
+        while cursor != backups_root:
+            if cursor.is_symlink():
+                raise ValueError(f"rollback backup parent must not be a symlink: {cursor}")
+            cursor = cursor.parent
+        if backup.is_symlink():
+            raise ValueError(f"rollback backup artifact must not be a symlink: {backup}")
     restored: list[str] = []
     removed: list[str] = []
     preserved_modified: list[str] = []
-    fingerprints = state.get("managed_fingerprints", {})
 
     def unchanged(path: Path) -> bool:
         expected = fingerprints.get(str(path))

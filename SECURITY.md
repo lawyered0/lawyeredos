@@ -27,3 +27,15 @@ LawyeredOS does not store connector token values in its config. Reports about
 Gmail, Calendar, or session tools should name only the host, adapter, and
 failure class—never the account, calendar identifier, request headers, or
 token.
+
+## Local installer boundary
+
+Setup and rollback reject symlink substitutions, unexpected post-preview
+artifacts, paths outside their exact project-local namespaces, and managed
+artifacts whose recorded fingerprints have changed. These checks are
+path-based: the current implementation does not hold parent directory file
+descriptors and perform every mutation with `openat`-style operations. A local
+process able to rewrite the workspace concurrently could therefore race a
+successful check. Do not run setup or rollback while another process is
+modifying `.lawyeredos`, `.claude`, or `.agents`; stop and rerun the preview if
+the workspace changes.

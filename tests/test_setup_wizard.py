@@ -317,6 +317,144 @@ class SetupWizardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not be a symlink"):
             build_plan(self.answers())
 
+    def test_apply_rechecks_managed_directories_after_preview_symlink_swap(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        outside = self.root / "outside"
+        outside.mkdir()
+        marker = outside / "keep.txt"
+        marker.write_text("preserve", encoding="utf-8")
+        self.workspace.mkdir()
+        (self.workspace / ".claude").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            apply_plan(plan)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
+        self.assertEqual(list(outside.iterdir()), [marker])
+
+    def test_apply_rejects_setup_root_swap_before_transaction_state_read(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        outside = self.root / "outside-state"
+        outside.mkdir()
+        marker = outside / "setup-state.json"
+        marker.write_text("private", encoding="utf-8")
+        self.workspace.mkdir()
+        (self.workspace / ".lawyeredos").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            apply_plan(plan)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "private")
+        self.assertEqual(list(outside.iterdir()), [marker])
+
+    def test_apply_refuses_discovery_skill_symlink_created_after_preview(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        outside = self.root / "outside-skill"
+        outside.mkdir()
+        marker = outside / "SKILL.md"
+        marker.write_text("private", encoding="utf-8")
+        skill = Path(plan["project_skills"]["matter"])
+        skill.parent.mkdir(parents=True)
+        skill.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "appeared after preview"):
+            apply_plan(plan)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "private")
+
+    def test_apply_refuses_private_files_that_appear_after_preview(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        config = Path(plan["config"])
+        launcher = Path(plan["launcher"])
+        config.parent.mkdir(parents=True)
+        config.write_text("private config", encoding="utf-8")
+        launcher.write_text("private launcher", encoding="utf-8")
+        launcher.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(config.read_text(encoding="utf-8"), "private config")
+        self.assertEqual(launcher.read_text(encoding="utf-8"), "private launcher")
+        self.assertEqual(launcher.stat().st_mode & 0o777, 0o640)
+
+    def test_malicious_discovery_cannot_claim_or_delete_external_path(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        external = self.root / "external-private.txt"
+        external.write_text("preserve", encoding="utf-8")
+        external.chmod(0o640)
+        discovery = Path(plan["discovery_state"])
+        discovery.parent.mkdir(parents=True)
+        discovery.write_text(json.dumps({
+            "schema_version": 2,
+            "package_digest": plan["package_digest"],
+            "managed_paths": [str(external)],
+            "managed_fingerprints": {},
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "outside the LawyeredOS Claude namespace"):
+            apply_plan(plan)
+        self.assertEqual(external.read_text(encoding="utf-8"), "preserve")
+        self.assertEqual(external.stat().st_mode & 0o777, 0o640)
+
+    def test_discovery_fingerprint_change_fails_closed(self):
+        first = apply_plan(build_plan(self.answers()))
+        agent = self.workspace / ".claude" / "agents" / "lawyeredos-legal-review-lens.md"
+        agent.write_text("private replacement", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "fingerprint changed"):
+            build_plan(self.answers())
+        self.assertEqual(agent.read_text(encoding="utf-8"), "private replacement")
+        self.assertTrue(Path(first["plugin"]).is_dir())
+
+    def test_schema_one_discovery_uses_setup_state_fingerprints_and_migrates(self):
+        first = apply_plan(build_plan(self.answers()))
+        discovery_path = self.workspace / ".lawyeredos" / "project-discovery.json"
+        discovery = json.loads(discovery_path.read_text(encoding="utf-8"))
+        discovery["schema_version"] = 1
+        discovery.pop("managed_fingerprints")
+        discovery_path.write_text(json.dumps(discovery), encoding="utf-8")
+        # Faithful released sequence: a later config-only replacement rewrote
+        # setup-state.json without retaining unchanged project-artifact hashes.
+        state_path = Path(first["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        project_prefixes = (
+            str(self.workspace / ".claude" / "skills"),
+            str(self.workspace / ".claude" / "agents"),
+        )
+        state["managed_fingerprints"] = {
+            path: value for path, value in state["managed_fingerprints"].items()
+            if not path.startswith(project_prefixes)
+        }
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        repeated = apply_plan(build_plan(self.answers()))
+        self.assertTrue(repeated["ok"])
+        migrated = json.loads(discovery_path.read_text(encoding="utf-8"))
+        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(set(migrated["managed_paths"]), set(migrated["managed_fingerprints"]))
+        self.assertTrue(Path(first["plugin"]).is_dir())
+
+    def test_rollback_refuses_setup_root_symlink_swap(self):
+        result = apply_plan(build_plan(self.answers()))
+        setup_root = self.workspace / ".lawyeredos"
+        state_text = Path(result["rollback_state"]).read_text(encoding="utf-8")
+        retained = self.root / "retained-setup"
+        setup_root.rename(retained)
+        outside = self.root / "outside-rollback"
+        outside.mkdir()
+        marker = outside / "private.txt"
+        marker.write_text("preserve", encoding="utf-8")
+        (outside / "setup-state.json").write_text(
+            state_text, encoding="utf-8"
+        )
+        setup_root.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            rollback(self.workspace)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
+
+    def test_rollback_rejects_external_state_paths_before_deletion(self):
+        result = apply_plan(build_plan(self.answers()))
+        external = self.root / "external-rollback.txt"
+        external.write_text("preserve", encoding="utf-8")
+        state_path = Path(result["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["created"].append(str(external))
+        state["managed_fingerprints"][str(external)] = "0" * 64
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "outside the managed namespace"):
+            rollback(self.workspace)
+        self.assertEqual(external.read_text(encoding="utf-8"), "preserve")
+
     def test_trial_requires_new_or_empty_workspace(self):
         self.workspace.mkdir()
         (self.workspace / "existing-skill.txt").write_text("keep", encoding="utf-8")
