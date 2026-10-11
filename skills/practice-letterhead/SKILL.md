@@ -38,6 +38,17 @@ and 200 MiB total uncompressed; body text is capped at 5 MiB. Oversized,
 duplicate-member, unsafe-path, truncated, or non-DOCX packages fail without an
 output and require separate inspection rather than bypassing the limit.
 
+Run the bundled linter on the final body before insertion and again after any
+substantive revision:
+
+```bash
+PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredos.voice_lint \
+  "<body.txt>" --register letter
+```
+
+Correct every FAIL in original prose; a finding in a verbatim quotation may be
+disclosed and retained, but is not a general bypass.
+
 ## Verify
 
 Render the DOCX to PDF and page PNGs with the bundled wrapper (or a configured
@@ -58,4 +69,6 @@ positions, admissions, waivers, deadline commitments, or when the user asks.
 Re-hash after review.
 
 Persist only through the no-overwrite writer. Saving produces an internal draft
-and does not authorize sending, signing, filing, or service.
+and does not authorize sending, signing, filing, or service. A collision or
+changed target requires a fresh read and a new preview; never overwrite newer
+work or rename around a protected-path or symlink refusal.

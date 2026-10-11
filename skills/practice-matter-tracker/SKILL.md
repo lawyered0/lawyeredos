@@ -26,7 +26,9 @@ Use names only to locate candidates. For conflict screening, search with
 file number, client, description, opposing party, other parties, and primary
 email in this local register. It does not do fuzzy or alias matching, query
 external sources, maintain a clearance-status field, or make the lawyer's
-final conflict decision. Mutate by exact file number.
+final conflict decision. Report “No located hit in the local register fields
+searched,” never “no conflict,” “clear,” or equivalent. Mutate by exact file
+number.
 
 ## Link the first existing matter folder
 

@@ -266,6 +266,19 @@ external_ai = false
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "ok_read_only")
         self.assertTrue(result["brief"]["present"])
+        self.assertEqual(result["brief"]["characters"], len("# Fictional matter\n"))
+        self.assertRegex(result["brief"]["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_orientation_marks_truncated_brief_and_hashes_full_source(self):
+        config = self.config()
+        brief = self.root / "workspace" / "2030-001-northstar" / "_matter-brief.md"
+        content = "# Fictional matter\n" + ("bounded detail\n" * 3000)
+        brief.write_text(content, encoding="utf-8")
+        result = orient(config, "2030-001", 10)
+        self.assertTrue(result["brief"]["truncated"])
+        self.assertEqual(result["brief"]["characters"], len(content))
+        self.assertEqual(len(result["brief"]["text"]), 30000)
+        self.assertRegex(result["brief"]["sha256"], r"^[0-9a-f]{64}$")
 
     def test_orientation_name_resolution_is_unicode_case_insensitive(self):
         config = self.config()

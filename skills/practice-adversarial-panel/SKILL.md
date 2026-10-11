@@ -49,6 +49,16 @@ Deduplicate findings. Agreement raises salience, not truth. Verify citations
 against the actual extracted source, check the strongest countervailing
 evidence, distinguish observation from inference and legal significance, and
 classify live versus contingent, cured, historical, dormant, or unverified.
+Disposition every material finding as accepted, rejected, or deferred. Correct
+accepted findings in the owning workflow; reject only on a verified source
+basis; and surface deferred findings. A missing controlling source, failed
+reviewer, or deferred material finding blocks any “ready” or equivalent label.
+
+Reviewer findings are evidence, not authority. A panel concern alone never
+establishes that insurer notice, independent advice, withdrawal, conflict
+action, stopping work, or a client warning is required. The owning workflow
+must apply the governing threshold, actual prejudice, urgency, curability, and
+proportional alternatives before recommending a protective step.
 
 Run `review_bundle verify --manifest <manifest>` before reporting. If the hash
 changed, lead with that fact and do not treat the review as read-only.

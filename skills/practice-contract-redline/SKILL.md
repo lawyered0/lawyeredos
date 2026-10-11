@@ -7,6 +7,9 @@ description: Apply established edits as genuine Word tracked changes, verify mar
 
 This skill applies established changes; it does not decide negotiation or legal
 positions. Require an editable `.docx`. Do not reconstruct a contract from PDF.
+Hash the exact source before generation and confirm it is unchanged after all
+outputs are produced. Existing revisions are a separate source state; do not
+silently edit through or accept another reviewer's changes.
 
 The pinned MIT engine is under
 `${LAWYEREDOS_ROOT}/vendor/legal-redline-tools`. Preserve its `LICENSE` and
@@ -29,6 +32,12 @@ source-colliding output paths and stages all requested outputs before publishing
 Input snapshots are bounded at 100 MiB compressed, 50 MiB per package entry,
 and 200 MiB total uncompressed. Oversized, duplicate-member, unsafe-path,
 truncated, or non-DOCX packages fail without output.
+
+Keep counterparty-facing marked/clean files separate from internal rationale,
+walkaway positions, or privileged notes. Generate and persist only the outputs
+the user requested. A Word comment or unresolved revision makes a
+counterparty-facing artifact not ready unless the user expressly decides to
+retain it after review.
 
 Verification requires:
 
@@ -57,7 +66,9 @@ hyperlink, footnote/endnote reference, or external chunk), because hiding the
 visible revision would not safely remove the related package bytes.
 
 Persist only requested, verified, versioned outputs with the
-guarded writer. Never send or negotiate.
+guarded writer. On a collision or stale preview, inspect the current target and
+preview again; never overwrite newer work or bypass a protected-path or symlink
+refusal. Never send or negotiate.
 
 Read [`references/change-set.md`](references/change-set.md) before building a
 change list.
