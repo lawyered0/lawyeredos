@@ -18,8 +18,8 @@ decided contract redlines, calendar planning, and independent draft review.
 
 | Host | Download | SHA-256 |
 |---|---|---|
-| Claude Desktop Code Local | [0.2.0 beta.3](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.3.zip) | Published alongside the immutable download |
-| Codex local project | [0.2.0 beta.2](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-codex-beta.2.zip) | Published alongside the immutable download |
+| Claude Desktop Code Local | [0.2.0 beta.3](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.3.zip) | `65f8d412e6ee656fc525f64f13ff84b35f631ae9878d71a6aef88e0d2e359e67` |
+| Codex local project | [0.2.0 beta.2](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-codex-beta.2.zip) | `65f8d412e6ee656fc525f64f13ff84b35f631ae9878d71a6aef88e0d2e359e67` |
 
 The versioned release ZIPs remain on the
 [LawyeredOS download site](https://www.lawyered.lawyer/lawyeredos). This source
