@@ -34,7 +34,18 @@ def confined_path(root: Path, relative: str) -> Path:
     if not relative or Path(relative).is_absolute():
         raise ValueError("path must be non-empty and relative")
     root = root.resolve()
-    candidate = (root / relative).resolve()
+    relative_path = Path(relative)
+    if ".." in relative_path.parts:
+        raise ValueError("path leaves configured root")
+    unresolved = root / relative_path
+    current = root
+    for part in relative_path.parts:
+        if part in {"", "."}:
+            continue
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("path contains a symlink")
+    candidate = unresolved.resolve()
     if candidate == root or root not in candidate.parents:
         raise ValueError("path leaves configured root")
     return candidate

@@ -80,7 +80,7 @@ class TrackerTests(unittest.TestCase):
         args = mutation_args(
             self.database,
             "create",
-            other_parties="Cedar Guarantor Inc.",
+            other_parties="Café Guarantor Inc.",
             primary_email="fictional.contact@example.invalid",
         )
         preview = preview_mutation(self.database, "create", args)
@@ -89,7 +89,7 @@ class TrackerTests(unittest.TestCase):
         preview = preview_mutation(self.database, "close", close)
         commit_mutation(self.database, "close", close, preview["confirm_token"])
 
-        for query in ("northstar", "harbor paper", "cedar guarantor", "example.invalid"):
+        for query in ("northstar", "harbor paper", "café guarantor", "example.invalid"):
             output = io.StringIO()
             with redirect_stdout(output):
                 result = tracker_main([
@@ -100,6 +100,14 @@ class TrackerTests(unittest.TestCase):
             payload = json.loads(output.getvalue())
             self.assertEqual(payload["query"], query)
             self.assertEqual([row["file_number"] for row in payload["matters"]], ["2030-001"])
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            tracker_main([
+                "find", "--database", str(self.database),
+                "--query", "%", "--status", "all",
+            ])
+        self.assertEqual(json.loads(output.getvalue())["matters"], [])
 
 
 class WorkflowTests(unittest.TestCase):
@@ -158,6 +166,17 @@ external_ai = false
         self.assertEqual(result["status"], "ok_read_only")
         self.assertTrue(result["brief"]["present"])
 
+    def test_orientation_name_resolution_is_unicode_case_insensitive(self):
+        config = self.config()
+        database = self.root / "workspace" / "matters.sqlite3"
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                "UPDATE matters SET client='Étoile Foods Ltd.' WHERE file_number='2030-001'"
+            )
+        result = orient(config, "étoile", 10)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["matter"]["file_number"], "2030-001")
+
     def test_safe_output_refuses_overwrite_and_escape(self):
         matter = self.root / "matter"
         matter.mkdir()
@@ -179,6 +198,39 @@ external_ai = false
         )
         with self.assertRaises(ValueError):
             preview_output(escaped)
+
+    def test_matter_and_output_paths_refuse_internal_symlink_aliases(self):
+        config = self.config()
+        workspace = self.root / "workspace"
+        registered = workspace / "2030-001-northstar"
+        physical = workspace / "physical-matter-folder"
+        registered.rename(physical)
+        registered.symlink_to(physical, target_is_directory=True)
+        result = orient(config, "2030-001", 10)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "folder_unavailable")
+
+        content = self.root / "content.txt"
+        content.write_text("fictional", encoding="utf-8")
+        alias_args = argparse.Namespace(
+            root=str(workspace), matter_folder="2030-001-northstar",
+            relative_path="draft.txt", content_file=str(content), confirm_token=None,
+        )
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            preview_output(alias_args)
+
+        matter = workspace / "real-matter"
+        matter.mkdir()
+        outside_subfolder = workspace / "other-matter-output"
+        outside_subfolder.mkdir()
+        (matter / "correspondence").symlink_to(outside_subfolder, target_is_directory=True)
+        nested_args = argparse.Namespace(
+            root=str(workspace), matter_folder="real-matter",
+            relative_path="correspondence/draft.txt", content_file=str(content),
+            confirm_token=None,
+        )
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            preview_output(nested_args)
 
     def test_calendar_plan(self):
         desired = [{"sync_key":"x","date":"2030-01-02","title":"X","timezone":"UTC"}]

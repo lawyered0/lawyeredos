@@ -22,7 +22,7 @@ PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredo
 ```
 
 Use names only to locate candidates. For conflict screening, search with
-`--status all` and report that the case-insensitive substring search covers
+`--status all` and report that the Unicode case-folded literal substring search covers
 file number, client, description, opposing party, other parties, and primary
 email in this local register. It does not do fuzzy or alias matching, query
 external sources, maintain a clearance-status field, or make the lawyer's

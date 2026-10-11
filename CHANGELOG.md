@@ -15,6 +15,16 @@ their own reviewed version and checksum boundaries.
   screening across recorded fields, while final legal clearance, fuzzy/alias
   matching, external sources, and a clearance-status field remain outside the
   implementation.
+- Made Claude setup roll back installer-created paths and restore replaced
+  managed files when apply raises or is cancelled; Codex cancellation now uses
+  the same cleanup boundary.
+- Rejected symlink components in confined matter and output paths so one matter
+  cannot be accessed through an in-workspace alias.
+- Added a pre-import Python 3.11 version gate to both setup entrypoints so an
+  older macOS Python receives an actionable error instead of a traceback.
+- Made tracker conflict screening and name resolution use Unicode case folding
+  with literal substring semantics, avoiding non-ASCII false negatives and
+  accidental SQL wildcard behavior.
 
 ## 0.2.0 beta.2
 

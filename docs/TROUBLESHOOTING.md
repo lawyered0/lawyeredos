@@ -7,6 +7,25 @@ the launcher by hand. Restore that folder at its original path or extract the
 same/new release to a stable location, recreate its `.venv`, and rerun the
 wizard for the same workspace using the default `reuse` policy.
 
+## Setup stopped or was cancelled during apply
+
+An ordinary installer exception or keyboard cancellation triggers cleanup of
+installer-created paths and restoration of managed files replaced during that
+attempt. Unrelated workspace files are not rollback targets. Preview the same
+plan again and inspect it before retrying.
+
+A process kill, power loss, or host crash cannot run in-process cleanup. If a
+workspace contains partial `.lawyeredos`, `.claude`, or `.agents` state but no
+valid setup result, stop instead of deleting it or selecting `replace`. Preserve
+the directory and seek support with paths and client content redacted.
+
+## Setup exits before showing a plan
+
+Run `python3 --version`. Both setup entrypoints require Python 3.11 or newer and
+now reject an older interpreter before importing the core. Use a retained
+supported interpreter or approved virtual environment; do not modify the system
+Python.
+
 ## The skill is missing in Claude Code
 
 Confirm that you opened the exact configured workspace through

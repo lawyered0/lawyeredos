@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import re
 import sys
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stderr
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -24,6 +26,20 @@ def load_script(name: str):
 
 
 class DistributionTests(unittest.TestCase):
+    def test_setup_entrypoints_reject_old_python_before_core_import(self):
+        for name in ("setup_wizard", "setup_codex"):
+            text = (ROOT / "scripts" / f"{name}.py").read_text(encoding="utf-8")
+            self.assertLess(
+                text.index("require_supported_python()"),
+                text.index("from lawyeredos"),
+            )
+            module = load_script(name)
+            error = io.StringIO()
+            with redirect_stderr(error), self.assertRaises(SystemExit) as raised:
+                module.require_supported_python((3, 9))
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("requires Python 3.11 or newer", error.getvalue())
+
     def test_manifest_and_six_skills(self):
         manifest_path = ROOT / ".claude-plugin" / "plugin.json"
         self.assertTrue(manifest_path.is_file())

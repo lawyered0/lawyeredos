@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -162,6 +163,82 @@ class SetupWizardTests(unittest.TestCase):
         second = apply_plan(build_plan(self.answers(branding_label="Ignored on reuse")))
         self.assertTrue(second["idempotent"])
         self.assertEqual(config_path.read_bytes(), original)
+
+    def test_failed_apply_removes_partial_install_and_preserves_unrelated_file(self):
+        self.workspace.mkdir()
+        private = self.workspace / "private-user-file.txt"
+        private.write_text("preserve", encoding="utf-8")
+
+        def fail_after_partial_tracker(path):
+            path.write_bytes(b"partial tracker")
+            raise OSError("simulated tracker interruption")
+
+        with patch("lawyeredos.setup_wizard.initialize", side_effect=fail_after_partial_tracker):
+            with self.assertRaisesRegex(OSError, "simulated tracker interruption"):
+                apply_plan(build_plan(self.answers(existing_config="error")))
+        self.assertEqual(private.read_text(encoding="utf-8"), "preserve")
+        self.assertFalse((self.workspace / ".lawyeredos").exists())
+        self.assertFalse((self.workspace / ".claude").exists())
+
+    def test_cancelled_apply_removes_partial_install(self):
+        def interrupt_after_partial_tracker(path):
+            path.write_bytes(b"partial tracker")
+            raise KeyboardInterrupt
+
+        with patch("lawyeredos.setup_wizard.initialize", side_effect=interrupt_after_partial_tracker):
+            with self.assertRaises(KeyboardInterrupt):
+                apply_plan(build_plan(self.answers(existing_config="error")))
+        self.assertFalse(self.workspace.exists())
+
+    def test_failed_first_apply_after_state_write_removes_all_created_paths(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        with patch(
+            "lawyeredos.setup_wizard.load_config",
+            side_effect=OSError("simulated late verification failure"),
+        ):
+            with self.assertRaisesRegex(OSError, "simulated late verification failure"):
+                apply_plan(plan)
+        self.assertFalse(self.workspace.exists())
+
+    def test_failed_restore_preserves_recovery_backup(self):
+        first = apply_plan(build_plan(self.answers()))
+        launcher = Path(first["launcher"])
+        launcher.write_text("private launcher modification\n", encoding="utf-8")
+        loaded = load_config(Path(first["config"]))
+        plan = build_plan(self.answers())
+        real_copy2 = shutil.copy2
+
+        def fail_only_during_restore(source, destination, *args, **kwargs):
+            if "backups" in Path(source).parts:
+                raise OSError("simulated restore copy failure")
+            return real_copy2(source, destination, *args, **kwargs)
+
+        with patch(
+            "lawyeredos.setup_wizard.load_config",
+            side_effect=[loaded, OSError("simulated final verification interruption")],
+        ), patch("lawyeredos.setup_wizard.shutil.copy2", side_effect=fail_only_during_restore):
+            with self.assertRaisesRegex(RuntimeError, "recovery backups preserved at"):
+                apply_plan(plan)
+        backups = list((self.workspace / ".lawyeredos" / "backups").glob("*/launch-lawyeredos.sh"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), "private launcher modification\n")
+
+    def test_failed_reapply_restores_replaced_file_and_previous_state(self):
+        first = apply_plan(build_plan(self.answers()))
+        launcher = Path(first["launcher"])
+        state = Path(first["rollback_state"])
+        launcher.write_text("private launcher modification\n", encoding="utf-8")
+        state_before = state.read_bytes()
+        loaded = load_config(Path(first["config"]))
+        plan = build_plan(self.answers())
+        with patch(
+            "lawyeredos.setup_wizard.load_config",
+            side_effect=[loaded, OSError("simulated final verification interruption")],
+        ):
+            with self.assertRaisesRegex(OSError, "simulated final verification interruption"):
+                apply_plan(plan)
+        self.assertEqual(launcher.read_text(encoding="utf-8"), "private launcher modification\n")
+        self.assertEqual(state.read_bytes(), state_before)
 
     def test_projectized_skills_use_only_project_names(self):
         apply_plan(build_plan(self.answers()))
