@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from lawyeredos.calendar_plan import plan
 from lawyeredos.config import load_config
@@ -75,6 +76,106 @@ class TrackerTests(unittest.TestCase):
         commit_mutation(self.database, "timeline", second, second_preview["confirm_token"])
         with self.assertRaises(ValueError):
             commit_mutation(self.database, "timeline", first, first_preview["confirm_token"])
+
+    def test_post_commit_readback_failure_is_not_reported_as_retry_safe(self):
+        args = mutation_args(self.database, "create")
+        preview = preview_mutation(self.database, "create", args)
+        output = io.StringIO()
+        with patch(
+            "lawyeredos.tracker_cli.read_show",
+            side_effect=sqlite3.OperationalError("fictional read failure"),
+        ):
+            with redirect_stdout(output):
+                exit_code = tracker_main([
+                    "create", "--database", str(self.database),
+                    "--file-number", args.file_number,
+                    "--client", args.client,
+                    "--description", args.description,
+                    "--matter-folder", args.matter_folder,
+                    "--opposing-party", args.opposing_party,
+                    "--other-parties", args.other_parties,
+                    "--primary-email", args.primary_email,
+                    "--confirm-token", preview["confirm_token"],
+                ])
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 3)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["committed"])
+        self.assertEqual(result["commit_state"], "committed")
+        self.assertEqual(result["verification_state"], "readback_failed")
+        self.assertEqual(result["audit_verification_state"], "not_performed")
+        self.assertIsInstance(result["audit_id"], int)
+        self.assertFalse(result["retry_safe"])
+        self.assertFalse(result["recovery"]["retry_mutation"])
+        self.assertEqual(result["commit_evidence"]["revision"], 1)
+        self.assertEqual(read_show(self.database, "2030-001")["client"], args.client)
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            commit_mutation(self.database, "create", args, preview["confirm_token"])
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM audit").fetchone()[0], 1)
+
+    def test_successful_commit_only_claims_matter_readback_verification(self):
+        result = self.create_matter()
+        self.assertEqual(result["verification_state"], "readback_verified")
+        self.assertEqual(result["audit_verification_state"], "not_performed")
+        self.assertFalse(result["retry_safe"])
+        with sqlite3.connect(self.database) as connection:
+            audit = connection.execute(
+                "SELECT id, revision, action, file_number FROM audit WHERE id=?",
+                (result["audit_id"],),
+            ).fetchone()
+        self.assertEqual(audit, (result["audit_id"], 1, "create", "2030-001"))
+
+    def test_pre_commit_failure_has_canonical_not_committed_receipt(self):
+        args = mutation_args(self.database, "create")
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = tracker_main([
+                "create", "--database", str(self.database),
+                "--file-number", args.file_number,
+                "--client", args.client,
+                "--description", args.description,
+                "--matter-folder", args.matter_folder,
+                "--confirm-token", "wrong-token",
+            ])
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(result["committed"])
+        self.assertEqual(result["commit_state"], "not_committed")
+        self.assertIsNone(result["audit_id"])
+        self.assertFalse(result["retry_safe"])
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM audit").fetchone()[0], 0)
+
+    def test_commit_call_error_is_unknown_whether_before_or_after_durability(self):
+        for durable in (False, True):
+            with self.subTest(durable=durable):
+                database = self.root / f"commit-{durable}.sqlite3"
+                initialize(database)
+                args = mutation_args(database, "create")
+                preview = preview_mutation(database, "create", args)
+
+                def ambiguous_commit(connection):
+                    if durable:
+                        connection.execute("COMMIT")
+                    raise sqlite3.OperationalError("fictional COMMIT transport failure")
+
+                with patch("lawyeredos.tracker_cli._commit_transaction", side_effect=ambiguous_commit):
+                    result = commit_mutation(database, "create", args, preview["confirm_token"])
+
+                self.assertFalse(result["ok"])
+                self.assertIsNone(result["committed"])
+                self.assertEqual(result["commit_state"], "outcome_unknown")
+                self.assertIsInstance(result["audit_id"], int)
+                self.assertFalse(result["retry_safe"])
+                self.assertEqual(
+                    result["recovery"]["required_inspection"],
+                    ["show", "history", "verify"],
+                )
+                with sqlite3.connect(database) as connection:
+                    audit_count = connection.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
+                self.assertEqual(audit_count, int(durable))
 
     def test_conflict_screening_searches_party_fields_and_closed_matters(self):
         args = mutation_args(

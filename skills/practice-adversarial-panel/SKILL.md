@@ -61,6 +61,15 @@ unchanged. Each finding's `severity` must be exactly `critical`, `material`, or
 `optional`; other labels are invalid. Missing/invalid results are coverage gaps,
 never silent success.
 
+Collection completeness and readiness are separate. `collection_complete`
+means every requested reviewer returned a valid result; it is not clearance.
+`ready` (and the CLI result's `ok`) remains false when there are no controlling
+sources, when coverage gaps or questions remain, or while any critical or
+material finding remains unresolved. Correct the draft or evidence, create a
+new manifest, and re-run the review to clear such a finding. The report's
+`authorizes_action` field is always false: even a ready review does not
+authorize edits, sending, filing, service, or any other action.
+
 Lead with the supported recommendation. Material findings identify the exact
 passage, source, countervailing evidence, consequence, and confidence. Close
 with coverage gaps and unchanged SHA-256. The panel never authorizes edits,
