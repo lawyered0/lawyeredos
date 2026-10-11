@@ -253,6 +253,11 @@ def preview_mutation(path: Path, action: str, args: argparse.Namespace) -> dict[
     return {"ok": True, "dry_run": True, "payload": payload, "confirm_token": preview_token(action, payload)}
 
 
+def _commit_transaction(connection: sqlite3.Connection) -> None:
+    """Isolated for deterministic testing of SQLite's ambiguous COMMIT errors."""
+    connection.execute("COMMIT")
+
+
 def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: str) -> dict[str, Any]:
     connection = sqlite3.connect(path, timeout=5, isolation_level=None)
     connection.row_factory = sqlite3.Row
@@ -303,17 +308,86 @@ def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: st
             )
         new_revision = current_revision + 1
         connection.execute("UPDATE meta SET value=? WHERE key='revision'", (str(new_revision),))
-        connection.execute(
+        audit_cursor = connection.execute(
             "INSERT INTO audit(revision, action, file_number, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
             (new_revision, action, file_number, json.dumps(payload, sort_keys=True), timestamp),
         )
-        connection.execute("COMMIT")
+        audit_id = int(audit_cursor.lastrowid)
+        recovery = {
+            "retry_mutation": False,
+            "database": str(path),
+            "file_number": file_number,
+            "expected_revision": new_revision,
+            "audit_id": audit_id,
+            "required_inspection": ["show", "history", "verify"],
+        }
+        try:
+            _commit_transaction(connection)
+        except Exception as exc:
+            # A COMMIT call can fail before or after SQLite made the transaction
+            # durable. Neither a rollback attempt nor the exception alone can
+            # distinguish those outcomes, so require read-only recovery checks.
+            try:
+                connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            return {
+                "ok": False,
+                "committed": None,
+                "commit_state": "outcome_unknown",
+                "verification_state": "not_performed",
+                "audit_verification_state": "not_performed",
+                "audit_id": audit_id,
+                "retry_safe": False,
+                "revision": new_revision,
+                "action": action,
+                "file_number": file_number,
+                "commit_error": str(exc),
+                "recovery": recovery,
+            }
+        # COMMIT is the durable boundary. A later readback failure must never be
+        # reported as an uncommitted, safely retryable mutation: blindly
+        # replaying the approved command could create a second timeline entry or
+        # apply a later revision than the user approved.
+        commit_evidence = {
+            "revision": new_revision,
+            "action": action,
+            "file_number": file_number,
+            "audit_id": audit_id,
+            "audit_created_at": timestamp,
+        }
+        try:
+            matter = read_show(path, file_number)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "committed": True,
+                "commit_state": "committed",
+                "verification_state": "readback_failed",
+                "audit_verification_state": "not_performed",
+                "audit_id": audit_id,
+                "retry_safe": False,
+                "revision": new_revision,
+                "action": action,
+                "file_number": file_number,
+                "commit_evidence": commit_evidence,
+                "verification_error": str(exc),
+                "recovery": recovery,
+            }
         return {
             "ok": True,
             "committed": True,
+            "commit_state": "committed",
+            "verification_state": "readback_verified",
+            "audit_verification_state": "not_performed",
+            "audit_id": audit_id,
+            "retry_safe": False,
             "revision": new_revision,
             "action": action,
-            "matter": read_show(path, file_number),
+            "file_number": file_number,
+            "commit_evidence": commit_evidence,
+            "recovery": recovery,
+            "matter": matter,
         }
     except Exception:
         try:
@@ -423,10 +497,19 @@ def main(argv: list[str] | None = None) -> int:
             if args.dry_run:
                 emit(preview_mutation(path, args.command, args))
             else:
-                emit(commit_mutation(path, args.command, args, args.confirm_token))
+                result = commit_mutation(path, args.command, args, args.confirm_token)
+                emit(result)
+                return 0 if result["ok"] else 3
         return 0
     except (ValueError, sqlite3.Error, OSError, json.JSONDecodeError) as exc:
-        emit({"ok": False, "committed": False, "error": str(exc)})
+        emit({
+            "ok": False,
+            "committed": False,
+            "commit_state": "not_committed",
+            "audit_id": None,
+            "retry_safe": False,
+            "error": str(exc),
+        })
         return 2
 
 

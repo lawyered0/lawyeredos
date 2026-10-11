@@ -60,6 +60,18 @@ PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredo
 Always re-read after commit. Close, reopen, deadline changes, calendar changes,
 and external practice-manager writes require exact current approval. Do not
 retry an ambiguous result blindly; inspect `history`, `show`, and `verify`.
+The CLI treats SQLite `COMMIT` as the durable boundary. If its post-commit
+readback fails, it reports `committed: true`, `verification_state:
+readback_failed`, and structured recovery evidence. That result is not safe to
+retry: inspect the stated revision with the read commands before doing anything
+else. A successful matter readback reports `verification_state:
+readback_verified`; that narrow state does not verify the audit/history, so the
+result also reports `audit_verification_state: not_performed`.
+If the `COMMIT` call itself raises, the outcome may be durable or rolled back;
+the CLI reports `committed: null`, `commit_state: outcome_unknown`, and
+`retry_safe: false`. Do not infer an outcome or retry. Run all three mandatory
+read-only recovery checks in the result (`show`, `history`, and `verify`) and
+reconcile the reported revision and provisional `audit_id` first.
 
 `court_deadlines` is JSON data, not a verified legal calculation. The register
 stores facts and sources; jurisdiction-specific rules live in separate profiles.
