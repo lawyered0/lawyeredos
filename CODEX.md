@@ -5,9 +5,9 @@ redline, and guarded workflow core. Its Codex integration is separate from the
 Claude integration: Codex discovers selected project skills under
 `.agents/skills`, while the Claude beta continues to use `.claude/`.
 
-Reviewed release: [Codex 0.2.0 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-codex-beta.1.zip),
+Reviewed release: [Codex 0.2.1 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.1-macos-codex-beta.1.zip),
 SHA-256
-`b468300f81bfdcc88398964a2808f6484c5cd2fb56b44d48e6721ab2d7d6e366`.
+`1e7d886c76e2e6cbfeee33bf14833995db91fde2b4a7d1e1565dcb4769d14856`.
 The source branch may be newer; rebuilding it does not replace that archive.
 
 ## Safe fictional trial
@@ -51,6 +51,14 @@ That user-reported functional result is not an independent GUI observation,
 forensic no-write verification, or proof of session-start catalog registration.
 The candidate makes no Windows, Linux, other Python-version, cloud-host, or
 live-connector compatibility claim.
+
+The 0.2.1 beta.1 portable read-only IMAP path also completed one exact
+self-addressed, user-created Gmail test thread in an ordinary Codex Desktop /
+GPT-5 session: the body and three hash-bound DOCX chunks were acknowledged,
+the checkpoint completed, the repeat deduplicated, and guarded bundle deletion
+succeeded. This is bounded evidence for that account, thread, launcher, and
+host—not general Gmail, OAuth/REST, sending, mutation, or session-tool
+acceptance.
 
 Project skill discovery follows Codex's documented `.agents/skills` mechanism.
 Codex can delegate independent reviewers when that capability is exposed in

@@ -98,9 +98,14 @@ The provider has comprehensive synthetic fake-IMAP acceptance. Tests verify
 localized All Mail discovery, exact Gmail raw queries, stable ID conversion,
 read-only selection, `BODY.PEEK`, raw and attachment limits, nested and unnamed
 parts, inline unsupported content, full supported attachment processing, and
-repeat-run deduplication. No live IMAP credential or mailbox was used during
-implementation. Ordinary Claude Desktop and Codex project sessions still need
-separate live-host acceptance.
+repeat-run deduplication. One exact self-addressed, user-created Gmail test
+thread subsequently completed through this adapter in each supported ordinary
+desktop host: Claude Desktop Code Local and Codex Desktop / GPT-5. Each host
+acknowledged the body and three hash-bound DOCX chunks, completed the
+checkpoint, deduplicated the repeat, and completed guarded bundle deletion.
+This accepts only the tested account, thread, launcher, and host; broader
+mailboxes, accounts, versions, OAuth/REST, sending, mutation, and session-tool
+routes remain unaccepted.
 
 One user-created, self-addressed Gmail message was also exercised through the
 authorized connector available in the delegated development session. The
@@ -108,6 +113,6 @@ initial fixed-window design stopped on the long DOCX and exposed the need to
 separate extraction from review. After that correction, the same document
 produced three hash-bound paragraph-aware chunks; the active model reviewed and
 acknowledged each chunk plus the body, final reconciliation advanced the
-checkpoint, and the repeat deduplicated. This is delegated connector/core
-evidence, not live acceptance of this IMAP provider or an ordinary Claude/Codex
-host session.
+checkpoint, and the repeat deduplicated. This remains delegated connector/core
+evidence and is separate from the later, narrow ordinary-host portable-IMAP
+acceptance above.

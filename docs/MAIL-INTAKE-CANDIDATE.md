@@ -1,5 +1,19 @@
 # Matter-mail intake candidate record
 
+## 0.2.1 acceptance addendum — 2026-10-11
+
+After the 0.2.0 record below was completed, one exact self-addressed,
+user-created Gmail test thread passed through the portable read-only IMAP path
+in each supported ordinary desktop host: Claude Desktop Code Local and Codex
+Desktop / GPT-5. Each host acknowledged one body and three hash-bound DOCX
+chunks, completed the checkpoint, deduplicated the repeat, and completed
+guarded bundle deletion. This accepts only the tested account, thread,
+launcher, and host; it does not establish broader mailbox/account coverage,
+OAuth or REST acceptance, sending, mutation, or general session-tool support.
+
+The remainder of this document preserves the earlier 0.2.0 beta.3/beta.2 gate
+as a historical record.
+
 This record covers the shared matter-mail intake released in Claude beta.3 and
 Codex beta.2. It is not a complete live-mail acceptance. The owner waived the
 pending ordinary-host/live-IMAP test as a publication prerequisite; the
