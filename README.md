@@ -27,6 +27,12 @@ repository is the place for review and contributions. Earlier versioned ZIPs
 remain immutable; the version and checksum published beside each download are
 its release boundary.
 
+For continuity, the immediately preceding reviewed archives remain available
+with their original SHA-256 checksums: Claude beta.2
+`0f3eccf6e62e0bcb7ffbb88a6c14dd2f96c8a05acba73b93bb4bff3173af7cd5`
+and Codex beta.1
+`b468300f81bfdcc88398964a2808f6484c5cd2fb56b44d48e6721ab2d7d6e366`.
+
 ## Safe first trial
 
 Extract the package for your host into a private folder you will retain. For
