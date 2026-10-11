@@ -1,21 +1,21 @@
 # Workflow parity and deferred capabilities
 
-The current branch adds an unreleased **instruction layer** described in the
+Released 0.2.3 beta.1 adds an **instruction layer** described in the
 [workflow catalog](WORKFLOW-CATALOG.md) and
 [gap disposition matrix](WORKFLOW-COMPLETENESS.md). The table below records the
 published baseline's mechanical/host evidence; it is not acceptance of the new
 manual modules. Added semantic completion rules propose exact records rather
 than infer or authorize automatic updates. Native discovery of the nine added
 modules and broader acquisition remain separately unsupported. Read the
-[release plan](WORKFLOW-RELEASE-PLAN.md) before making any new package/site claim.
+[release record](RELEASE-0.2.3.md) for completed package and installation checks.
 
 This is a first private rewrite, not a drop-in replacement for an established
 practice environment. “Tested” means fixture or structural testing in this
 package; it does not mean a live account or real matter was used.
 
-## Current dual-host candidate boundary (2026-10-11)
+## Historical dual-host baseline evidence (2026-10-11)
 
-The draft integration candidate covers both Claude and Codex. Its portable
+The 0.2.2 integration baseline covers both Claude and Codex. Its portable
 mechanical contracts are exercised with fictional executable tests, while
 live accounts, genuine host-agent invocation, and private-practice artifacts
 retain separate acceptance boundaries. This is reviewed hardening, not full

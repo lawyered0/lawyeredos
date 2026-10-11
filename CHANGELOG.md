@@ -3,7 +3,7 @@
 All notable source changes are recorded here. Published host packages retain
 their own reviewed version and checksum boundaries.
 
-## 0.2.3 beta.1 — release candidate
+## 0.2.3 beta.1 — 2026-10-11
 
 - Add shared scope, source-verification, client-advice/delivery, date,
   semantic-record/handoff and intake/closure contracts to existing workflows.
@@ -18,6 +18,12 @@ their own reviewed version and checksum boundaries.
   and release limits. The initial instruction review did not execute project
   checks; ordinary unchanged release validation is a separate candidate gate.
   The published 0.2.2 beta.1 archives remain unchanged.
+- Publish the two reviewed 172-member, 1,554,842-byte packages at protected merge
+  `c2dca1a7028bd77f0e69de9a9f9fec3a42e4e218`, with shared SHA-256
+  `c5b28fb086f18dc09c2ec89062a578e06469036538d71953cb8134f59312ce35`.
+  Required reviewed-head and post-merge CI, 254 project tests, 103 vendored tests,
+  ordinary acceptance, strict plugin/archive checks and fresh both-host
+  installed-reference checks passed. See [release record](docs/RELEASE-0.2.3.md).
 
 ## 0.2.2 beta.1 — 2026-10-11
 

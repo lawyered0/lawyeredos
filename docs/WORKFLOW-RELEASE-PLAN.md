@@ -1,5 +1,10 @@
 # Instruction candidate release plan
 
+This plan was completed for published `v0.2.3-beta.1`. The
+[release record](RELEASE-0.2.3.md) identifies the immutable artifact and completed
+checks. Retain the plan below as its preparation scope; it does not authorize
+replacement of published bytes or expansion of acceptance claims.
+
 This `0.2.3 beta.1` candidate is a documentation/instruction addition to the
 published `v0.2.2-beta.1` baseline. It is presented as a draft pull request for
 exact-source review. Only static package-version values change in Python;

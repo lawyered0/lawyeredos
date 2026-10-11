@@ -1,6 +1,6 @@
 # LawyeredOS for Codex
 
-This source branch adds unreleased manual workflow instructions listed in
+Released 0.2.3 beta.1 includes manual workflow instructions listed in
 [WORKFLOW-CATALOG.md](docs/WORKFLOW-CATALOG.md). The existing six projectized
 skills remain the only native installed entries. New modules are read at their
 source paths through the current matter entrypoint; their frontmatter is not
@@ -15,10 +15,13 @@ redline, and guarded workflow core. Its Codex integration is separate from the
 Claude integration: Codex discovers selected project skills under
 `.agents/skills`, while the Claude beta continues to use `.claude/`.
 
-Reviewed release: [Codex 0.2.1 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.1-macos-codex-beta.1.zip),
+Reviewed release: [Codex 0.2.3 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.3-beta.1/lawyeredos-0.2.3-macos-codex-beta.1.zip),
 SHA-256
-`1e7d886c76e2e6cbfeee33bf14833995db91fde2b4a7d1e1565dcb4769d14856`.
+`c5b28fb086f18dc09c2ec89062a578e06469036538d71953cb8134f59312ce35`.
 The source branch may be newer; rebuilding it does not replace that archive.
+See the [0.2.3 release record](docs/RELEASE-0.2.3.md) for exact-head checks and
+fresh installed-reference validation. Historical host results below retain
+their original scope and do not prove new substantive instruction behavior.
 
 ## Safe fictional trial
 
