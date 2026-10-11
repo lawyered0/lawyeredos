@@ -17,10 +17,13 @@ reply state, attachment/content review, tracker commit receipts, hash-bound
 four-lens review orchestration, letter generation, redline/clean-copy safety,
 and installer ownership/fingerprint checks. The following limits remain:
 
-- Matter orientation still returns a bounded prefix plus hash, length, and
-  truncation metadata. Instructions require targeted follow-up reads, but there
-  is no compact section-aware loader, first-H1 identity check, decisions or
-  communications synthesis, or frozen source snapshot.
+- Matter orientation now fails closed unless the brief's sole first H1 matches
+  the tracker file number, or an existing 0.2.1 brief's H1 matches the exact
+  tracker client name. It fully hashes bounded sources, prioritizes complete
+  sections or paragraphs within a disclosed output budget, recovers structured
+  decision and communication locators, and reports selected and omitted
+  coverage. This is a read-only compact view, not a frozen source snapshot or
+  substantive verification of the returned evidence.
 - One supported next action is required, and tracker mutations use explicit
   preview/commit receipts. Completed work is not automatically reconciled into
   timeline and next-action records; that remains a separate approved mutation.
@@ -49,7 +52,7 @@ external-account authority are intentional differences, not deferred success.
 
 | Workflow | Preserved and tested | Intentional change | Deferred or missing | Live verification still required |
 |---|---|---|---|---|
-| Work on matter | Unique tracker resolution, folder confinement, bounded brief/file inventory, bounded matter-email intake, safe supported attachment filing/review, local memory search, guarded memory writes, PDF extraction/OCR | Neutral paths and explicit adapters; read-only mailbox, local attachment and private review-ledger writes only | Section-aware orientation; atomic guarded matter-memory updates; background polling and automatic authoritative record update | Broader ordinary-host session-tool behavior; broader IMAP plus live REST; live OCR. One exact user-created Gmail thread completed through portable IMAP in each supported desktop host; a separate bounded delegated-session self-test completed the connector/core and host-model review path without a real matter. |
+| Work on matter | Unique tracker resolution, folder confinement, section-aware bounded brief/decisions/communications recovery with identity and coverage checks, bounded file inventory and matter-email intake, safe supported attachment filing/review, local memory search, guarded memory writes, PDF extraction/OCR | Neutral paths and explicit adapters; read-only mailbox, local attachment and private review-ledger writes only | Frozen orientation snapshot; atomic guarded matter-memory updates; background polling and automatic authoritative record update | Broader ordinary-host session-tool behavior; broader IMAP plus live REST; live OCR. One exact user-created Gmail thread completed through portable IMAP in each supported desktop host; a separate bounded delegated-session self-test completed the connector/core and host-model review path without a real matter. |
 | Matter tracker | SQLite schema, health check, find/show/list/history, party/name candidate screening across the local register, guarded mutations, preview-token migration, CSV/JSON export, XLSX projection | SQLite is the only authority; XLSX is derived; screening is not a legal clearance decision | Dedicated conflict-clearance decision/status, fuzzy or alias matching, external conflict sources, folder creation, practice-manager projection | Legacy mapping and concurrent use against a disposable copy |
 | Correspondence | Neutral DOCX creation from immutable scanned template bytes, package-wide marker/review-markup refusal, configured author, atomic no-overwrite save, renderer, configurable voice lint | New anonymous template; no logo or signature | Installed-template manifest, advanced private-template topology, automatic outbound gate, sending | Private template compatibility, fonts, renderer, and full-page visual QA in target host |
 | Contract redline | MIT engine and upstream tests, genuine text OOXML revisions, simple accepted-copy test, renderer | Author is configured; private rationale stays outside the external change set | Complete Word revision-class acceptance, automatic internal/external separation, outbound automation | Representative complex contracts and target Word version |

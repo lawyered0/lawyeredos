@@ -240,7 +240,10 @@ class WorkflowTests(unittest.TestCase):
         matter = workspace / "2030-001-northstar"
         matter.mkdir(parents=True)
         scratch.mkdir()
-        (matter / "_matter-brief.md").write_text("# Fictional matter\n", encoding="utf-8")
+        (matter / "_matter-brief.md").write_text(
+            "# Northstar Bakery Ltd.\n\n## Status\n\nFictional matter.\n",
+            encoding="utf-8",
+        )
         database = workspace / "matters.sqlite3"
         initialize(database)
         with sqlite3.connect(database) as connection:
@@ -281,18 +284,24 @@ external_ai = false
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "ok_read_only")
         self.assertTrue(result["brief"]["present"])
-        self.assertEqual(result["brief"]["characters"], len("# Fictional matter\n"))
+        self.assertEqual(
+            result["brief"]["characters"],
+            len("# Northstar Bakery Ltd.\n\n## Status\n\nFictional matter.\n"),
+        )
         self.assertRegex(result["brief"]["sha256"], r"^[0-9a-f]{64}$")
 
     def test_orientation_marks_truncated_brief_and_hashes_full_source(self):
         config = self.config()
         brief = self.root / "workspace" / "2030-001-northstar" / "_matter-brief.md"
-        content = "# Fictional matter\n" + ("bounded detail\n" * 3000)
+        content = "# 2030-001 — Fictional matter\n\n## Background\n\n" + ("bounded detail\n" * 3000)
         brief.write_text(content, encoding="utf-8")
         result = orient(config, "2030-001", 10)
         self.assertTrue(result["brief"]["truncated"])
         self.assertEqual(result["brief"]["characters"], len(content))
-        self.assertEqual(len(result["brief"]["text"]), 30000)
+        self.assertLessEqual(result["brief"]["coverage"]["selected_characters"], 30000)
+        self.assertEqual(result["brief"]["coverage"]["selection"],
+                         "section_aware_complete_sections_or_passages")
+        self.assertTrue(result["brief"]["coverage"]["omitted"])
         self.assertRegex(result["brief"]["sha256"], r"^[0-9a-f]{64}$")
 
     def test_orientation_name_resolution_is_unicode_case_insensitive(self):
@@ -302,6 +311,8 @@ external_ai = false
             connection.execute(
                 "UPDATE matters SET client='Étoile Foods Ltd.' WHERE file_number='2030-001'"
             )
+        brief = self.root / "workspace" / "2030-001-northstar" / "_matter-brief.md"
+        brief.write_text("# Étoile Foods Ltd.\n\n## Status\n\nFictional matter.\n", encoding="utf-8")
         result = orient(config, "étoile", 10)
         self.assertTrue(result["ok"])
         self.assertEqual(result["matter"]["file_number"], "2030-001")

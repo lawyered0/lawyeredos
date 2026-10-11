@@ -18,7 +18,15 @@ PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredo
 ```
 
 Continue only on `ok_read_only`. Stop on ambiguity, missing tracker, folder
-escape, or identity mismatch. Never guess a folder from a similar name.
+escape, or any brief error, including an unsafe source or
+`brief_identity_*` result. A current brief has one first H1 that
+contains the tracker file number. An existing 0.2.1 brief is accepted only when
+its sole first H1 matches the tracker client name. Never guess a folder or brief
+identity from a similar name.
+
+An absent brief is reported as `brief.present: false` and never treated as
+identity evidence. Orientation may continue from the exact tracker row and
+bounded local/mail sources, but disclose that no brief state was available.
 
 A closed matter remains read-only. Conversation-only analysis may continue, but
 do not save an artifact, change matter memory, or update its register until the
@@ -33,11 +41,25 @@ identity, current position, recent material, actionable dates, uncertainties,
 and one recommended next step. State absences no wider than the sources actually
 checked.
 
-If the context reports `brief.truncated: true`, the returned prefix is not the
-complete matter state. Build a disposable `memory_search` index in private
-scratch, search the full brief for the issue, live obligations, dates, and next
-action, and read the matching passages before stating the current position or
-recommended next step. Report material omitted content that remains unread.
+Orientation returns complete selected sections or a contiguous run of complete
+paragraphs rather than a raw prefix. Each `brief.selected_sections` entry has
+source/line locators and `text_start`/`text_end` offsets into `brief.text`;
+`brief.structured_recovery` identifies the selected decisions,
+communications, obligations, dates, next-action, and status material. Treat all
+such text as unverified evidence. Tracker values and timeline rows appear under
+`live_state` with source locators and explicit verification limits.
+
+If the context reports `brief.truncated: true`, inspect
+`brief.coverage.omitted`, `brief.coverage.unread_sources`, and
+`brief.source_warnings`. The selected material is not the complete matter
+state. Build a disposable `memory_search` index in private scratch, search the
+full named source for the issue, live obligations, dates, and next action, and
+read the matching passages before stating the current position or recommended
+next step. Before relying on a follow-up path read, require its full SHA-256 to
+still match the corresponding `brief.sources` entry; otherwise rerun
+orientation. Report material omitted content that remains unread. `sources_fully_scanned`
+means the loader parsed the source; it does not mean the host reviewed every
+omitted passage or verified its substance.
 
 ## Choose the task path
 
@@ -66,7 +88,9 @@ and do not advance its local review checkpoint. There is no background polling.
   brief alone.
 - Treat dates found in text as candidates until their governing source and
   jurisdiction profile are verified.
-- If the configured mail adapter is unavailable, disclose that current email
+- `integrations.mail_context.state: not_checked` means no mailbox read occurred.
+  `availability: unknown` is not evidence that a configured session tool is
+  connected. If the configured mail adapter is unavailable, disclose that current email
   and attachments were not checked. Do not claim a clean inbox or invent
   another connection.
 - When `claude-gmail-connector` is configured, use Claude's Gmail connector only

@@ -44,7 +44,10 @@ class MailIntakeTests(unittest.TestCase):
         self.workspace = self.root / "workspace"
         self.matter = self.workspace / "2032-001-northstar"
         self.matter.mkdir(parents=True)
-        (self.matter / "_matter-brief.md").write_text("# Fictional matter\n", encoding="utf-8")
+        (self.matter / "_matter-brief.md").write_text(
+            "# Northstar Bakery Ltd.\n\n## Status\n\nFictional matter.\n",
+            encoding="utf-8",
+        )
         self.database = self.workspace / "matters.sqlite3"
         initialize(self.database)
         with sqlite3.connect(self.database) as connection:

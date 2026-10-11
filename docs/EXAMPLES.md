@@ -16,6 +16,11 @@ All names and file numbers below are fictional.
 
 ## Orient to a matter
 
+The brief's first heading should bind it to the tracker record, for example
+`# 2030-001 — Northstar Bakery Ltd.`. Existing 0.2.1 briefs whose sole first H1
+is the exact tracker client name remain readable; other missing, duplicate, or
+conflicting identity headings fail closed.
+
 ```bash
 PYTHONPATH=src python3 -m lawyeredos.matter_context \
   --config /private/config.toml --identifier 2030-001

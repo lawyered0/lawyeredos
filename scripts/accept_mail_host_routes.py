@@ -173,7 +173,10 @@ def _run_route(root: Path, adapter: str, source: str) -> dict:
     workspace = root / adapter
     matter = workspace / "2032-001-northstar"
     matter.mkdir(parents=True)
-    (matter / "_matter-brief.md").write_text("# Fictional matter\n", encoding="utf-8")
+    (matter / "_matter-brief.md").write_text(
+        "# Northstar Bakery Ltd.\n\n## Status\n\nFictional matter.\n",
+        encoding="utf-8",
+    )
     tracker = workspace / "matters.sqlite3"
     initialize(tracker)
     with sqlite3.connect(tracker) as connection:
