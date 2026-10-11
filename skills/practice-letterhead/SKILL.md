@@ -25,7 +25,11 @@ UTF-8 text file with no template markers. Then run:
 Do not invent facts, legal propositions, amounts, commitments, or dates. Do not
 leave placeholders, drafting notes, comments, or template directions. A neutral
 public template must not contain a real signature, logo, personal contact data,
-or identifying metadata.
+or identifying metadata. The helper preserves the formatting of unaffected
+runs when a placeholder spans multiple runs or appears in a header/footer table.
+It refuses templates containing pre-existing tracked revisions or comments and
+refuses every existing or symlinked output path; resolve those conditions rather
+than flattening, accepting, or overwriting them implicitly.
 
 ## Verify
 

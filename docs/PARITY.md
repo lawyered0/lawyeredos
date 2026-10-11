@@ -27,7 +27,7 @@ package; it does not mean a live account or real matter was used.
 | DOCX renderer and rasterizer | `render_docx.py` | Preserved through LibreOffice/Poppler; tested on macOS |
 | Voice/style linter | `voice_lint.py` | Anonymous configurable rules; tested |
 | XLSX tracker projection | `tracker_xlsx.py` | Disposable projection preserved; tested |
-| DOCX tracked-change acceptor | `accept_tracked_changes.py` | Text insert/delete/move wrappers only; simple round trip tested |
+| DOCX tracked-change acceptor | `accept_tracked_changes.py` | Insert/delete/move acceptance with package-wide cleanup validation; comments and unsupported property revisions fail closed |
 | Calendar connector/writer | `calendar_plan.py` and `integrations.py` | Explicit opt-in adapter; network behavior tested with a fake transport only |
 | Practice-management extension | None | Deferred; adapter reports unavailable |
 | Cross-provider review runner | Claude Code plugin agent plus `review_orchestrator.py` | Intentionally replaced; deterministic synthetic orchestration tested |
