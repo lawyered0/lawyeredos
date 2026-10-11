@@ -1,5 +1,13 @@
 # Codex beta.2 coverage matrix
 
+> **0.2.1 beta.1 addendum (2026-10-11):** one exact self-addressed,
+> user-created Gmail test thread completed through portable read-only IMAP in
+> an ordinary Codex Desktop / GPT-5 session. The body and three hash-bound DOCX
+> chunks were acknowledged, the checkpoint completed, the repeat deduplicated,
+> and guarded bundle deletion succeeded. This accepts only that account,
+> thread, launcher, and host—not broader Gmail, OAuth/REST, sending, mutation,
+> or session-tool behavior. The matrix below preserves the earlier beta.2 gate.
+
 This matrix records the private gate completed before Codex 0.2.0 beta.1 was
 published. `Pass` identifies actual evidence; `Pending` is not accepted; and
 `Excluded` records an intentional boundary. Publication rows describe that

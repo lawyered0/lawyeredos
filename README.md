@@ -18,8 +18,8 @@ decided contract redlines, calendar planning, and independent draft review.
 
 | Host | Download | SHA-256 |
 |---|---|---|
-| Claude Desktop Code Local | [0.2.0 beta.3](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.3.zip) | `65f8d412e6ee656fc525f64f13ff84b35f631ae9878d71a6aef88e0d2e359e67` |
-| Codex local project | [0.2.0 beta.2](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-codex-beta.2.zip) | `65f8d412e6ee656fc525f64f13ff84b35f631ae9878d71a6aef88e0d2e359e67` |
+| Claude Desktop Code Local | [0.2.1 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.1-macos-beta.1.zip) | `1e7d886c76e2e6cbfeee33bf14833995db91fde2b4a7d1e1565dcb4769d14856` |
+| Codex local project | [0.2.1 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.1-macos-codex-beta.1.zip) | `1e7d886c76e2e6cbfeee33bf14833995db91fde2b4a7d1e1565dcb4769d14856` |
 
 The versioned release ZIPs remain on the
 [LawyeredOS download site](https://www.lawyered.lawyer/lawyeredos). This source
@@ -27,8 +27,8 @@ repository is the place for review and contributions. Earlier versioned ZIPs
 remain immutable; the version and checksum published beside each download are
 its release boundary.
 
-For continuity, the immediately preceding reviewed archives remain available
-with their original SHA-256 checksums: Claude beta.2
+For continuity, earlier reviewed archives remain available with their original
+SHA-256 checksums: Claude beta.2
 `0f3eccf6e62e0bcb7ffbb88a6c14dd2f96c8a05acba73b93bb4bff3173af7cd5`
 and Codex beta.1
 `b468300f81bfdcc88398964a2808f6484c5cd2fb56b44d48e6721ab2d7d6e366`.
@@ -140,14 +140,17 @@ route based on localized All Mail discovery, stable Gmail IDs, and
 
 | Host | Accepted scope |
 |---|---|
-| Claude Desktop Code, Local environment, macOS | Beta.3 preserves the beta.2 project-local host path verified with Python 3.12 and adds the shared mail core covered by automated, synthetic, and delegated-session acceptance. |
-| Codex local project, macOS | Beta.2 preserves the beta.1 project-local discovery and persistence path verified with Python 3.12.7 and Codex CLI 0.147.0, and adds the shared mail core. Desktop functional persistence evidence is user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
+| Claude Desktop Code, Local environment, macOS | 0.2.1 beta.1 preserves the project-local host path verified with Python 3.12 and adds a narrowly accepted ordinary-host portable-IMAP path. |
+| Codex local project, macOS | 0.2.1 beta.1 preserves project-local discovery and persistence verified with Python 3.12.7 and Codex CLI 0.147.0, and adds a narrowly accepted ordinary-host portable-IMAP path. Desktop functional persistence evidence remains user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
 
 Windows, Linux, other Python or host versions, and cloud execution are not
-accepted targets. A bounded connector-to-core read of one user-created Gmail
-self-test completed three hash-bound DOCX chunks plus the message body through
-actual model acknowledgements and repeat deduplication. This is delegated-session
-evidence, not ordinary-host or portable-IMAP acceptance. Claude's documented Gmail connector reads messages
+accepted targets. On each supported desktop host, one exact self-addressed,
+user-created Gmail test thread completed through the portable read-only IMAP
+path: one body and three hash-bound DOCX chunks were acknowledged, the
+checkpoint completed, the repeat deduplicated, and guarded bundle deletion
+succeeded. That is acceptance only for the tested account, thread, host, and
+launcher—not a claim about other mailboxes, accounts, host versions, OAuth or
+REST adapters, sending, or mailbox mutation. Claude's documented Gmail connector reads messages
 but directly exposes attachment metadata rather than attachment contents. Codex
 defines MCP/plugin tool discovery but not a built-in Gmail tool contract. Either
 host uses an already-authorized runtime read tool only when one is actually
