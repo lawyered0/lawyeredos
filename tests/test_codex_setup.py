@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -98,6 +99,87 @@ class CodexSetupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not replace"):
             build_plan(self.answers(existing="replace"))
 
+    def test_apply_rechecks_managed_directories_after_preview_symlink_swap(self):
+        plan = build_plan(self.answers())
+        outside = self.root / "outside"
+        outside.mkdir()
+        marker = outside / "keep.txt"
+        marker.write_text("preserve", encoding="utf-8")
+        self.workspace.mkdir()
+        (self.workspace / ".agents").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            apply_plan(plan)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
+        self.assertEqual(list(outside.iterdir()), [marker])
+
+    def test_apply_refuses_leaf_symlinks_created_after_preview(self):
+        plan = build_plan(self.answers())
+        outside = self.root / "outside.txt"
+        outside.write_text("preserve", encoding="utf-8")
+        outside.chmod(0o640)
+        setup_root = self.workspace / ".lawyeredos"
+        setup_root.mkdir(parents=True)
+        Path(plan["runner"]).symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, "managed file must not be a symlink"):
+            apply_plan(plan)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
+        self.assertEqual(outside.stat().st_mode & 0o777, 0o640)
+
+    def test_apply_refuses_valid_discovery_file_that_appears_after_preview(self):
+        plan = build_plan(self.answers())
+        discovery = Path(plan["discovery"])
+        discovery.parent.mkdir(parents=True)
+        content = json.dumps({
+            "schema_version": 2,
+            "host": "codex",
+            "package_digest": plan["package_digest"],
+            "managed_paths": [],
+            "managed_fingerprints": {},
+        })
+        discovery.write_text(content, encoding="utf-8")
+        discovery.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(discovery.read_text(encoding="utf-8"), content)
+        self.assertEqual(discovery.stat().st_mode & 0o777, 0o640)
+
+    def test_apply_refuses_discovery_skill_symlink_created_after_preview(self):
+        plan = build_plan(self.answers())
+        outside = self.root / "outside-skill"
+        outside.mkdir()
+        marker = outside / "SKILL.md"
+        marker.write_text("private", encoding="utf-8")
+        skill = Path(plan["project_skills"]["matter"])
+        skill.parent.mkdir(parents=True)
+        skill.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "appeared after preview"):
+            apply_plan(plan)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "private")
+
+    def test_apply_refuses_tracker_that_appears_after_preview(self):
+        plan = build_plan(self.answers())
+        tracker = self.workspace / ".lawyeredos" / "data" / "matters.sqlite3"
+        tracker.parent.mkdir(parents=True)
+        tracker.write_bytes(b"private tracker")
+        tracker.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(tracker.read_bytes(), b"private tracker")
+        self.assertEqual(tracker.stat().st_mode & 0o777, 0o640)
+
+    def test_tracker_race_is_never_registered_for_rollback(self):
+        plan = build_plan(self.answers())
+        tracker = self.workspace / ".lawyeredos" / "data" / "matters.sqlite3"
+
+        def simulate_race(path):
+            path.write_bytes(b"concurrent private tracker")
+            raise ValueError("tracker path appeared after preview")
+
+        with patch("lawyeredos.codex_setup.initialize_tracker_exclusive", side_effect=simulate_race):
+            with self.assertRaisesRegex(RuntimeError, "automatic rollback was incomplete"):
+                apply_plan(plan)
+        self.assertEqual(tracker.read_bytes(), b"concurrent private tracker")
+
     def test_installed_skills_use_codex_runtime_and_session_mail_boundary(self):
         result = apply_plan(build_plan(self.answers(mail="session-tools")))
         work_skill = Path(result["skills"]["matter"]) / "SKILL.md"
@@ -145,7 +227,7 @@ class CodexSetupTests(unittest.TestCase):
             path.write_bytes(b"partial")
             raise OSError("simulated interruption")
 
-        with patch("lawyeredos.codex_setup.initialize", side_effect=fail_after_partial_tracker):
+        with patch("lawyeredos.setup_wizard.initialize", side_effect=fail_after_partial_tracker):
             with self.assertRaisesRegex(OSError, "simulated interruption"):
                 apply_plan(build_plan(self.answers()))
         self.assertEqual(private.read_text(encoding="utf-8"), "preserve")
@@ -157,12 +239,14 @@ class CodexSetupTests(unittest.TestCase):
             path.write_bytes(b"partial")
             raise KeyboardInterrupt
 
-        with patch("lawyeredos.codex_setup.initialize", side_effect=interrupt_after_partial_tracker):
+        with patch("lawyeredos.setup_wizard.initialize", side_effect=interrupt_after_partial_tracker):
             with self.assertRaises(KeyboardInterrupt):
                 apply_plan(build_plan(self.answers()))
         self.assertFalse(self.workspace.exists())
 
     def test_cancelled_apply_preserves_concurrently_created_unrelated_file(self):
+        plan = build_plan(self.answers())
+
         def interrupt_during_plugin_copy(source, destination, *args, **kwargs):
             unrelated = self.workspace / ".agents" / "skills" / "unrelated-concurrent.txt"
             unrelated.write_text("preserve", encoding="utf-8")
@@ -170,7 +254,7 @@ class CodexSetupTests(unittest.TestCase):
 
         with patch("lawyeredos.codex_setup.shutil.copytree", side_effect=interrupt_during_plugin_copy):
             with self.assertRaisesRegex(RuntimeError, "automatic rollback was incomplete"):
-                apply_plan(build_plan(self.answers()))
+                apply_plan(plan)
         unrelated = self.workspace / ".agents" / "skills" / "unrelated-concurrent.txt"
         self.assertEqual(unrelated.read_text(encoding="utf-8"), "preserve")
 
@@ -185,6 +269,66 @@ class CodexSetupTests(unittest.TestCase):
         self.assertEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), new_plugin.resolve())
         for path in upgraded["skills"].values():
             self.assertTrue(Path(path).resolve().is_relative_to(new_plugin.resolve()))
+
+    def test_repeat_install_rejects_tampered_versioned_core(self):
+        first = apply_plan(build_plan(self.answers()))
+        skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\nprivate tamper\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "versioned Codex core content changed"):
+            build_plan(self.answers(existing="reuse"))
+        self.assertIn("private tamper", skill.read_text(encoding="utf-8"))
+
+    def test_apply_rechecks_versioned_core_after_preview(self):
+        first = apply_plan(build_plan(self.answers()))
+        plan = build_plan(self.answers(existing="reuse"))
+        skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\npost-preview tamper\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertIn("post-preview tamper", skill.read_text(encoding="utf-8"))
+
+    def test_repeat_preview_rejects_empty_directory_and_special_entry_in_core(self):
+        first = apply_plan(build_plan(self.answers()))
+        plugin = Path(first["plugin"])
+        empty = plugin / "PRIVATE-EMPTY"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "versioned Codex core content changed"):
+            build_plan(self.answers(existing="reuse"))
+        empty.rmdir()
+        fifo = plugin / "PRIVATE-FIFO"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "unsupported filesystem entry"):
+            build_plan(self.answers(existing="reuse"))
+        fifo.unlink()
+
+    def test_apply_rejects_post_preview_empty_directory_and_special_entry_in_core(self):
+        first = apply_plan(build_plan(self.answers()))
+        plugin = Path(first["plugin"])
+        plan = build_plan(self.answers(existing="reuse"))
+        empty = plugin / "PRIVATE-EMPTY"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        empty.rmdir()
+        plan = build_plan(self.answers(existing="reuse"))
+        fifo = plugin / "PRIVATE-FIFO"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "unsupported filesystem entry"):
+            apply_plan(plan)
+        fifo.unlink()
+
+    def test_schema_one_discovery_migrates_without_broadening_ownership(self):
+        first = apply_plan(build_plan(self.answers()))
+        discovery_path = Path(first["discovery"])
+        discovery = json.loads(discovery_path.read_text(encoding="utf-8"))
+        discovery["schema_version"] = 1
+        discovery.pop("managed_fingerprints")
+        discovery_path.write_text(json.dumps(discovery), encoding="utf-8")
+        repeated = apply_plan(build_plan(self.answers(existing="reuse")))
+        self.assertTrue(repeated["ok"])
+        migrated = json.loads(discovery_path.read_text(encoding="utf-8"))
+        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(set(migrated["managed_paths"]), set(migrated["managed_fingerprints"]))
 
 
 if __name__ == "__main__":
