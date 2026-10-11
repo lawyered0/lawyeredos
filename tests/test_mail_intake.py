@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import imaplib
 import io
 import json
 import sqlite3
@@ -808,6 +809,53 @@ class FakeImapClient:
         return "BYE", [b"closed"]
 
 
+class WireRecordingImapClient:
+    """Exercise imaplib's real command formatter without opening a socket."""
+
+    select = imaplib.IMAP4.select
+    _command = imaplib.IMAP4._command
+    _new_tag = imaplib.IMAP4._new_tag
+
+    def __init__(self, list_entry, *, encoding="ascii", error_stage=""):
+        self.list_entry = list_entry
+        self.error_stage = error_stage
+        self.sent = []
+        self.state = "AUTH"
+        self.untagged_responses = {}
+        self.is_readonly = False
+        self.literal = None
+        self.tagpre = b"A"
+        self.tagnum = 0
+        self.tagged_commands = {}
+        self._encoding = encoding
+        self.debug = 0
+
+    def login(self, _account, _password):
+        if self.error_stage == "login":
+            raise imaplib.IMAP4.error("server login detail must not escape")
+        return "OK", [b"authenticated"]
+
+    def list(self):
+        if self.error_stage == "list":
+            raise imaplib.IMAP4.error("server list detail must not escape")
+        return "OK", [self.list_entry]
+
+    def send(self, data):
+        self.sent.append(data)
+
+    def _log(self, _message):
+        return None
+
+    def _simple_command(self, name, *args):
+        self._command(name, *args)
+        if self.error_stage == "select":
+            raise imaplib.IMAP4.error("server detail must not escape")
+        return "OK", [b"0"]
+
+    def logout(self):
+        return "BYE", [b"closed"]
+
+
 def imap_message(*, include_complex=False) -> bytes:
     message = EmailMessage()
     message["From"] = "Fictional Client <client@example.invalid>"
@@ -860,7 +908,7 @@ class GmailImapTransportTests(unittest.TestCase):
         attachment = result["messages"][0]["attachments"][0]
         self.assertEqual(attachment["filename"], "evidence.txt")
         self.assertEqual(base64.b64decode(attachment["content_base64"]), b"Northstar fictional attachment.\n")
-        self.assertEqual(client.selected, ("[Gmail]/Todo el correo", True))
+        self.assertEqual(client.selected, ('"[Gmail]/Todo el correo"', True))
         calls = repr(client.calls)
         self.assertIn("X-GM-RAW", calls)
         self.assertIn("BODY.PEEK[]", calls)
@@ -872,6 +920,75 @@ class GmailImapTransportTests(unittest.TestCase):
         self.assertTrue(
             all(call[1] in {"SEARCH", "FETCH"} for call in client.calls if call[0] == "UID")
         )
+
+    def test_all_mail_names_are_quoted_on_the_actual_imap_wire(self):
+        cases = [
+            (
+                b'(\\HasNoChildren \\All) "/" "[Gmail]/Todo el correo"',
+                "ascii",
+                b'A0 EXAMINE "[Gmail]/Todo el correo"\r\n',
+            ),
+            (
+                b'(\\HasNoChildren \\All) "/" "[Gmail]/All \\"Quoted\\" \\\\ Folder"',
+                "ascii",
+                b'A0 EXAMINE "[Gmail]/All \\"Quoted\\" \\\\ Folder"\r\n',
+            ),
+            (
+                '(\\HasNoChildren \\All) "/" "[Gmail]/所有郵件"'.encode(),
+                "utf-8",
+                'A0 EXAMINE "[Gmail]/所有郵件"\r\n'.encode(),
+            ),
+            (
+                (b'(\\HasNoChildren \\All) "/" {25}', b'[Gmail]/Tous les messages'),
+                "ascii",
+                b'A0 EXAMINE "[Gmail]/Tous les messages"\r\n',
+            ),
+        ]
+        for list_entry, encoding, expected in cases:
+            with self.subTest(list_entry=list_entry):
+                client = WireRecordingImapClient(list_entry, encoding=encoding)
+                adapter = GmailImapReadonlyAdapter(
+                    "fictional@example.invalid", "fixture", lambda _host: client
+                )
+                _connected, mailbox = adapter._connect()
+                self.assertTrue(mailbox)
+                self.assertEqual(client.sent, [expected])
+                self.assertTrue(client.is_readonly)
+
+    def test_connection_server_errors_are_sanitized(self):
+        cases = {
+            "login": "login failed",
+            "list": "mailbox discovery failed",
+            "select": "could not be opened read-only",
+        }
+        for stage, public_error in cases.items():
+            with self.subTest(stage=stage):
+                client = WireRecordingImapClient(
+                    b'(\\HasNoChildren \\All) "/" "[Gmail]/All Mail"',
+                    error_stage=stage,
+                )
+                adapter = GmailImapReadonlyAdapter(
+                    "fictional@example.invalid", "fixture", lambda _host: client
+                )
+                with self.assertRaisesRegex(ValueError, public_error) as caught:
+                    adapter._connect()
+                self.assertNotIn("server", str(caught.exception))
+
+    def test_malformed_list_names_fail_without_reaching_examine(self):
+        cases = [
+            b'(\\HasNoChildren \\All) "/" "[Gmail]/Bad\\q"',
+            (b'(\\HasNoChildren \\All) "/" {99}', b'[Gmail]/All Mail'),
+        ]
+        for list_entry in cases:
+            with self.subTest(list_entry=list_entry):
+                client = WireRecordingImapClient(list_entry)
+                adapter = GmailImapReadonlyAdapter(
+                    "fictional@example.invalid", "fixture", lambda _host: client
+                )
+                with self.assertRaisesRegex(ValueError, "malformed data") as caught:
+                    adapter._connect()
+                self.assertNotIn("Bad", str(caught.exception))
+                self.assertEqual(client.sent, [])
 
     def test_nested_unnamed_and_inline_parts_are_explicit(self):
         adapter, _client = self.adapter(imap_message(include_complex=True))

@@ -184,13 +184,52 @@ def _part_bytes(part: Message) -> bytes:
     return part.get_payload(decode=True) or b""
 
 
-def _imap_mailbox_name(line: bytes) -> str:
-    text = line.decode("utf-8", errors="replace").strip()
-    quoted = re.findall(r'"((?:[^"\\]|\\.)*)"', text)
-    if quoted:
-        return quoted[-1].replace('\\"', '"').replace("\\\\", "\\")
-    parts = text.rsplit(" ", 1)
-    return parts[-1].strip('"') if parts else ""
+def _imap_list_entry(value: Any) -> tuple[set[bytes], str] | None:
+    """Parse one LIST response without exposing untrusted server text."""
+    line: bytes
+    literal: bytes | None = None
+    if isinstance(value, bytes):
+        line = value.strip()
+    elif (
+        isinstance(value, tuple)
+        and len(value) >= 2
+        and isinstance(value[0], bytes)
+        and isinstance(value[1], bytes)
+    ):
+        line = value[0].strip()
+        literal = value[1]
+    else:
+        return None
+
+    flag_match = re.match(rb"^\(([^)]*)\)\s+", line)
+    if not flag_match:
+        return None
+    flags = {flag.lower() for flag in flag_match.group(1).split()}
+
+    try:
+        if literal is not None:
+            size_match = re.search(rb"\{(\d+)\}\s*$", line)
+            if not size_match or int(size_match.group(1)) != len(literal):
+                raise ValueError
+            mailbox_bytes = literal
+        else:
+            quoted_match = re.search(rb'"((?:[^"\\]|\\.)*)"\s*$', line)
+            if quoted_match:
+                escaped = quoted_match.group(1)
+                if not re.fullmatch(rb'(?:[^\\]|\\[\\"])*', escaped):
+                    raise ValueError
+                mailbox_bytes = re.sub(rb"\\([\\\"])", rb"\1", escaped)
+            else:
+                parts = line.rsplit(None, 1)
+                if len(parts) != 2:
+                    raise ValueError
+                mailbox_bytes = parts[1]
+        mailbox = mailbox_bytes.decode("utf-8")
+        if not mailbox or any(ord(character) < 32 or ord(character) == 127 for character in mailbox):
+            raise ValueError
+    except (UnicodeDecodeError, ValueError):
+        raise ValueError("Gmail IMAP mailbox discovery returned malformed data") from None
+    return flags, mailbox
 
 
 def _attribute_number(attributes: bytes, name: str) -> int | None:
@@ -232,21 +271,26 @@ class GmailImapReadonlyAdapter:
             raise ValueError("Gmail IMAP account and app password are required")
         client = self.client_factory(self.host)
         try:
-            status, _ = client.login(self.account, self.password)
+            try:
+                status, _ = client.login(self.account, self.password)
+            except imaplib.IMAP4.error:
+                raise ValueError("Gmail IMAP login failed") from None
             if status != "OK":
                 raise ValueError("Gmail IMAP login failed")
-            status, mailboxes = client.list()
+            try:
+                status, mailboxes = client.list()
+            except imaplib.IMAP4.error:
+                raise ValueError("Gmail IMAP mailbox discovery failed") from None
             if status != "OK":
                 raise ValueError("Gmail IMAP mailbox discovery failed")
-            all_mail = [
-                _imap_mailbox_name(line)
-                for line in mailboxes or []
-                if isinstance(line, bytes) and re.search(rb"(?:^|[ (])\\All(?:[ )]|$)", line, re.I)
-            ]
-            all_mail = [name for name in all_mail if name]
+            entries = [entry for line in mailboxes or [] if (entry := _imap_list_entry(line))]
+            all_mail = [name for flags, name in entries if b"\\all" in flags]
             if len(all_mail) != 1:
                 raise ValueError("Gmail IMAP did not expose one localized \\All mailbox")
-            status, _ = client.select(all_mail[0], readonly=True)
+            try:
+                status, _ = client.select(_imap_quote(all_mail[0]), readonly=True)
+            except (imaplib.IMAP4.error, UnicodeError):
+                raise ValueError("Gmail IMAP All Mail could not be opened read-only") from None
             if status != "OK":
                 raise ValueError("Gmail IMAP All Mail could not be opened read-only")
             return client, all_mail[0]
