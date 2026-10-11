@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
+import json
 import os
 import re
 import stat
@@ -253,6 +255,34 @@ def _read_regular_bytes(path: Path, label: str, maximum: int) -> bytes:
             os.close(descriptor)
 
 
+def _validate_template_manifest(template: Path, template_bytes: bytes, manifest: Path) -> None:
+    manifest_bytes = _read_regular_bytes(manifest, "template manifest", 64 * 1024)
+    try:
+        value = json.loads(manifest_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("template manifest is not valid JSON") from exc
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ValueError("unsupported template manifest schema")
+    if value.get("algorithm") != "sha256":
+        raise ValueError("unsupported template manifest algorithm")
+    relative = value.get("template")
+    expected = value.get("sha256")
+    if (
+        not isinstance(relative, str)
+        or Path(relative).is_absolute()
+        or ".." in Path(relative).parts
+        or not isinstance(expected, str)
+        or len(expected) != 64
+        or any(character not in "0123456789abcdef" for character in expected)
+    ):
+        raise ValueError("template manifest contains invalid binding metadata")
+    bound = (manifest.parent / relative).absolute()
+    if template.absolute() != bound:
+        raise ValueError("template path does not match the integrity manifest")
+    if hashlib.sha256(template_bytes).hexdigest() != expected:
+        raise ValueError("template integrity check failed")
+
+
 def _unlink_created(path: Path, identity) -> None:
     try:
         current = path.stat(follow_symlinks=False)
@@ -294,6 +324,11 @@ def create(args: argparse.Namespace) -> None:
     if output.exists() or output.is_symlink():
         raise ValueError("output already exists")
     template_bytes = _read_regular_bytes(template_input, "template", MAX_DOCX_BYTES)
+    _validate_template_manifest(
+        template_input,
+        template_bytes,
+        Path(args.template_manifest).expanduser(),
+    )
     with zipfile.ZipFile(io.BytesIO(template_bytes)) as package:
         review_markers = package_review_markers(package)
     if review_markers:
@@ -332,6 +367,7 @@ def create(args: argparse.Namespace) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create neutral DOCX correspondence")
     parser.add_argument("--template", required=True)
+    parser.add_argument("--template-manifest", required=True)
     parser.add_argument("--body-file", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--organization", required=True)

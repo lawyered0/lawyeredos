@@ -50,6 +50,7 @@ PROJECT_SKILLS = {
 }
 PROJECT_AGENT = "lawyeredos-legal-review-lens"
 EXCLUDE = {".venv", ".demo", ".git", "__pycache__", ".pytest_cache", "qa"}
+TEMPLATE_MANIFEST = ".lawyeredos-template-manifest.json"
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,24 @@ def package_digest(root: Path) -> str:
         digest.update(len(content).to_bytes(8, "big"))
         digest.update(content)
     return digest.hexdigest()
+
+
+def write_template_manifest(plugin: Path) -> Path:
+    """Bind the bundled neutral template to this immutable installed core."""
+    template = plugin / "assets" / "neutral-letterhead.docx"
+    if template.is_symlink() or not template.is_file():
+        raise ValueError(f"bundled neutral template must be a regular file: {template}")
+    manifest = plugin / TEMPLATE_MANIFEST
+    if manifest.exists() or manifest.is_symlink():
+        raise ValueError(f"template manifest already exists in candidate payload: {manifest}")
+    content = {
+        "schema_version": 1,
+        "algorithm": "sha256",
+        "template": "assets/neutral-letterhead.docx",
+        "sha256": hashlib.sha256(template.read_bytes()).hexdigest(),
+    }
+    manifest.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest
 
 
 def legacy_managed_fingerprint(path: Path) -> str:
@@ -364,6 +383,7 @@ def expected_claude_plugin_fingerprint(source: Path, modules: tuple[str, ...], d
                 shutil.rmtree(plugin / "skills" / skill)
         if "review" not in selected:
             shutil.rmtree(plugin / "agents")
+        write_template_manifest(plugin)
         _prepare_project_payload(plugin, selected)
         (plugin / ".lawyeredos-package.json").write_text(json.dumps({
             "version": VERSION, "digest": digest, "modules": list(modules),
@@ -474,6 +494,7 @@ def render_config(answers: Answers, plugin_target: Path) -> str:
         f"database = {_toml_string(str(setup_root / 'data' / 'matters.sqlite3'))}",
         "", "[documents]",
         f"template = {_toml_string(str(plugin_target / 'assets' / 'neutral-letterhead.docx'))}",
+        f"template_manifest = {_toml_string(str(plugin_target / TEMPLATE_MANIFEST))}",
         'author = "Authorized reviewer"', "", "[branding]",
         f"mode = {_toml_string(answers.branding_mode)}",
         f"label = {_toml_string(label)}", "", "[jurisdiction]",
@@ -1074,6 +1095,7 @@ def apply_plan(plan: dict) -> dict:
                 shutil.rmtree(plugin / "skills" / skill)
         if "review" not in selected:
             shutil.rmtree(plugin / "agents")
+        write_template_manifest(plugin)
         _prepare_project_payload(plugin, selected)
         marker.write_text(json.dumps({
             "version": VERSION, "digest": plan["package_digest"],

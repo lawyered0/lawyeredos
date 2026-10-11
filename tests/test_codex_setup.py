@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 import subprocess
@@ -9,11 +10,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from lawyeredos import codex_setup
 from lawyeredos.codex_setup import (
     apply_plan,
     build_plan,
     dependency_report,
     normalize_answers,
+    rollback_upgrade,
 )
 from lawyeredos.config import load_config
 from lawyeredos.review_orchestrator import prepare
@@ -337,6 +340,82 @@ class CodexSetupTests(unittest.TestCase):
         self.assertEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), new_plugin.resolve())
         for path in upgraded["skills"].values():
             self.assertTrue(Path(path).resolve().is_relative_to(new_plugin.resolve()))
+
+    def test_successful_upgrade_can_roll_back_links_without_touching_matter_data(self):
+        first = apply_plan(build_plan(self.answers()))
+        old_plugin = Path(first["plugin"])
+        tracker = self.workspace / ".lawyeredos" / "data" / "matters.sqlite3"
+        with sqlite3.connect(tracker) as connection:
+            connection.execute("UPDATE meta SET value='17' WHERE key='revision'")
+        unrelated = self.workspace / "fictional-client-note.txt"
+        unrelated.write_text("preserve", encoding="utf-8")
+        with patch("lawyeredos.codex_setup.package_digest", return_value="b" * 64):
+            upgraded = apply_plan(build_plan(self.answers(existing="reuse")))
+        new_plugin = Path(upgraded["plugin"])
+        self.assertTrue(Path(upgraded["upgrade_rollback_state"]).is_file())
+
+        result = rollback_upgrade(self.workspace)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), old_plugin.resolve())
+        for path in first["skills"].values():
+            self.assertTrue(Path(path).resolve().is_relative_to(old_plugin.resolve()))
+        with sqlite3.connect(tracker) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT value FROM meta WHERE key='revision'"
+            ).fetchone()[0], "17")
+        self.assertEqual(unrelated.read_text(encoding="utf-8"), "preserve")
+        self.assertTrue(new_plugin.is_dir())
+        self.assertFalse(Path(upgraded["upgrade_rollback_state"]).exists())
+
+    def test_upgrade_rollback_refuses_managed_core_drift_without_mutation(self):
+        first = apply_plan(build_plan(self.answers()))
+        old_plugin = Path(first["plugin"])
+        with patch("lawyeredos.codex_setup.package_digest", return_value="c" * 64):
+            upgraded = apply_plan(build_plan(self.answers(existing="reuse")))
+        new_plugin = Path(upgraded["plugin"])
+        changed = new_plugin / "src" / "lawyeredos" / "config.py"
+        changed.write_text(changed.read_text(encoding="utf-8") + "\n# fictional drift\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "applied Codex core changed"):
+            rollback_upgrade(self.workspace)
+
+        self.assertEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), new_plugin.resolve())
+        self.assertNotEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), old_plugin.resolve())
+        self.assertTrue(Path(upgraded["upgrade_rollback_state"]).is_file())
+
+    def test_upgrade_rollback_recovers_applied_links_if_discovery_restore_fails(self):
+        apply_plan(build_plan(self.answers()))
+        with patch("lawyeredos.codex_setup.package_digest", return_value="d" * 64):
+            upgraded = apply_plan(build_plan(self.answers(existing="reuse")))
+        new_plugin = Path(upgraded["plugin"])
+        discovery = Path(upgraded["discovery"])
+        original_replace = codex_setup.replace_private_file
+
+        def fail_discovery(path, content):
+            if path == discovery:
+                raise OSError("fictional discovery write failure")
+            return original_replace(path, content)
+
+        with patch("lawyeredos.codex_setup.replace_private_file", side_effect=fail_discovery):
+            with self.assertRaisesRegex(OSError, "fictional discovery write failure"):
+                rollback_upgrade(self.workspace)
+
+        self.assertEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), new_plugin.resolve())
+        for path in upgraded["skills"].values():
+            self.assertTrue(Path(path).resolve().is_relative_to(new_plugin.resolve()))
+        self.assertTrue(Path(upgraded["upgrade_rollback_state"]).is_file())
+
+    def test_installed_codex_core_has_bound_template_manifest(self):
+        result = apply_plan(build_plan(self.answers()))
+        config = load_config(result["config"])
+        self.assertIsNotNone(config.document_template_manifest)
+        manifest = json.loads(config.document_template_manifest.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["template"], "assets/neutral-letterhead.docx")
+        self.assertEqual(
+            manifest["sha256"],
+            hashlib.sha256(config.document_template.read_bytes()).hexdigest(),
+        )
 
     def test_repeat_install_rejects_tampered_versioned_core(self):
         first = apply_plan(build_plan(self.answers()))

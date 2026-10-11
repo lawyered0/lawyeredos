@@ -12,6 +12,7 @@ class PracticeConfig:
     scratch: Path
     tracker_database: Path
     document_template: Path
+    document_template_manifest: Path | None
     document_author: str
     timezone: str
     jurisdiction_profile: str
@@ -58,6 +59,8 @@ def load_config(path: str | Path) -> PracticeConfig:
     scratch = Path(_required(workspace, "scratch", "workspace")).expanduser().resolve()
     database = Path(_required(tracker, "database", "tracker")).expanduser().resolve()
     template = Path(_required(documents, "template", "documents")).expanduser().resolve()
+    manifest_value = str(documents.get("template_manifest", "")).strip()
+    template_manifest = Path(manifest_value).expanduser().resolve() if manifest_value else None
     profile = jurisdiction.get("profile", "none")
     if profile not in {"none", "ontario"}:
         raise ValueError("jurisdiction profile must be 'none' or 'ontario'")
@@ -105,6 +108,7 @@ def load_config(path: str | Path) -> PracticeConfig:
         scratch=scratch,
         tracker_database=database,
         document_template=template,
+        document_template_manifest=template_manifest,
         document_author=str(documents.get("author", "Authorized reviewer")),
         timezone=str(workspace.get("timezone", "UTC")),
         jurisdiction_profile=profile,

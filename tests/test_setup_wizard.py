@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import sqlite3
@@ -654,6 +655,17 @@ class SetupWizardTests(unittest.TestCase):
         project_skill = self.workspace / ".claude" / "skills" / "lawyeredos-work-on-matter"
         self.assertTrue(project_skill.is_symlink())
         self.assertTrue(str(project_skill.resolve()).startswith(str(new_plugin)))
+
+    def test_installed_claude_core_has_bound_template_manifest(self):
+        result = apply_plan(build_plan(self.answers()))
+        config = load_config(result["config"])
+        self.assertIsNotNone(config.document_template_manifest)
+        manifest = json.loads(config.document_template_manifest.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["template"], "assets/neutral-letterhead.docx")
+        self.assertEqual(
+            manifest["sha256"],
+            hashlib.sha256(config.document_template.read_bytes()).hexdigest(),
+        )
 
     def test_repeat_install_rejects_tampered_versioned_plugin(self):
         first = apply_plan(build_plan(self.answers()))

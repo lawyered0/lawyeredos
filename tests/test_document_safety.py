@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import io
+import json
 import tempfile
 import unittest
 import zipfile
@@ -25,8 +27,16 @@ def load_script(name: str):
 
 
 def letter_args(template: Path, body: Path, output: Path):
+    manifest = template.parent / "template-manifest.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "algorithm": "sha256",
+        "template": template.name,
+        "sha256": hashlib.sha256(template.read_bytes()).hexdigest(),
+    }), encoding="utf-8")
     return type("Args", (), {
         "template": str(template),
+        "template_manifest": str(manifest),
         "body_file": str(body),
         "output": str(output),
         "organization": "Northstar Legal Lab",
@@ -349,6 +359,30 @@ class DocumentSafetyTests(unittest.TestCase):
             self.assertNotIn("SWAPPED SOURCE", rendered)
             self.assertIn("Fictional body.", rendered)
 
+    def test_letter_refuses_template_hash_or_path_not_bound_by_manifest(self):
+        creator = load_script("create_letter")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            template = self._template(folder)
+            body = folder / "body.txt"
+            body.write_text("Fictional body.", encoding="utf-8")
+            args = letter_args(template, body, folder / "hash-failure.docx")
+            manifest = Path(args.template_manifest)
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            value["sha256"] = "0" * 64
+            manifest.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "template integrity check failed"):
+                creator.create(args)
+            self.assertFalse(Path(args.output).exists())
+
+            args = letter_args(template, body, folder / "path-failure.docx")
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            value["template"] = "different.docx"
+            manifest.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "path does not match"):
+                creator.create(args)
+            self.assertFalse(Path(args.output).exists())
+
     def test_document_clis_sanitize_truncated_packages_without_output(self):
         creator = load_script("create_letter")
         accepter = load_script("accept_tracked_changes")
@@ -360,9 +394,15 @@ class DocumentSafetyTests(unittest.TestCase):
             body.write_text("Fictional body.", encoding="utf-8")
             letter_output = folder / "letter.docx"
             clean_output = folder / "clean.docx"
+            manifest = folder / "template-manifest.json"
+            manifest.write_text(json.dumps({
+                "schema_version": 1, "algorithm": "sha256", "template": broken.name,
+                "sha256": hashlib.sha256(broken.read_bytes()).hexdigest(),
+            }), encoding="utf-8")
 
             creator_argv = [
-                "create_letter.py", "--template", str(broken), "--body-file", str(body),
+                "create_letter.py", "--template", str(broken),
+                "--template-manifest", str(manifest), "--body-file", str(body),
                 "--output", str(letter_output), "--organization", "Northstar Legal Lab",
                 "--date", "October 11, 2026", "--recipient", "Alex Example",
                 "--address", "100 Example Street", "--subject", "Fictional matter",
@@ -384,6 +424,9 @@ class DocumentSafetyTests(unittest.TestCase):
 
             with zipfile.ZipFile(broken, "w") as package:
                 package.writestr("notes.txt", "not a Word package")
+            value = json.loads(manifest.read_text(encoding="utf-8"))
+            value["sha256"] = hashlib.sha256(broken.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(value), encoding="utf-8")
             output = io.StringIO()
             with mock.patch("sys.argv", creator_argv), redirect_stdout(output):
                 self.assertEqual(creator.main(), 2)
@@ -401,6 +444,8 @@ class DocumentSafetyTests(unittest.TestCase):
                 package.writestr("[Content_Types].xml", "<Types/>")
                 package.writestr("_rels/.rels", "<Relationships/>")
                 package.writestr("word/document.xml", "<document/>")
+            value["sha256"] = hashlib.sha256(broken.read_bytes()).hexdigest()
+            manifest.write_text(json.dumps(value), encoding="utf-8")
             output = io.StringIO()
             with mock.patch("sys.argv", creator_argv), redirect_stdout(output):
                 self.assertEqual(creator.main(), 2)

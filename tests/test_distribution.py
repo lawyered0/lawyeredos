@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import io
 import json
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -267,11 +269,19 @@ class DistributionTests(unittest.TestCase):
         creator = load_script("create_letter")
         with tempfile.TemporaryDirectory() as temporary:
             temporary = Path(temporary)
+            template = temporary / "neutral-letterhead.docx"
+            shutil.copy2(ROOT / "assets" / "neutral-letterhead.docx", template)
+            manifest = temporary / "template-manifest.json"
+            manifest.write_text(json.dumps({
+                "schema_version": 1, "algorithm": "sha256", "template": template.name,
+                "sha256": hashlib.sha256(template.read_bytes()).hexdigest(),
+            }), encoding="utf-8")
             body = temporary / "body.txt"
             output = temporary / "letter.docx"
             body.write_text("This is a fictional test letter.\n", encoding="utf-8")
             args = type("Args", (), {
-                "template": str(ROOT / "assets" / "neutral-letterhead.docx"),
+                "template": str(template),
+                "template_manifest": str(manifest),
                 "body_file": str(body),
                 "output": str(output),
                 "organization": "Northstar Legal Lab",

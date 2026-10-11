@@ -15,7 +15,8 @@ UTF-8 text file with no template markers. Then run:
 
 ```bash
 "${LAWYEREDOS_PYTHON:-python3}" "${LAWYEREDOS_ROOT}/scripts/create_letter.py" \
-  --template "<configured template>" --body-file "<body.txt>" \
+  --template "<configured template>" \
+  --template-manifest "<configured template_manifest>" --body-file "<body.txt>" \
   --output "<scratch.docx>" --organization "<configured branding label>" \
   --date "<date>" --recipient "<recipient>" \
   --address "<address>" --subject "<subject>" --signoff "<signoff>" \
@@ -37,6 +38,10 @@ Template snapshots are capped at 100 MiB compressed, 50 MiB per package entry,
 and 200 MiB total uncompressed; body text is capped at 5 MiB. Oversized,
 duplicate-member, unsafe-path, truncated, or non-DOCX packages fail without an
 output and require separate inspection rather than bypassing the limit.
+The installed neutral template is also bound to its persistent SHA-256 manifest;
+a missing, malformed, path-mismatched, or hash-mismatched manifest fails before
+document creation. This integrity check does not approve a private replacement
+template; such a template requires a separately reviewed manifest and config.
 
 Run the bundled linter on the final body before insertion and again after any
 substantive revision:

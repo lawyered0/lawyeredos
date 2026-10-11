@@ -18,6 +18,7 @@ from .setup_wizard import (
     MODULES,
     MODULE_SKILLS,
     PROJECT_SKILLS,
+    TEMPLATE_MANIFEST,
     VERSION,
     Answers,
     _ignored,
@@ -30,6 +31,7 @@ from .setup_wizard import (
     path_snapshot,
     render_config,
     validate_answers,
+    write_template_manifest,
 )
 from .tracker_cli import initialize
 from .private_fs import (
@@ -44,6 +46,7 @@ from .private_fs import (
 DISCOVERY_FILE = "codex-project-discovery.json"
 RUNNER_FILE = "lawyeredos-run"
 CURRENT_LINK = "current-codex"
+UPGRADE_ROLLBACK_FILE = "codex-upgrade-rollback.json"
 
 
 def _inside(path: Path, parent: Path) -> bool:
@@ -299,6 +302,7 @@ def expected_codex_plugin_fingerprint(source: Path, modules: tuple[str, ...], di
         for module, skill in MODULE_SKILLS.items():
             if module not in selected:
                 shutil.rmtree(plugin / "skills" / skill)
+        write_template_manifest(plugin)
         _prepare_payload(plugin, selected)
         (plugin / ".lawyeredos-package.json").write_text(json.dumps({
             "version": VERSION, "digest": digest, "modules": list(modules), "host": "codex",
@@ -394,6 +398,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         raise ValueError(f"installed versioned Codex core content changed: {plugin}")
     agents_root = workspace / ".agents" / "skills"
     discovery = setup_root / DISCOVERY_FILE
+    rollback_state = setup_root / UPGRADE_ROLLBACK_FILE
     project_skills = {module: agents_root / PROJECT_SKILLS[module] for module in effective.modules}
     current = setup_root / CURRENT_LINK
     runner = setup_root / RUNNER_FILE
@@ -412,6 +417,23 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
             launcher: render_launcher({"workspace": str(workspace)}),
         },
     )
+    if rollback_state.is_symlink():
+        raise ValueError(f"managed Codex upgrade rollback state must not be a symlink: {rollback_state}")
+    if rollback_state.exists():
+        if not rollback_state.is_file():
+            raise ValueError(f"managed Codex upgrade rollback state is not a file: {rollback_state}")
+        assert_private_file(rollback_state)
+        if not prior_managed:
+            raise ValueError(f"Codex upgrade rollback path exists without a managed install: {rollback_state}")
+        rollback_data = json.loads(rollback_state.read_text(encoding="utf-8"))
+        if (
+            not isinstance(rollback_data, dict)
+            or rollback_data.get("schema_version") != 1
+            or rollback_data.get("workspace") != str(workspace)
+            or rollback_data.get("setup_root") != str(setup_root)
+            or not isinstance(rollback_data.get("applied_managed_fingerprints"), dict)
+        ):
+            raise ValueError(f"invalid managed Codex upgrade rollback state: {rollback_state}")
     managed_candidates = {*map(str, project_skills.values()), str(current), str(runner), str(launcher)}
     for raw in managed_candidates:
         path = Path(raw)
@@ -437,6 +459,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "source": str(source), "workspace": str(workspace), "setup_root": str(setup_root),
         "config": str(config), "plugin": str(plugin), "current": str(current),
         "runner": str(runner), "launcher": str(launcher), "discovery": str(discovery),
+        "upgrade_rollback_state": str(rollback_state),
         "runtime_python": str(runtime), "package_digest": digest, "selection_digest": selection,
         "plugin_fingerprint": plugin_fingerprint,
         "project_skills": {module: str(path) for module, path in project_skills.items()},
@@ -447,6 +470,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
             for path in (
                 config, setup_root / "data" / "matters.sqlite3", runner, launcher,
                 discovery,
+                rollback_state,
             )
         },
         "answers": {**asdict(effective), "workspace": str(workspace), "modules": list(effective.modules)},
@@ -478,17 +502,18 @@ def apply_plan(plan: dict) -> dict:
     config, current = Path(plan["config"]), Path(plan["current"])
     tracker = setup_root / "data" / "matters.sqlite3"
     runner, launcher, discovery = Path(plan["runner"]), Path(plan["launcher"]), Path(plan["discovery"])
+    rollback_state = Path(plan["upgrade_rollback_state"])
     managed_directories = (
         workspace, setup_root, setup_root / "scratch", setup_root / "data",
         setup_root / "plugins", workspace / ".agents", workspace / ".agents" / "skills",
         plugin,
     )
-    _validate_managed_paths(managed_directories, (config, runner, launcher, discovery))
+    _validate_managed_paths(managed_directories, (config, runner, launcher, discovery, rollback_state))
     assert_preflight_paths(plan.get("preflight_paths", {}))
     for directory in (setup_root, setup_root / "scratch", setup_root / "data", setup_root / "plugins"):
         if directory.exists() or directory.is_symlink():
             assert_private_directory(directory)
-    for private_file in (config, tracker, discovery):
+    for private_file in (config, tracker, discovery, rollback_state):
         if private_file.exists() or private_file.is_symlink():
             assert_private_file(private_file)
     allowed_managed = {
@@ -510,6 +535,12 @@ def apply_plan(plan: dict) -> dict:
     replaced_links: list[tuple[Path, str]] = []
     replaced_files: list[tuple[Path, bytes, int]] = []
     changed: list[str] = []
+    prior_discovery_text = discovery.read_text(encoding="utf-8") if discovery.is_file() else None
+    prior_link_targets = {
+        str(path): os.readlink(path)
+        for path in {*(Path(raw) for raw in plan["project_skills"].values()), current}
+        if path.is_symlink()
+    }
     try:
         if plugin.exists() and managed_fingerprint(plugin) != plan["plugin_fingerprint"]:
             raise ValueError(f"installed versioned Codex core content changed after preview: {plugin}")
@@ -532,6 +563,7 @@ def apply_plan(plan: dict) -> dict:
             for module, skill in MODULE_SKILLS.items():
                 if module not in selected:
                     shutil.rmtree(plugin / "skills" / skill)
+            write_template_manifest(plugin)
             _prepare_payload(plugin, selected)
             (plugin / ".lawyeredos-package.json").write_text(json.dumps({
                 "version": VERSION, "digest": plan["package_digest"], "modules": plan["answers"]["modules"],
@@ -606,6 +638,32 @@ def apply_plan(plan: dict) -> dict:
                 created.append(discovery)
             replace_private_file(discovery, discovery_text.encode("utf-8"))
             changed.append(str(discovery))
+        if prior_discovery_text is not None and replaced_links:
+            rollback_record = {
+                "schema_version": 1,
+                "workspace": str(workspace),
+                "setup_root": str(setup_root),
+                "prior_discovery": json.loads(prior_discovery_text),
+                "prior_managed_fingerprints": plan["prior_fingerprints"],
+                "prior_link_targets": prior_link_targets,
+                "applied_package_digest": plan["package_digest"],
+                "applied_plugin": str(plugin),
+                "applied_plugin_fingerprint": managed_fingerprint(plugin),
+                "applied_managed_fingerprints": {
+                    str(path): managed_fingerprint(path) for path in sorted(desired)
+                },
+            }
+            if rollback_state.exists():
+                replaced_files.append(
+                    (rollback_state, rollback_state.read_bytes(), rollback_state.stat().st_mode)
+                )
+            else:
+                created.append(rollback_state)
+            replace_private_file(
+                rollback_state,
+                (json.dumps(rollback_record, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+            )
+            changed.append(str(rollback_state))
         with sqlite3.connect(load_config(config).tracker_database) as connection:
             if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                 raise ValueError("tracker quick_check failed")
@@ -642,7 +700,172 @@ def apply_plan(plan: dict) -> dict:
         raise
     return {"ok": True, "idempotent": not changed, "changed": changed, "workspace": str(workspace),
             "config": str(config), "plugin": str(plugin), "launcher": str(launcher),
-            "skills": plan["project_skills"], "discovery": str(discovery)}
+            "skills": plan["project_skills"], "discovery": str(discovery),
+            "upgrade_rollback_state": str(rollback_state)}
+
+
+def rollback_upgrade(workspace: Path) -> dict:
+    """Restore the links and discovery record from the latest Codex upgrade."""
+    requested = workspace.expanduser().absolute()
+    if requested.is_symlink():
+        raise ValueError(f"workspace must not be a symlink for rollback: {requested}")
+    workspace = requested.resolve()
+    setup_root = workspace / ".lawyeredos"
+    skills_root = workspace / ".agents" / "skills"
+    plugins_root = setup_root / "plugins"
+    discovery = setup_root / DISCOVERY_FILE
+    state_path = setup_root / UPGRADE_ROLLBACK_FILE
+    _validate_managed_paths(
+        (workspace, setup_root, plugins_root, workspace / ".agents", skills_root),
+        (discovery, state_path),
+    )
+    assert_private_directory(setup_root)
+    assert_private_directory(plugins_root)
+    assert_private_file(discovery)
+    assert_private_file(state_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(state, dict) or state.get("schema_version") != 1:
+        raise ValueError(f"unsupported Codex upgrade rollback schema: {state_path}")
+    if state.get("workspace") != str(workspace) or state.get("setup_root") != str(setup_root):
+        raise ValueError("Codex upgrade rollback state belongs to a different workspace")
+    prior_discovery = state.get("prior_discovery")
+    if (
+        not isinstance(prior_discovery, dict)
+        or prior_discovery.get("schema_version") not in {1, 2}
+        or prior_discovery.get("host") != "codex"
+    ):
+        raise ValueError("Codex upgrade rollback has invalid prior discovery state")
+    allowed = {
+        *(skills_root / name for name in PROJECT_SKILLS.values()),
+        setup_root / CURRENT_LINK,
+        setup_root / RUNNER_FILE,
+        setup_root / "launch-lawyeredos-codex.sh",
+    }
+    current_managed, current_fingerprints = _load_codex_discovery(
+        discovery,
+        allowed,
+        setup_root,
+        {
+            setup_root / RUNNER_FILE: render_runner({
+                "runtime_python": str(Path(os.path.abspath(sys.executable)).expanduser())
+            }),
+            setup_root / "launch-lawyeredos-codex.sh": render_launcher({"workspace": str(workspace)}),
+        },
+    )
+    applied_fingerprints = state.get("applied_managed_fingerprints")
+    if not isinstance(applied_fingerprints, dict) or current_fingerprints != applied_fingerprints:
+        raise ValueError("managed Codex state changed after upgrade; refusing rollback")
+    if current_managed != set(applied_fingerprints):
+        raise ValueError("managed Codex path set changed after upgrade; refusing rollback")
+    applied_plugin = Path(state.get("applied_plugin", ""))
+    if (
+        not applied_plugin.is_absolute()
+        or applied_plugin.parent != plugins_root
+        or not applied_plugin.name.startswith("lawyeredos-")
+        or not applied_plugin.is_dir()
+        or applied_plugin.is_symlink()
+        or managed_fingerprint(applied_plugin) != state.get("applied_plugin_fingerprint")
+    ):
+        raise ValueError("applied Codex core changed after upgrade; refusing rollback")
+    raw_targets = state.get("prior_link_targets")
+    if not isinstance(raw_targets, dict) or not raw_targets:
+        raise ValueError("Codex upgrade rollback is missing prior link targets")
+    expected_link_paths = {raw for raw in current_managed if Path(raw).is_symlink()}
+    if set(raw_targets) != expected_link_paths:
+        raise ValueError("Codex upgrade rollback link set does not match the installed upgrade")
+    prior_digest = prior_discovery.get("package_digest")
+    validated_targets: dict[Path, str] = {}
+    for raw, target_raw in raw_targets.items():
+        path = Path(raw)
+        if (
+            not isinstance(raw, str)
+            or not path.is_absolute()
+            or str(path.absolute()) != raw
+            or path not in allowed
+            or raw not in current_managed
+            or not path.is_symlink()
+            or not isinstance(target_raw, str)
+        ):
+            raise ValueError(f"invalid managed link in Codex upgrade rollback: {raw}")
+        target = Path(target_raw)
+        if not target.is_absolute() or not _inside(target, plugins_root):
+            raise ValueError(f"prior Codex link target escapes the plugin namespace: {target}")
+        plugin = next(
+            (parent for parent in (target, *target.parents) if parent.parent == plugins_root),
+            None,
+        )
+        marker = plugin / ".lawyeredos-package.json" if plugin else None
+        if marker is None or not marker.is_file() or marker.is_symlink():
+            raise ValueError(f"prior Codex link target lacks package provenance: {target}")
+        marker_data = json.loads(marker.read_text(encoding="utf-8"))
+        if marker_data.get("host") != "codex" or marker_data.get("digest") != prior_digest:
+            raise ValueError(f"prior Codex link target has mismatched package provenance: {target}")
+        if not target.exists() or target.is_symlink():
+            raise ValueError(f"prior Codex link target is unavailable: {target}")
+        validated_targets[path] = target_raw
+    prior_paths = prior_discovery.get("managed_paths")
+    if not isinstance(prior_paths, list) or set(prior_paths) != current_managed:
+        raise ValueError("prior Codex managed path set does not match the installed upgrade")
+    prior_fingerprints = state.get("prior_managed_fingerprints")
+    if (
+        not isinstance(prior_fingerprints, dict)
+        or set(prior_fingerprints) != current_managed
+        or not all(isinstance(value, str) and len(value) == 64 for value in prior_fingerprints.values())
+    ):
+        raise ValueError("Codex upgrade rollback has invalid prior managed fingerprints")
+    for path, target in validated_targets.items():
+        expected = hashlib.sha256(b"symlink\0" + target.encode()).hexdigest()
+        if prior_fingerprints[str(path)] != expected:
+            raise ValueError(f"prior Codex link fingerprint does not match its target: {path}")
+    prior_discovery = {
+        **prior_discovery,
+        "schema_version": 2,
+        "managed_fingerprints": prior_fingerprints,
+    }
+
+    restored: list[str] = []
+    applied_targets = {path: os.readlink(path) for path in validated_targets}
+
+    def replace_link(path: Path, target: str, suffix: str) -> None:
+        staged = path.parent / f".{path.name}.lawyeredos-{suffix}-{os.getpid()}"
+        if staged.exists() or staged.is_symlink():
+            raise ValueError(f"rollback staging path already exists: {staged}")
+        try:
+            staged.symlink_to(target, target_is_directory=True)
+            os.replace(staged, path)
+        finally:
+            staged.unlink(missing_ok=True)
+
+    try:
+        for path, target in validated_targets.items():
+            replace_link(path, target, "rollback")
+            restored.append(str(path))
+        replace_private_file(
+            discovery,
+            (json.dumps(prior_discovery, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        )
+    except BaseException as exc:
+        recovery_problems = []
+        for raw in reversed(restored):
+            path = Path(raw)
+            try:
+                replace_link(path, applied_targets[path], "rollback-recovery")
+            except (OSError, ValueError) as recovery_exc:
+                recovery_problems.append(f"restore {path}: {recovery_exc}")
+        if recovery_problems:
+            raise RuntimeError(
+                "Codex upgrade rollback failed and recovery was incomplete: "
+                + "; ".join(recovery_problems)
+            ) from exc
+        raise
+    state_path.unlink()
+    return {
+        "ok": True,
+        "status": "upgrade_rolled_back",
+        "restored": sorted(restored),
+        "preserved_plugin": str(applied_plugin),
+        "discovery": str(discovery),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -654,17 +877,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--modules", default=",".join(MODULES))
     parser.add_argument(
         "--mail", choices=("session-tools", "skip", "gmail-readonly", "gmail-imap"),
-        required=True,
     )
     parser.add_argument("--calendar", choices=("off", "google-calendar"), default="off")
     parser.add_argument("--calendar-id", default="")
     parser.add_argument("--existing-config", choices=("reuse", "error"), default="error")
     parser.add_argument("--require-new-workspace", action="store_true")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--rollback-upgrade", action="store_true")
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.rollback_upgrade:
+            if args.apply:
+                raise ValueError("choose either --apply or --rollback-upgrade")
+            if not args.yes:
+                raise ValueError("rollback-upgrade requires --yes after reviewing the managed workspace")
+            print(json.dumps(rollback_upgrade(Path(args.workspace)), indent=2, sort_keys=True))
+            return 0
+        if args.mail is None:
+            raise ValueError("--mail is required for setup preview and apply")
         answers = normalize_answers(Path(args.workspace), args.branding_mode, args.branding_label,
                                     args.jurisdiction, args.modules, args.mail, args.calendar,
                                     args.calendar_id, args.existing_config)
