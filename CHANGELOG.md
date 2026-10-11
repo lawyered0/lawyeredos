@@ -3,14 +3,13 @@
 All notable source changes are recorded here. Published host packages retain
 their own reviewed version and checksum boundaries.
 
-## Unreleased source
+## 0.2.0 beta.3 / Codex beta.2 — 2026-10-11
 
 - Documented one shared core with separate Claude and Codex project
   integrations and preserved the released host-specific setup prompts.
 - Added dual-host contribution guidance, host-aware issue forms, a pull-request
   template, and public-only least-privilege CI.
-- Added architecture, lifecycle, mail-boundary, and troubleshooting guidance
-  without changing the published Claude beta.2 or Codex beta.1 archives.
+- Added architecture, lifecycle, mail-boundary, and troubleshooting guidance.
 - Clarified that the shared tracker performs local party/name conflict
   screening across recorded fields, while final legal clearance, fuzzy/alias
   matching, external sources, and a clearance-status field remain outside the
@@ -49,6 +48,10 @@ their own reviewed version and checksum boundaries.
   all three DOCX chunks and the message body received actual model review
   acknowledgements, final reconciliation completed, and repeat deduplication
   passed. Ordinary-host and live IMAP acceptance remain pending.
+- Published the shared-core update as Claude beta.3 and Codex beta.2 after the
+  owner waived ordinary-host/live-IMAP acceptance as a release prerequisite.
+  That path remains explicitly unverified and experimental; the waiver is not
+  evidence of successful ordinary-host or portable-IMAP operation.
 
 ## 0.2.0 beta.2
 

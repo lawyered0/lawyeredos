@@ -80,6 +80,9 @@ tests that remain before public distribution.
   final reconciliation and repeat deduplication. The local providers otherwise
   use injected fake transports. No ordinary-host, live-IMAP, live-REST, or
   live-calendar claim is made.
+  The owner expressly waived this item as a publication prerequisite for
+  Claude beta.3 and Codex beta.2 on 2026-10-11. It remains unchecked and
+  unverified; publication does not convert the waiver into acceptance.
 - [ ] Validate migration against a read-only copy or export of the owner's real
   tracker, reconcile every row and history count, and keep rollback material.
   Fictional SQLite/CSV/JSON/XLSX paths are verified; private tracker
@@ -112,9 +115,9 @@ tests that remain before public distribution.
 - [ ] Clear the LawyeredOS name for the intended jurisdictions and channels,
   including trademark, package-registry, repository, domain, and marketplace
   availability. This private rename makes no availability or registration claim.
-- [ ] Approve version `0.2.0` and the intended repository. GitHub Issues is the
-  sanitized public support route; enable and verify GitHub Private vulnerability
-  reporting before changing repository visibility.
+- [x] Approve version `0.2.0`, Claude beta.3, Codex beta.2, and the intended
+  repository. GitHub Issues is the sanitized public support route; GitHub
+  Private vulnerability reporting was verified enabled before publication.
 - [x] Record the exact separately installed dependency-license inventory. No
   dependency code is vendored beyond the retained MIT component; rebuild and
   re-review the inventory whenever the lock changes.

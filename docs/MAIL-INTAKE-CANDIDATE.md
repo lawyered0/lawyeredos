@@ -1,8 +1,9 @@
 # Matter-mail intake candidate record
 
-This record covers the unreleased shared matter-mail intake candidate. It does
-not amend the acceptance scope of the published Claude beta.2 or Codex beta.1
-archives and is not a complete live-mail acceptance.
+This record covers the shared matter-mail intake released in Claude beta.3 and
+Codex beta.2. It is not a complete live-mail acceptance. The owner waived the
+pending ordinary-host/live-IMAP test as a publication prerequisite; the
+capability remains experimental and explicitly unverified.
 
 ## Host-tool boundary
 
@@ -98,4 +99,5 @@ destination-directory replacement races.
 - No background polling is implemented.
 - OCR completion remains unavailable on the tested host.
 - Other operating systems and host versions remain unaccepted.
-- The existing public archives and site downloads were not replaced.
+- Earlier versioned public archives remain immutable alongside the new
+  beta.3/beta.2 downloads.

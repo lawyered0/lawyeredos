@@ -1,4 +1,4 @@
-# Codex beta.1 coverage matrix
+# Codex beta.2 coverage matrix
 
 This matrix records the private gate completed before Codex 0.2.0 beta.1 was
 published. `Pass` identifies actual evidence; `Pending` is not accepted; and
