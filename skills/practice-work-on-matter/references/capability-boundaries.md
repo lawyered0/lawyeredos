@@ -12,10 +12,13 @@
   bytes, pages, or supported extraction keep the local complete checkpoint from
   advancing. No route polls in the background or changes Gmail state.
   The portable IMAP route has comprehensive synthetic coverage and one narrowly
-  accepted user-created thread on each supported desktop host. That evidence is
-  limited to the tested account, thread, launcher, and host; broader coverage,
-  REST/session-tool acceptance, reply state, sending, and mutation remain
-  unaccepted.
+  accepted user-created thread on each supported desktop host. Conservative
+  local reply state distinguishes draft, scheduled, sent, received, not-sent,
+  and unknown records; provider ordering is persisted, unresolved ordering
+  fails closed, and a Sent marker never proves delivery. That evidence is
+  limited to the tested account, thread, launcher, and host. Current-audience
+  reconciliation, broader account coverage, live REST/session-tool acceptance,
+  sending, delivery confirmation, and mutation remain unaccepted.
 - **Calendar:** orientation may inspect or propose; it may not create, update,
   or delete events.
 - **Practice manager:** unavailable by default. Never treat a tracker write as
