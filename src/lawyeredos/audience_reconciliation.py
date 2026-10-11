@@ -65,7 +65,11 @@ def _normalize_audience(
     return normalized, ambiguous, unknown
 
 
-def reconcile(message: dict[str, Any], expected: dict[str, Any]) -> dict[str, Any]:
+def reconcile(
+    message: dict[str, Any],
+    expected: dict[str, Any],
+    provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Compare normalized headers; never infer audience from message content."""
     retrieved, retrieved_ambiguous, unknown = _normalize_audience(message, retrieved=True)
     proposed, proposed_ambiguous, proposed_unknown = _normalize_audience(expected, retrieved=False)
@@ -80,6 +84,7 @@ def reconcile(message: dict[str, Any], expected: dict[str, Any]) -> dict[str, An
             message.get("headers_complete")
             if isinstance(message.get("headers_complete"), bool) else None
         ),
+        "provenance": provenance or {"input_kind": "direct_api"},
     }
     proposed_payload = {"headers": proposed}
     mismatches: dict[str, dict[str, list[str]]] = {}
@@ -137,23 +142,43 @@ def _read_json(path: Path) -> Any:
         raise ValueError("input is not readable UTF-8 JSON") from exc
 
 
-def _select_message(value: Any, message_id: str) -> dict[str, Any]:
+def _select_message(value: Any, message_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(value, dict):
         raise ValueError("message input must be an object")
+    if not message_id:
+        raise ValueError("--message-id is required")
     if "messages" not in value:
-        return value
+        if str(value.get("id", "")) != message_id:
+            raise ValueError("--message-id does not match the standalone normalized message")
+        return value, {"input_kind": "standalone_message"}
     messages = value["messages"]
     if not isinstance(messages, list):
         raise ValueError("bundle messages must be a list")
-    if not message_id:
-        raise ValueError("--message-id is required for a normalized mail bundle")
+    if value.get("schema") != "lawyeredos-mail-bundle-v1":
+        raise ValueError("normalized mail bundle has an unsupported schema")
+    source = value.get("source")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("normalized mail bundle requires a source")
+    account_fingerprint = value.get("account_fingerprint")
+    if account_fingerprint is not None and not isinstance(account_fingerprint, str):
+        raise ValueError("normalized mail bundle account_fingerprint must be a string")
+    query = value.get("query")
+    if query is not None and not isinstance(query, str):
+        raise ValueError("normalized mail bundle query must be a string")
     matches = [
         item for item in messages
         if isinstance(item, dict) and str(item.get("id", "")) == message_id
     ]
     if len(matches) != 1:
         raise ValueError("--message-id must select exactly one normalized message")
-    return matches[0]
+    return matches[0], {
+        "input_kind": "normalized_bundle",
+        "schema": value["schema"],
+        "source": source.strip(),
+        "account_fingerprint": account_fingerprint.strip().casefold()
+        if isinstance(account_fingerprint, str) else None,
+        "query": query,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -161,13 +186,13 @@ def main(argv: list[str] | None = None) -> int:
         description="Compare retrieved normalized From/To/Cc evidence with a proposed audience."
     )
     parser.add_argument("--message", type=Path, required=True)
-    parser.add_argument("--message-id", default="")
+    parser.add_argument("--message-id", required=True)
     parser.add_argument("--expected", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        message = _select_message(_read_json(args.message), args.message_id)
+        message, provenance = _select_message(_read_json(args.message), args.message_id)
         expected = _read_json(args.expected)
-        emit({"ok": True, **reconcile(message, expected)})
+        emit({"ok": True, **reconcile(message, expected, provenance)})
         return 0
     except ValueError as exc:
         emit({"ok": False, "error": str(exc)})

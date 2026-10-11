@@ -40,7 +40,7 @@ def main() -> int:
     if not config.document_template.is_file():
         warnings.append("document template is missing; correspondence unavailable")
     if config.document_template_manifest is None:
-        warnings.append("document template manifest is not configured; correspondence integrity is unverified")
+        errors.append("document template manifest is not configured; correspondence unavailable")
     elif not config.document_template_manifest.is_file():
         errors.append("document template manifest is missing; correspondence unavailable")
     elif config.document_template.is_file():

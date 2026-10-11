@@ -667,6 +667,27 @@ class SetupWizardTests(unittest.TestCase):
             hashlib.sha256(config.document_template.read_bytes()).hexdigest(),
         )
 
+    def test_validation_fails_when_template_manifest_binding_is_removed(self):
+        result = apply_plan(build_plan(self.answers()))
+        config_path = Path(result["config"])
+        config_path.write_text(
+            "\n".join(
+                line for line in config_path.read_text(encoding="utf-8").splitlines()
+                if not line.startswith("template_manifest =")
+            ) + "\n",
+            encoding="utf-8",
+        )
+        validation = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parents[1] / "scripts" / "validate_setup.py"),
+                "--config", str(config_path),
+            ],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(validation.returncode, 2)
+        self.assertIn("document template manifest is not configured", validation.stdout)
+
     def test_repeat_install_rejects_tampered_versioned_plugin(self):
         first = apply_plan(build_plan(self.answers()))
         skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"

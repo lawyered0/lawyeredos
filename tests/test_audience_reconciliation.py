@@ -116,6 +116,9 @@ class AudienceReconciliationTests(unittest.TestCase):
             expected = root / "expected.json"
             bundle.write_text(json.dumps({
                 "schema": "lawyeredos-mail-bundle-v1",
+                "source": "fictional-session-tool",
+                "account_fingerprint": "a" * 64,
+                "query": "fictional exact query",
                 "messages": [
                     {"id": "m-1", "from": "other@example.invalid", "to": "lawyer@example.invalid", "cc": ""},
                     {"id": "m-2", "from": "client@example.invalid", "to": "lawyer@example.invalid", "cc": ""},
@@ -136,6 +139,40 @@ class AudienceReconciliationTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["state"], "verified")
         self.assertEqual(result["retrieved_audience_evidence"]["message_id"], "m-2")
+        self.assertEqual(
+            result["retrieved_audience_evidence"]["provenance"],
+            {
+                "input_kind": "normalized_bundle",
+                "schema": "lawyeredos-mail-bundle-v1",
+                "source": "fictional-session-tool",
+                "account_fingerprint": "a" * 64,
+                "query": "fictional exact query",
+            },
+        )
+
+    def test_cli_refuses_standalone_message_id_mismatch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            message = root / "message.json"
+            expected = root / "expected.json"
+            message.write_text(json.dumps({
+                "id": "m-1", "from": "client@example.invalid",
+                "to": "lawyer@example.invalid", "cc": "",
+            }), encoding="utf-8")
+            expected.write_text(json.dumps({
+                "from": "client@example.invalid",
+                "to": "lawyer@example.invalid", "cc": "",
+            }), encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main([
+                    "--message", str(message), "--message-id", "m-2",
+                    "--expected", str(expected),
+                ])
+            result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(result["ok"])
+        self.assertIn("does not match", result["error"])
 
 
 if __name__ == "__main__":

@@ -384,6 +384,41 @@ class CodexSetupTests(unittest.TestCase):
         self.assertNotEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), old_plugin.resolve())
         self.assertTrue(Path(upgraded["upgrade_rollback_state"]).is_file())
 
+    def test_upgrade_rollback_refuses_retained_prior_core_drift_without_mutation(self):
+        first = apply_plan(build_plan(self.answers()))
+        old_plugin = Path(first["plugin"])
+        with patch("lawyeredos.codex_setup.package_digest", return_value="e" * 64):
+            upgraded = apply_plan(build_plan(self.answers(existing="reuse")))
+        new_plugin = Path(upgraded["plugin"])
+        changed = old_plugin / "src" / "lawyeredos" / "config.py"
+        changed.write_text(changed.read_text(encoding="utf-8") + "\n# fictional retained drift\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "retained prior Codex core changed"):
+            rollback_upgrade(self.workspace)
+
+        self.assertEqual(
+            (self.workspace / ".lawyeredos" / "current-codex").resolve(),
+            new_plugin.resolve(),
+        )
+        self.assertTrue(Path(upgraded["upgrade_rollback_state"]).is_file())
+
+    def test_upgrade_apply_rechecks_retained_prior_core_after_preview(self):
+        first = apply_plan(build_plan(self.answers()))
+        old_plugin = Path(first["plugin"])
+        with patch("lawyeredos.codex_setup.package_digest", return_value="9" * 64):
+            plan = build_plan(self.answers(existing="reuse"))
+        changed = old_plugin / "src" / "lawyeredos" / "config.py"
+        changed.write_text(changed.read_text(encoding="utf-8") + "\n# post-preview retained drift\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(ValueError, "retained prior Codex core changed after preview"):
+            apply_plan(plan)
+
+        self.assertEqual(
+            (self.workspace / ".lawyeredos" / "current-codex").resolve(),
+            old_plugin.resolve(),
+        )
+        self.assertFalse(Path(plan["plugin"]).exists())
+
     def test_upgrade_rollback_recovers_applied_links_if_discovery_restore_fails(self):
         apply_plan(build_plan(self.answers()))
         with patch("lawyeredos.codex_setup.package_digest", return_value="d" * 64):

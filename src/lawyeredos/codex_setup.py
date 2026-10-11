@@ -417,6 +417,24 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
             launcher: render_launcher({"workspace": str(workspace)}),
         },
     )
+    prior_plugins: set[Path] = set()
+    for raw in prior_managed:
+        path = Path(raw)
+        if not path.is_symlink():
+            continue
+        target = path.resolve(strict=True)
+        prior_plugin = next(
+            (parent for parent in (target, *target.parents)
+             if parent.parent == setup_root / "plugins"),
+            None,
+        )
+        if prior_plugin is None:
+            raise ValueError(f"managed Codex link has no versioned core: {path}")
+        prior_plugins.add(prior_plugin)
+    prior_plugin_fingerprints = {
+        str(prior_plugin): managed_fingerprint(prior_plugin)
+        for prior_plugin in sorted(prior_plugins)
+    }
     if rollback_state.is_symlink():
         raise ValueError(f"managed Codex upgrade rollback state must not be a symlink: {rollback_state}")
     if rollback_state.exists():
@@ -465,6 +483,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "project_skills": {module: str(path) for module, path in project_skills.items()},
         "prior_managed": sorted(prior_managed),
         "prior_fingerprints": prior_fingerprints,
+        "prior_plugin_fingerprints": prior_plugin_fingerprints,
         "preflight_paths": {
             str(path): path_snapshot(path)
             for path in (
@@ -528,6 +547,19 @@ def apply_plan(plan: dict) -> dict:
     )
     if current_managed != set(plan.get("prior_managed", [])) or current_fingerprints != plan.get("prior_fingerprints", {}):
         raise ValueError("LawyeredOS Codex discovery state changed after preview; build a new plan")
+    approved_prior_plugins = plan.get("prior_plugin_fingerprints", {})
+    if not isinstance(approved_prior_plugins, dict):
+        raise ValueError("approved prior Codex core fingerprints are invalid")
+    for raw, expected in approved_prior_plugins.items():
+        prior_plugin = Path(raw)
+        if (
+            not prior_plugin.is_absolute()
+            or prior_plugin.parent != setup_root / "plugins"
+            or not isinstance(expected, str)
+            or len(expected) != 64
+            or managed_fingerprint(prior_plugin) != expected
+        ):
+            raise ValueError("retained prior Codex core changed after preview; build a new plan")
     for path in {*(Path(raw) for raw in plan["project_skills"].values()), current}:
         if (path.exists() or path.is_symlink()) and str(path) not in current_managed:
             raise ValueError(f"Codex discovery target appeared after preview and is not managed: {path}")
@@ -639,6 +671,8 @@ def apply_plan(plan: dict) -> dict:
             replace_private_file(discovery, discovery_text.encode("utf-8"))
             changed.append(str(discovery))
         if prior_discovery_text is not None and replaced_links:
+            if not approved_prior_plugins:
+                raise ValueError("Codex upgrade has no retained prior core to fingerprint")
             rollback_record = {
                 "schema_version": 1,
                 "workspace": str(workspace),
@@ -646,6 +680,7 @@ def apply_plan(plan: dict) -> dict:
                 "prior_discovery": json.loads(prior_discovery_text),
                 "prior_managed_fingerprints": plan["prior_fingerprints"],
                 "prior_link_targets": prior_link_targets,
+                "prior_plugin_fingerprints": approved_prior_plugins,
                 "applied_package_digest": plan["package_digest"],
                 "applied_plugin": str(plugin),
                 "applied_plugin_fingerprint": managed_fingerprint(plugin),
@@ -775,6 +810,7 @@ def rollback_upgrade(workspace: Path) -> dict:
         raise ValueError("Codex upgrade rollback link set does not match the installed upgrade")
     prior_digest = prior_discovery.get("package_digest")
     validated_targets: dict[Path, str] = {}
+    validated_prior_plugins: set[Path] = set()
     for raw, target_raw in raw_targets.items():
         path = Path(raw)
         if (
@@ -802,7 +838,19 @@ def rollback_upgrade(workspace: Path) -> dict:
             raise ValueError(f"prior Codex link target has mismatched package provenance: {target}")
         if not target.exists() or target.is_symlink():
             raise ValueError(f"prior Codex link target is unavailable: {target}")
+        validated_prior_plugins.add(plugin)
         validated_targets[path] = target_raw
+    prior_plugin_fingerprints = state.get("prior_plugin_fingerprints")
+    if (
+        not isinstance(prior_plugin_fingerprints, dict)
+        or set(prior_plugin_fingerprints) != {str(plugin) for plugin in validated_prior_plugins}
+        or not all(isinstance(value, str) and len(value) == 64
+                   for value in prior_plugin_fingerprints.values())
+    ):
+        raise ValueError("Codex upgrade rollback has invalid prior core fingerprints")
+    for plugin in validated_prior_plugins:
+        if managed_fingerprint(plugin) != prior_plugin_fingerprints[str(plugin)]:
+            raise ValueError("retained prior Codex core changed after upgrade; refusing rollback")
     prior_paths = prior_discovery.get("managed_paths")
     if not isinstance(prior_paths, list) or set(prior_paths) != current_managed:
         raise ValueError("prior Codex managed path set does not match the installed upgrade")
