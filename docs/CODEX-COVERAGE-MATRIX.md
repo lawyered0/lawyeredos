@@ -12,8 +12,9 @@ This matrix records the private gate completed before Codex 0.2.0 beta.1 was
 published. `Pass` identifies actual evidence; `Pending` is not accepted; and
 `Excluded` records an intentional boundary. Publication rows describe that
 historical checkpoint, not the current visibility of the source repository.
-The repository is now public; the current dual-host candidate remains an
-unreleased draft pull request.
+Current publication state is recorded by the immutable Git tag, GitHub
+release, asset hashes, and protected merge; none of those expands the
+acceptance evidence below.
 
 | Area | Layer | Status | Evidence |
 | --- | --- | --- | --- |
@@ -44,7 +45,7 @@ unreleased draft pull request.
 
 The historical candidate passed its recorded gates within the stated
 macOS, Python, Codex CLI, fictional-data, and user-reported Desktop evidence
-boundaries. The current public draft remains unreleased. Release still requires an explicit publication decision and
-must preserve the exclusions above. Any review coverage gap remains a
+boundaries. A later release must preserve the exclusions above. Any review
+coverage gap remains a
 matter-specific caution rather than a software failure, provided it is shown
 to the user and the integrity checks pass.

@@ -18,8 +18,8 @@ decided contract redlines, calendar planning, and independent draft review.
 
 | Host | Download | SHA-256 |
 |---|---|---|
-| Claude Desktop Code Local | [0.2.1 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.1-macos-beta.1.zip) | `1e7d886c76e2e6cbfeee33bf14833995db91fde2b4a7d1e1565dcb4769d14856` |
-| Codex local project | [0.2.1 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.1-macos-codex-beta.1.zip) | `1e7d886c76e2e6cbfeee33bf14833995db91fde2b4a7d1e1565dcb4769d14856` |
+| Claude Desktop Code Local | [0.2.2 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.2-beta.1/lawyeredos-0.2.2-macos-beta.1.zip) | `b9bb69afde0b62d4a4a4211cad8ff08e98d1d376f688c149d10a5805b2e640ee` |
+| Codex local project | [0.2.2 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.2-beta.1/lawyeredos-0.2.2-macos-codex-beta.1.zip) | `b9bb69afde0b62d4a4a4211cad8ff08e98d1d376f688c149d10a5805b2e640ee` |
 
 The versioned release ZIPs remain on the
 [LawyeredOS download site](https://www.lawyered.lawyer/lawyeredos). This source
@@ -140,8 +140,8 @@ route based on localized All Mail discovery, stable Gmail IDs, and
 
 | Host | Accepted scope |
 |---|---|
-| Claude Desktop Code, Local environment, macOS | 0.2.1 beta.1 preserves the project-local host path verified with Python 3.12 and adds a narrowly accepted ordinary-host portable-IMAP path. |
-| Codex local project, macOS | 0.2.1 beta.1 preserves project-local discovery and persistence verified with Python 3.12.7 and Codex CLI 0.147.0, and adds a narrowly accepted ordinary-host portable-IMAP path. Desktop functional persistence evidence remains user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
+| Claude Desktop Code, Local environment, macOS | 0.2.2 beta.1 preserves the project-local path and earlier bounded portable-IMAP evidence. The new audience, review-mode, template-integrity, and lifecycle behavior has deterministic fictional acceptance; no new authenticated Claude or live-account acceptance was run. |
+| Codex local project, macOS | 0.2.2 beta.1 preserves project-local discovery and persistence and adds installed-archive acceptance for the new portable behavior. Earlier genuine model evidence remains bounded as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md); synthetic review packets do not prove reviewer invocation. |
 
 Windows, Linux, other Python or host versions, and cloud execution are not
 accepted targets. On each supported desktop host, one exact self-addressed,
