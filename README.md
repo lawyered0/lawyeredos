@@ -18,15 +18,14 @@ decided contract redlines, calendar planning, and independent draft review.
 
 | Host | Download | SHA-256 |
 |---|---|---|
-| Claude Desktop Code Local | [0.2.0 beta.2](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.2.zip) | `0f3eccf6e62e0bcb7ffbb88a6c14dd2f96c8a05acba73b93bb4bff3173af7cd5` |
-| Codex local project | [0.2.0 beta.1](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-codex-beta.1.zip) | `b468300f81bfdcc88398964a2808f6484c5cd2fb56b44d48e6721ab2d7d6e366` |
+| Claude Desktop Code Local | [0.2.0 beta.3](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-beta.3.zip) | Published alongside the immutable download |
+| Codex local project | [0.2.0 beta.2](https://raw.githubusercontent.com/lawyered0/lawyered0.github.io/main/downloads/lawyeredos-0.2.0-macos-codex-beta.2.zip) | Published alongside the immutable download |
 
 The versioned release ZIPs remain on the
 [LawyeredOS download site](https://www.lawyered.lawyer/lawyeredos). This source
-repository is the place for review and contributions; building the current
-tree does not replace either published archive. The source branch may be newer
-than those ZIPs; the version and checksum shown above remain the release
-boundary.
+repository is the place for review and contributions. Earlier versioned ZIPs
+remain immutable; the version and checksum published beside each download are
+its release boundary.
 
 ## Safe first trial
 
@@ -126,7 +125,7 @@ between host skills, deterministic Python commands, and authoritative SQLite
 state.
 
 For complete Gmail bodies and attachment bytes independent of host connector
-limitations, the candidate includes an experimental portable read-only IMAP
+limitations, the release includes an experimental portable read-only IMAP
 route based on localized All Mail discovery, stable Gmail IDs, and
 `BODY.PEEK`. Credential creation remains entirely user-mediated; see
 [Portable Gmail IMAP intake](docs/IMAP-READONLY.md).
@@ -135,8 +134,8 @@ route based on localized All Mail discovery, stable Gmail IDs, and
 
 | Host | Accepted scope |
 |---|---|
-| Claude Desktop Code, Local environment, macOS | Claude beta.2 with Python 3.12; project-local discovery and the documented fictional workflow were verified. |
-| Codex local project, macOS | Codex beta.1 with Python 3.12.7 and Codex CLI 0.147.0; project-local skills, fictional tracker persistence, and bounded review orchestration were verified. Desktop functional persistence evidence is user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
+| Claude Desktop Code, Local environment, macOS | Beta.3 preserves the beta.2 project-local host path verified with Python 3.12 and adds the shared mail core covered by automated, synthetic, and delegated-session acceptance. |
+| Codex local project, macOS | Beta.2 preserves the beta.1 project-local discovery and persistence path verified with Python 3.12.7 and Codex CLI 0.147.0, and adds the shared mail core. Desktop functional persistence evidence is user-reported as documented in [the acceptance record](docs/CODEX-ACCEPTANCE.md). |
 
 Windows, Linux, other Python or host versions, and cloud execution are not
 accepted targets. A bounded connector-to-core read of one user-created Gmail
