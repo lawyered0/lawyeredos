@@ -1,5 +1,12 @@
 # Installation
 
+For this unreleased instruction candidate, setup still accepts only the existing
+six modules. After opening the installed workspace, use the matter entrypoint
+and [workflow catalog](WORKFLOW-CATALOG.md) to read one requested manual module.
+Do not add new setup flags, TOML module keys or global skills to discover it.
+An instruction module does not enable an unselected renderer, reviewer, adapter
+or broad mailbox route. Its runtime and host acceptance remain unverified.
+
 ## Before you start
 
 LawyeredOS targets Claude Desktop Code Local or a Codex local project on macOS.

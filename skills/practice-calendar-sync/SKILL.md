@@ -8,6 +8,12 @@ description: Audit or reconcile approved tracked dates with a configured dedicat
 The matter register is authoritative; Calendar is a downstream projection.
 Missing or failed calendar access never reverses or conceals a tracker result.
 
+Read `${LAWYEREDOS_ROOT}/docs/workflows/calendar-policy.md` before planning or
+reconciling events and `${LAWYEREDOS_ROOT}/docs/workflows/dates.md` before
+treating a date as calendarable. Apply
+`${LAWYEREDOS_ROOT}/docs/workflows/scope-and-authority.md` to each mutation.
+The policy does not add an adapter, event field, or recurring job.
+
 Use the bundled planner for fixture or exported event JSON:
 
 ```bash

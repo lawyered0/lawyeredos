@@ -8,6 +8,19 @@ description: Resume, orient to, or do substantive work on an existing configured
 Use the configured local matter register and folder without assuming a firm,
 jurisdiction, account, or filesystem layout.
 
+Read `${LAWYEREDOS_ROOT}/docs/workflows/scope-and-authority.md` for the current
+task's authority. For substantive advice or drafting, also read
+`${LAWYEREDOS_ROOT}/docs/workflows/source-verification.md` and
+`${LAWYEREDOS_ROOT}/docs/workflows/client-advice.md`. Reuse these instructions
+while current; load only references needed for the requested work.
+
+For an expressly requested practice-wide workflow, read
+`${LAWYEREDOS_ROOT}/docs/WORKFLOW-CATALOG.md` before selecting any matter.
+Follow the selected module's bounded source scope and resolve individual files
+only when it requires them. Do not invent a single matter to enter triage,
+inbox workup, overdue review, or an orientation audit. The resolver below is
+for work tied to an individual matter.
+
 ## Start safely
 
 Require the `LAWYEREDOS_CONFIG` environment variable. Run:
@@ -74,6 +87,18 @@ omitted passage or verified its substance.
 - Reuse still-current verified context within the same task. Refresh only facts
   or sources made stale or newly material by the request.
 
+When a specific request needs a specialized workflow beyond these installed
+skills, read `${LAWYEREDOS_ROOT}/docs/WORKFLOW-CATALOG.md` and manually load the
+named source module from the package root. The catalog does not install skills,
+enable integrations, or grant authority. A general orientation does not need a
+catalog sweep or a write workflow.
+
+Complete the supported requested work and its approved follow-through in this
+task. Ask only for a decision or approval actually needed for the next action;
+do not leave a supported deliverable at a plan or offer to continue. State any
+blocked dependent work and preserve the remaining question under the record
+contract, without making an unapproved record write.
+
 For every general orientation, before recommending its next work, read
 [`references/mail-intake.md`](references/mail-intake.md) and run its bounded
 matter-email check. When configured access is available, review new relevant
@@ -88,6 +113,8 @@ and do not advance its local review checkpoint. There is no background polling.
   brief alone.
 - Treat dates found in text as candidates until their governing source and
   jurisdiction profile are verified.
+  Follow `${LAWYEREDOS_ROOT}/docs/workflows/dates.md` before computing,
+  describing, or proposing promotion of a date.
 - `integrations.mail_context.state: not_checked` means no mailbox read occurred.
   `availability: unknown` is not evidence that a configured session tool is
   connected. If the configured mail adapter is unavailable, disclose that current email
@@ -140,7 +167,20 @@ and do not advance its local review checkpoint. There is no background polling.
   `lawyeredos:practice-contract-redline`, and important outbound review through
   `lawyeredos:practice-adversarial-panel`.
 
+For correspondence, load
+`${LAWYEREDOS_ROOT}/docs/workflows/correspondence-completeness.md` when the work
+depends on inline visual material, quoted replies, attached email, or the final
+letter's date, attachments, execution, or transmission state. Follow the
+client-advice contract for retainer-ending preparation, required review, and
+complete email delivery; a saved path is not delivery of the requested text.
+
 ## Saves and records
+
+Read `${LAWYEREDOS_ROOT}/docs/workflows/records-and-handoffs.md` before proposing
+or saving matter memory or completing a substantive task. Its decision,
+instruction, history, review, and handoff rules describe what to preserve;
+they do not waive this skill's write approval. Report completed work, saved
+versions, actual delivery state, coverage gaps, and outstanding decisions.
 
 Use the bundled no-overwrite writer for deliverables. First run `preview`, then
 repeat identical arguments with `commit --confirm-token <token>`:

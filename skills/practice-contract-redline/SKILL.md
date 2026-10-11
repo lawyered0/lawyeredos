@@ -7,6 +7,10 @@ description: Apply established edits as genuine Word tracked changes, verify mar
 
 This skill applies established changes; it does not decide negotiation or legal
 positions. Require an editable `.docx`. Do not reconstruct a contract from PDF.
+Read `${LAWYEREDOS_ROOT}/docs/workflows/redline-meaning.md` for the operative
+meaning and final-artifact checks. If substantive positions are not established,
+use the contract-review source module selected from
+`${LAWYEREDOS_ROOT}/docs/WORKFLOW-CATALOG.md` before returning to this skill.
 Hash the exact source before generation and confirm it is unchanged after all
 outputs are produced. Existing revisions are a separate source state; do not
 silently edit through or accept another reviewer's changes.
@@ -48,6 +52,12 @@ Verification requires:
 5. Placeholder, comment, metadata, party, signature, and concession checks.
 6. Claude-only adversarial review when the outbound risk warrants it.
 
+Apply the redline-meaning contract to the marked text and intended accepted
+text. Mechanical application and revision counts do not prove the negotiated
+effect. Separate unresolved choices from approved edits; do not generate a
+single operative clause containing incompatible alternatives. Recheck any
+material revision against its source and approved position.
+
 Generate a clean copy and verify it separately:
 
 ```bash
@@ -69,6 +79,13 @@ Persist only requested, verified, versioned outputs with the
 guarded writer. On a collision or stale preview, inspect the current target and
 preview again; never overwrite newer work or bypass a protected-path or symlink
 refusal. Never send or negotiate.
+
+For source, date, authority, and handoff limits, read
+`${LAWYEREDOS_ROOT}/docs/workflows/source-verification.md`,
+`${LAWYEREDOS_ROOT}/docs/workflows/dates.md`, and
+`${LAWYEREDOS_ROOT}/docs/workflows/records-and-handoffs.md` as relevant. Do not
+create an unrequested clean copy or rationale artifact merely for delivery;
+verification artifacts remain private scratch unless their save is approved.
 
 Read [`references/change-set.md`](references/change-set.md) before building a
 change list.
