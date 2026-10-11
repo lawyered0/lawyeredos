@@ -9,7 +9,12 @@ from pathlib import Path
 
 from docx import Document
 
-from legal_redline.apply import apply_redlines, existing_review_markup, placement_problems
+from legal_redline.apply import (
+    apply_redlines,
+    existing_review_markup,
+    placement_problems,
+    read_regular_bytes,
+)
 from legal_redline.compare import compare_agreements, format_comparison_report
 from legal_redline.diff import diff_documents
 from legal_redline.markdown import generate_markdown
@@ -175,20 +180,24 @@ def _cmd_apply(args):
     }
     try:
         _validate_output_targets(args.input, outputs.values())
-        review_markers = existing_review_markup(args.input)
+        source_bytes = read_regular_bytes(args.input)
+        review_markers = existing_review_markup(source_bytes)
     except OutputIsInputError as exc:
         print(f"Error: {exc}. Nothing was generated.")
         sys.exit(1)
     except (OSError, ValueError) as exc:
         print(f"Error: {exc}. Nothing was generated.")
         sys.exit(2)
+
+    staging = tempfile.TemporaryDirectory(prefix="legal-redline-")
+    staged_source = Path(staging.name) / "source.docx"
+    staged_source.write_bytes(source_bytes)
     if review_markers:
         print("Error: input contains pre-existing revision/comment markup; resolve "
               "it before applying a new redline: " + ", ".join(review_markers))
         print("Nothing was generated.")
         sys.exit(2)
 
-    staging = tempfile.TemporaryDirectory(prefix="legal-redline-")
     staged = {
         name: str(Path(staging.name) / f"{name}{Path(path).suffix or '.tmp'}")
         for name, path in outputs.items() if path
@@ -196,7 +205,7 @@ def _cmd_apply(args):
 
     # 2026-10-07: a repeated span changed the first clause holding it while the
     # schedule named the intended section. Refuse before any output is written.
-    problems = placement_problems(Document(args.input), redlines)
+    problems = placement_problems(Document(staged_source), redlines)
     if problems:
         for _, msg in problems:
             print(f"  [REFUSED] {msg}")
@@ -217,7 +226,7 @@ def _cmd_apply(args):
                   "a new path. Nothing was generated.")
             sys.exit(1)
         print("--- .docx with tracked changes ---")
-        results = apply_redlines(args.input, staged["docx"], redlines, args.author)
+        results = apply_redlines(staged_source, staged["docx"], redlines, args.author)
         print()
         # 2026-10-07: a partial run exited 0 and the schedule, markdown and PDF
         # were still built from the JSON, listing changes the DOCX did not take.
@@ -238,7 +247,7 @@ def _cmd_apply(args):
     if args.pdf:
         print("--- Full-document redline PDF ---")
         render_redline_pdf(
-            args.input, redlines, staged["pdf"],
+            staged_source, redlines, staged["pdf"],
             header_text=args.header or args.doc_title,
             author=args.author,
         )
@@ -294,8 +303,14 @@ def _cmd_apply(args):
 
 
 def _reject_symlink_parents(path):
-    if path.parent.is_symlink():
-        raise ValueError(f"output parent must not be a symlink: {path.parent}")
+    current = path.parent
+    root = Path(path.anchor)
+    while current != current.parent:
+        if current.is_symlink():
+            metadata = current.lstat()
+            if current.parent != root or getattr(metadata, "st_uid", -1) != 0:
+                raise ValueError(f"output parent must not contain a symlink: {current}")
+        current = current.parent
 
 
 def _validate_output_targets(input_path, output_paths):
@@ -318,52 +333,55 @@ def _validate_output_targets(input_path, output_paths):
         _reject_symlink_parents(path)
 
 
-def _unlink_reserved(output, descriptor):
+def _unlink_if_same(output, identity):
     try:
-        opened = os.fstat(descriptor)
         current = output.stat(follow_symlinks=False)
-        if (opened.st_dev, opened.st_ino) == (current.st_dev, current.st_ino):
+        if (identity.st_dev, identity.st_ino) == (current.st_dev, current.st_ino):
             output.unlink()
     except OSError:
         pass
 
 
 def _publish_all_new(items):
-    """Reserve every target exclusively before writing any staged bytes."""
-    reservations = []
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    """Fully stage beside every target, then publish complete files no-replace."""
+    prepared = []
+    published = []
     try:
-        for staged, raw_output in items:
+        for source_path, raw_output in items:
             output = raw_output.expanduser().absolute()
             _reject_symlink_parents(output)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".legal-redline-publish-", dir=output.parent,
+            )
+            temporary = Path(temporary_name)
+            identity = os.fstat(descriptor)
+            prepared.append((temporary, output, identity))
             try:
-                descriptor = os.open(output, flags, 0o600)
+                with source_path.open("rb") as source:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        remaining = memoryview(chunk)
+                        while remaining:
+                            written = os.write(descriptor, remaining)
+                            remaining = remaining[written:]
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        for temporary, output, identity in prepared:
+            try:
+                os.link(temporary, output, follow_symlinks=False)
             except FileExistsError as exc:
                 raise ValueError(f"output already exists: {output}") from exc
-            reservations.append((staged, output, descriptor))
-        for staged, _, descriptor in reservations:
-            with staged.open("rb") as source:
-                while True:
-                    chunk = source.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    remaining = memoryview(chunk)
-                    while remaining:
-                        written = os.write(descriptor, remaining)
-                        remaining = remaining[written:]
-                os.fsync(descriptor)
+            published.append((output, identity))
     except BaseException:
-        for _, output, descriptor in reservations:
-            _unlink_reserved(output, descriptor)
+        for output, identity in published:
+            _unlink_if_same(output, identity)
         raise
     finally:
-        for _, _, descriptor in reservations:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+        for temporary, _, identity in prepared:
+            _unlink_if_same(temporary, identity)
 
 
 def _cmd_diff(args):

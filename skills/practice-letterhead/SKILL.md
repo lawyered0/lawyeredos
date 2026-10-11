@@ -29,7 +29,14 @@ or identifying metadata. The helper preserves the formatting of unaffected
 runs when a placeholder spans multiple runs or appears in a header/footer table.
 It refuses templates containing pre-existing tracked revisions or comments and
 refuses every existing or symlinked output path; resolve those conditions rather
-than flattening, accepting, or overwriting them implicitly.
+than flattening, accepting, or overwriting them implicitly. It scans the whole
+generated Word package for `{{PLACEHOLDER}}` plus exact drafting markers such as
+`[VERIFY]`, `[CITE]`, `[TBD]`, `[INSERT…]`, `[LAWYER TO CONFIRM]`, and standalone
+`TK`; ordinary verified bracketed citations are not rejected.
+Template snapshots are capped at 100 MiB compressed, 50 MiB per package entry,
+and 200 MiB total uncompressed; body text is capped at 5 MiB. Oversized,
+duplicate-member, unsafe-path, truncated, or non-DOCX packages fail without an
+output and require separate inspection rather than bypassing the limit.
 
 ## Verify
 

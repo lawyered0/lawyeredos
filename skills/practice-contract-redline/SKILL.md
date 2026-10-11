@@ -26,6 +26,9 @@ pre-existing revision or comment markup is a distinct review state: stop and
 have the user choose an authoritative clean source or separately resolve the
 existing review. The engine refuses existing, duplicate, symlinked, or
 source-colliding output paths and stages all requested outputs before publishing.
+Input snapshots are bounded at 100 MiB compressed, 50 MiB per package entry,
+and 200 MiB total uncompressed. Oversized, duplicate-member, unsafe-path,
+truncated, or non-DOCX packages fail without output.
 
 Verification requires:
 
@@ -48,7 +51,10 @@ Generate a clean copy and verify it separately:
 The clean-copy helper accepts insertion/deletion/move wrappers, removes the
 track-revisions setting, validates the entire Word XML package, and fails
 without output if comments, unsupported property revisions, or any residual
-revision/tracking marker remain.
+revision/tracking marker remain. It also fails closed when a removed revision
+contains relationship-backed or package content (such as an image, object,
+hyperlink, footnote/endnote reference, or external chunk), because hiding the
+visible revision would not safely remove the related package bytes.
 
 Persist only requested, verified, versioned outputs with the
 guarded writer. Never send or negotiate.
