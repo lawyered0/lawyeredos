@@ -5,6 +5,12 @@ description: Preview and install this LawyeredOS Codex candidate into a new priv
 
 # Set up LawyeredOS for Codex
 
+The source candidate also contains a manual workflow catalog under `docs/`.
+It does not add native project skills or setup module keys. Keep the six declared
+module choices; after approved setup, the current matter entrypoint can locate
+one expressly requested manual instruction module. Do not modify global skills
+or configuration to make it discoverable.
+
 Use only the bundled deterministic `scripts/setup_codex.py` writer. Do not edit
 the target workspace yourself and do not change `~/.codex`, `~/.agents`, an
 existing project `.codex/config.toml`, credentials, or connector permissions.

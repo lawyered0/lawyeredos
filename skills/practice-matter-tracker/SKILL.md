@@ -9,6 +9,14 @@ Treat the configured SQLite database as authoritative. Never edit it directly.
 Use the bundled CLI with `PYTHONPATH="${LAWYEREDOS_ROOT}/src"` and the
 database path from `LAWYEREDOS_CONFIG`.
 
+Read `${LAWYEREDOS_ROOT}/docs/workflows/scope-and-authority.md` for authority and
+`${LAWYEREDOS_ROOT}/docs/workflows/intake-and-lifecycle.md` when opening,
+updating parties, closing, or reopening a matter. Read
+`${LAWYEREDOS_ROOT}/docs/workflows/dates.md` for any date change and
+`${LAWYEREDOS_ROOT}/docs/workflows/records-and-handoffs.md` when matter memory
+or a completion record is involved. These contracts add workflow checks, not
+new CLI fields, commands, or standing write authority.
+
 ## Reads
 
 Available read commands are `verify`, `list`, `find`, `show`, and `history`:
@@ -30,6 +38,15 @@ final conflict decision. Report “No located hit in the local register fields
 searched,” never “no conflict,” “clear,” or equivalent. Mutate by exact file
 number.
 
+Preserve each searched name's role and relevant variants. Distinguish a possible
+duplicate engagement, current or former client potentially adverse, related
+person, repeat adverse party, and name-only ambiguity. A same-client match
+requires deciding whether this is the existing engagement or a separate one;
+a repeat opponent alone is not clearance or a conflict. Re-screen material
+parties discovered during intake or later updates. Disclose sources and limits.
+Broader folder or correspondence research needs a separately available,
+authorized route; the register's search command does not perform it.
+
 ## Link the first existing matter folder
 
 For a new installation, the register is intentionally empty. When the user asks
@@ -37,6 +54,13 @@ to link an existing folder, collect the exact file number, client display name,
 matter description, and folder path relative to the configured workspace.
 Resolve that folder and confirm it is a real directory inside the workspace and
 not a symlink. Do not move, rename, or copy the user's files.
+
+Before proposing creation, complete the intake-and-lifecycle contract's
+source-limited intake and lawyer-decision checks. Keep clearance, verification,
+engagement dates, related matters, and other facts unsupported by the current
+schema in a human-readable proposal or separately approved generic matter
+memory. Never pass invented fields to the tracker or call a linked row a
+completed professional clearance. Missing deadline inputs remain open questions.
 
 Preview a `create` operation, show the exact values, and commit only after the
 user approves that preview. Re-read the new row, then hand off to
@@ -85,6 +109,15 @@ commit through `lawyeredos.matter_write` as described in
 
 `court_deadlines` is JSON data, not a verified legal calculation. The register
 stores facts and sources; jurisdiction-specific rules live in separate profiles.
+
+Before close or reopen, review surviving obligations, evidence of completion,
+the current next action, and proposed brief/calendar consequences under the
+intake-and-lifecycle contract. A passed date or changed status is not completion
+evidence. Preview every supported operation and obtain its exact approval;
+unsupported integration effects remain proposals. Report canonical tracker,
+matter-memory, and optional projection outcomes separately, including partial
+success. When a proceeding is identified, propose its verified identifier and
+style in searchable description text rather than only in a timeline entry.
 
 Read [`references/schema.md`](references/schema.md) when mapping fields or
 building an adapter.

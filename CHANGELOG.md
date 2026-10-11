@@ -3,6 +3,22 @@
 All notable source changes are recorded here. Published host packages retain
 their own reviewed version and checksum boundaries.
 
+## 0.2.3 beta.1 — release candidate
+
+- Add shared scope, source-verification, client-advice/delivery, date,
+  semantic-record/handoff and intake/closure contracts to existing workflows.
+- Add manual instruction modules for substantive contract review, outbound
+  demands, inbound-demand options, sourced advocacy and evidence chronologies.
+- Add explicitly requested daily attention, bounded inbox workup, overdue
+  investigation and read-only orientation claim checks.
+- Extend correspondence completeness, calendar-policy and redline-meaning
+  instructions without adding adapters, commands, schema fields or native setup
+  module keys. All authoritative record changes keep existing approval gates.
+- Document all fifteen workflow gap dispositions, manual discovery dependencies
+  and release limits. The initial instruction review did not execute project
+  checks; ordinary unchanged release validation is a separate candidate gate.
+  The published 0.2.2 beta.1 archives remain unchanged.
+
 ## 0.2.2 beta.1 — 2026-10-11
 
 - Add normalized, hash-bound From/To/Cc audience reconciliation with explicit

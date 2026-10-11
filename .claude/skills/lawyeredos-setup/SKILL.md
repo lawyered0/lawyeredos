@@ -6,6 +6,12 @@ allowed-tools: Bash, Read
 
 # LawyeredOS setup
 
+The source candidate also contains a manual workflow catalog under `docs/`.
+It does not add native project skills or setup module keys. Keep the six declared
+module choices; after approved setup, the current matter entrypoint can locate
+one expressly requested manual instruction module. Do not modify global skills
+or configuration to make it discoverable.
+
 Guide a private, project-local LawyeredOS installation. Do not edit the target
 workspace yourself. The bundled setup wizard is the sole writer.
 

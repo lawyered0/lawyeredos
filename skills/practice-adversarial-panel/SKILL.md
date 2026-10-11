@@ -8,6 +8,12 @@ description: Independently challenge a bounded legal draft through a proportiona
 This workflow uses Claude reviewers only. Do not invoke another model provider
 or an external review service.
 
+Read `${LAWYEREDOS_ROOT}/docs/workflows/source-verification.md` for evidence
+limits and `${LAWYEREDOS_ROOT}/docs/workflows/records-and-handoffs.md` when a
+review spans revisions, reviewers, or a resumed task. The owning drafting
+workflow applies `${LAWYEREDOS_ROOT}/docs/workflows/client-advice.md` for review
+triggers and delivery. This standalone panel remains read-only.
+
 ## Choose the review contract
 
 Choose the mode explicitly from the work actually requested. Do not infer a
@@ -28,6 +34,22 @@ The principal lens names are `opposing-reader`, `fact-and-source-check`,
 to edit, send, file, serve, sign, or take another external action.
 
 ## Prepare
+
+Before briefing, perform a bounded read-only cross-matter search using the
+tracker's declared `find --status all` route. Search relevant parties,
+principals, organizations, representatives, and distinctive property or
+proceeding identifiers from the deliverable and controlling sources. Preserve
+roles and relevant variants. Read only the register fields needed to assess
+hits; do not open another client's documents or correspondence for this check.
+Include minimal relevant hit metadata and source locators in the common
+briefing, with search coverage and limitations. Assess whether the proposed
+position could be adverse to another client or rely on knowledge from another
+file. A shared opponent alone establishes neither concern nor clearance.
+Surface a material unresolved hit as a lawyer decision; the panel cannot clear
+it. No located hit means only no located hit in the register fields searched.
+Report this preflight separately from the machine review result where the
+current manifest does not represent it; do not invent manifest fields or imply
+that collection validates professional conflict clearance.
 
 This full workflow requires Claude Code. Confirm that the
 `lawyeredos:legal-review-lens` agent is available.
@@ -109,6 +131,13 @@ material finding remains unresolved. Correct the draft or evidence, create a
 new manifest, and re-run the review to clear such a finding. The report's
 `authorizes_action` field is always false: even a ready review does not
 authorize edits, sending, filing, service, or any other action.
+
+Preserve the manifest, exact reviewer returns, source coverage, dispositions,
+and pending questions for continuation under the records-and-handoffs contract.
+On resumption, verify the current draft and sources and check for newly material
+evidence before relying on earlier review. Retain earlier rounds as history;
+do not assign their review to changed bytes. Any new clearance still follows
+the declared manifest and collection procedure above.
 
 Lead with the supported recommendation. Material findings identify the exact
 passage, source, countervailing evidence, consequence, and confidence. Close

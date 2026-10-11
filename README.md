@@ -7,6 +7,16 @@ Codex local projects. Both hosts use the same Python, SQLite, document,
 redline, and guarded-workflow core. Host-specific setup and discovery files
 stay separate under `.claude/` and `.agents/`.
 
+This branch contains an **unreleased 0.2.3 beta.1 instruction candidate** based on
+published [0.2.2 beta.1](https://github.com/lawyered0/lawyeredos/releases/tag/v0.2.2-beta.1).
+It adds shared review/record contracts and nine manually loaded specialist or
+practice-attention modules. It changes no Python behavior or published download.
+Read the [workflow catalog](docs/WORKFLOW-CATALOG.md),
+[gap dispositions](docs/WORKFLOW-COMPLETENESS.md) and
+[candidate release plan](docs/WORKFLOW-RELEASE-PLAN.md) for availability and limits.
+Historical download and acceptance records below are retained; they do not
+establish acceptance of these additions.
+
 It works with the matter files you choose, records matter history and state in
 your workspace, and helps identify and execute the next step under lawyer
 oversight. Included workflows cover matter orientation and tracking, letters,
@@ -121,6 +131,13 @@ in [docs/EXAMPLES.md](docs/EXAMPLES.md).
   experimental and off by default.
 - `lawyeredos-adversarial-panel`: experimental multi-lens draft review.
 - `lawyeredos-setup`: guide installation through the deterministic installer.
+
+The candidate's [manual workflow catalog](docs/WORKFLOW-CATALOG.md) also covers
+contract review, demands and inbound triage, sourced advocacy, chronologies,
+daily attention, inbox workup, overdue triage and orientation claim checks.
+These source instruction modules are read through the existing matter entrypoint;
+they are not new native skill names or setup-module choices. Practice-wide mail
+needs an explicitly bounded supplied source set or actual authorized read tool.
 
 The toolkit also provides an SQLite matter register, collision-safe saved
 outputs, PDF extraction, optional OCR and local search, versioned upgrades, and

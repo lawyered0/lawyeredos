@@ -8,6 +8,15 @@ description: Create formal DOCX correspondence from the configured neutral or pr
 Resolve the matter through `lawyeredos:practice-work-on-matter`. An unresolved matter may
 receive conversation-only text but no persisted matter artifact.
 
+Before drafting, read `${LAWYEREDOS_ROOT}/docs/workflows/client-advice.md`,
+`${LAWYEREDOS_ROOT}/docs/workflows/source-verification.md`, and
+`${LAWYEREDOS_ROOT}/docs/workflows/correspondence-completeness.md`. The first
+contract owns retainer-ending preparation, source checks, review triggers, and
+email delivery. For demands, breach notices, or other specialized requests,
+manually select the relevant source module from
+`${LAWYEREDOS_ROOT}/docs/WORKFLOW-CATALOG.md`; this skill supplies the document
+rendering and save workflow, not substantive positions or an external action.
+
 ## Create
 
 Use the configured template and author identity. Write the body in a scratch
@@ -56,6 +65,12 @@ disclosed and retained, but is not a general bypass.
 
 ## Verify
 
+Confirm the final letter's static date, verified audience and address, subject,
+required attachments, execution status, and intended draft/delivery state under
+the correspondence-completeness contract. Apply
+`${LAWYEREDOS_ROOT}/docs/workflows/dates.md` to every asserted deadline or
+proposed response window. The document's creation date proves no legal trigger.
+
 Render the DOCX to PDF and page PNGs with the bundled wrapper (or a configured
 equivalent):
 
@@ -77,3 +92,8 @@ Persist only through the no-overwrite writer. Saving produces an internal draft
 and does not authorize sending, signing, filing, or service. A collision or
 changed target requires a fresh read and a new preview; never overwrite newer
 work or rename around a protected-path or symlink refusal.
+
+Complete the requested text or document delivery, and propose any necessary
+record or handoff under `${LAWYEREDOS_ROOT}/docs/workflows/records-and-handoffs.md`.
+No such follow-through changes the explicit tracker or matter-memory approval
+boundary.

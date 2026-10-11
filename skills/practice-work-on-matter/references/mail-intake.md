@@ -4,6 +4,14 @@ Run this after the matter resolver returns `ok_read_only`. Mail remains
 read-only; attachment saves and the rebuildable local review ledger are the only
 permitted writes in this step.
 
+For semantic completeness of inline images, answers embedded in quoted text,
+or attached email, apply
+`${LAWYEREDOS_ROOT}/docs/workflows/correspondence-completeness.md`. These items
+may contain the controlling instruction even when the ordinary body or
+attachment list appears complete. Use only the configured route's actually
+available reads; unsupported content remains a named review gap. The reference
+does not authorize a new acquisition route or an acknowledgement of unseen text.
+
 ## 1. Build the bounded plan
 
 ```bash
@@ -99,6 +107,12 @@ body, signature, quoted history, subject, thread name, or provider label. The
 result binds retrieved header evidence separately from the proposal and always
 reports authorization, delivery, and service as not established. A verified
 audience is not authority to send, file, serve, sign, or mutate an account.
+
+The client-advice contract at
+`${LAWYEREDOS_ROOT}/docs/workflows/client-advice.md` owns any explicit proposal
+to change the reply audience and the warning required before copy-ready
+delivery. Reconciliation of retrieved headers does not itself approve removing
+or adding a recipient, and the local ledger does not establish reply delivery.
 
 ## 3. Complete the hash-bound review queue
 

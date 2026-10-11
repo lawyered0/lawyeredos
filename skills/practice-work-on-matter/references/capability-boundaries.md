@@ -1,5 +1,13 @@
 # Capability boundaries
 
+The source workflows in `${LAWYEREDOS_ROOT}/docs/WORKFLOW-CATALOG.md` are
+manually loaded instructions. They do not add installed native skills, setup
+modules, account connections, register fields, or runtime capabilities. Use
+only the declared interfaces of the configured installation. Unsupported
+clearance, identity verification, engagement, related-matter, or delivery state
+belongs in a human-readable proposal or approved generic matter memory, not
+an invented field or a successful integration claim.
+
 - **Mail:** setup records exactly one configured route: unavailable by explicit
   skip; a host session tool selected but not locally verifiable; experimental
   local `gmail.readonly` REST; or experimental portable read-only Gmail IMAP.
@@ -21,6 +29,9 @@
   sending, delivery confirmation, and mutation remain unaccepted.
 - **Calendar:** orientation may inspect or propose; it may not create, update,
   or delete events.
+  Use `${LAWYEREDOS_ROOT}/docs/workflows/calendar-policy.md` for an explicitly
+  requested audit or reconciliation through the existing dedicated-calendar
+  route. An undated or unverified action produces no invented event.
 - **Practice manager:** unavailable by default. Never treat a tracker write as
   authorization for an external account write.
 - **PDF/OCR:** use `${LAWYEREDOS_ROOT}/scripts/extract_pdf.py` for local text
@@ -30,3 +41,6 @@
 - **Jurisdiction:** `none` means no jurisdiction-specific legal computation.
   An installed profile supplies boundaries and sources, not automatic legal
   authority.
+  `${LAWYEREDOS_ROOT}/docs/workflows/dates.md` distinguishes source assertions,
+  proposed windows, calculations for verification, and confirmed dates without
+  expanding that computation boundary.
