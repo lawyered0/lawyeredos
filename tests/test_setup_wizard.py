@@ -177,6 +177,13 @@ class SetupWizardTests(unittest.TestCase):
         skill_text = (project_skill / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("name: lawyeredos-contract-redline", skill_text)
         self.assertIn("${LAWYEREDOS_ROOT}", skill_text)
+        matter_text = (
+            self.workspace / ".claude" / "skills" / "lawyeredos-work-on-matter" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("A closed matter remains read-only", matter_text)
+        self.assertIn("without a preliminary full orientation", matter_text)
+        self.assertIn("brief.truncated: true", matter_text)
+        self.assertIn("From address alone does not prove", matter_text)
         settings = json.loads((self.workspace / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
         self.assertEqual(settings["env"]["LAWYEREDOS_ROOT"], str(plugin))
         agent = self.workspace / ".claude" / "agents" / "lawyeredos-legal-review-lens.md"

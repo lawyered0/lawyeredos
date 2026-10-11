@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .common import confined_path, emit
+from .common import confined_path, emit, sha256_file
 from .config import load_config
 from .tracker_cli import connect, row_dict, verify
 
@@ -78,7 +78,14 @@ def orient(config_path: Path, identifier: str, recent_limit: int) -> dict[str, A
     brief: dict[str, Any]
     if brief_path.is_file() and not brief_path.is_symlink():
         text = brief_path.read_text(encoding="utf-8", errors="replace")
-        brief = {"present": True, "path": str(brief_path), "text": text[:30000], "truncated": len(text) > 30000}
+        brief = {
+            "present": True,
+            "path": str(brief_path),
+            "text": text[:30000],
+            "characters": len(text),
+            "sha256": sha256_file(brief_path),
+            "truncated": len(text) > 30000,
+        }
     else:
         brief = {"present": False}
     return {

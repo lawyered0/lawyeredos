@@ -75,6 +75,24 @@ class DistributionTests(unittest.TestCase):
         self.assertIn("lawyeredos:legal-review-lens", combined_body)
         self.assertNotIn("panel-lens", combined_body)
 
+    def test_public_skills_preserve_portable_practice_guardrails(self):
+        work = (ROOT / "skills" / "practice-work-on-matter" / "SKILL.md").read_text(encoding="utf-8")
+        tracker = (ROOT / "skills" / "practice-matter-tracker" / "SKILL.md").read_text(encoding="utf-8")
+        panel = (ROOT / "skills" / "practice-adversarial-panel" / "SKILL.md").read_text(encoding="utf-8")
+        letter = (ROOT / "skills" / "practice-letterhead" / "SKILL.md").read_text(encoding="utf-8")
+        redline = (ROOT / "skills" / "practice-contract-redline" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("A closed matter remains read-only", work)
+        self.assertIn("without a preliminary full orientation", work)
+        self.assertIn("brief.truncated: true", work)
+        self.assertIn("From address alone does not prove", work)
+        self.assertIn("No located hit in the local register fields", tracker)
+        self.assertIn("Disposition every material finding", panel)
+        self.assertIn("panel concern alone never", panel)
+        self.assertIn("Correct every FAIL in original prose", letter)
+        self.assertIn("Hash the exact source before generation", redline)
+        self.assertRegex(letter, r"never overwrite newer\s+work")
+        self.assertRegex(redline, r"never overwrite newer\s+work")
+
     def test_bootstrap_setup_skill_is_project_local(self):
         setup_skill = ROOT / ".claude" / "skills" / "lawyeredos-setup" / "SKILL.md"
         text = setup_skill.read_text(encoding="utf-8")

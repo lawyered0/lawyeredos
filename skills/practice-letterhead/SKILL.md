@@ -27,6 +27,17 @@ leave placeholders, drafting notes, comments, or template directions. A neutral
 public template must not contain a real signature, logo, personal contact data,
 or identifying metadata.
 
+Run the bundled linter on the final body before insertion and again after any
+substantive revision:
+
+```bash
+PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredos.voice_lint \
+  "<body.txt>" --register letter
+```
+
+Correct every FAIL in original prose; a finding in a verbatim quotation may be
+disclosed and retained, but is not a general bypass.
+
 ## Verify
 
 Render the DOCX to PDF and page PNGs with the bundled wrapper (or a configured
@@ -47,4 +58,6 @@ positions, admissions, waivers, deadline commitments, or when the user asks.
 Re-hash after review.
 
 Persist only through the no-overwrite writer. Saving produces an internal draft
-and does not authorize sending, signing, filing, or service.
+and does not authorize sending, signing, filing, or service. A collision or
+changed target requires a fresh read and a new preview; never overwrite newer
+work or rename around a protected-path or symlink refusal.

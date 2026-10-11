@@ -7,6 +7,9 @@ description: Apply established edits as genuine Word tracked changes, verify mar
 
 This skill applies established changes; it does not decide negotiation or legal
 positions. Require an editable `.docx`. Do not reconstruct a contract from PDF.
+Hash the exact source before generation and confirm it is unchanged after all
+outputs are produced. Existing revisions are a separate source state; do not
+silently edit through or accept another reviewer's changes.
 
 The pinned MIT engine is under
 `${LAWYEREDOS_ROOT}/vendor/legal-redline-tools`. Preserve its `LICENSE` and
@@ -22,6 +25,12 @@ PYTHONPATH="$PKG" "${LAWYEREDOS_PYTHON:-python3}" -m legal_redline.cli apply \
 Use exact, unique text spans. The change-set JSON remains scratch material and
 must not contain internal rationale in a counterparty artifact. A failed or
 partial apply is not repaired by hand-editing OOXML.
+
+Keep counterparty-facing marked/clean files separate from internal rationale,
+walkaway positions, or privileged notes. Generate and persist only the outputs
+the user requested. A Word comment or unresolved revision makes a
+counterparty-facing artifact not ready unless the user expressly decides to
+retain it after review.
 
 Verification requires:
 
@@ -42,7 +51,9 @@ Generate a clean copy and verify it separately:
 ```
 
 Persist only requested, verified, versioned outputs with the
-guarded writer. Never send or negotiate.
+guarded writer. On a collision or stale preview, inspect the current target and
+preview again; never overwrite newer work or bypass a protected-path or symlink
+refusal. Never send or negotiate.
 
 Read [`references/change-set.md`](references/change-set.md) before building a
 change list.

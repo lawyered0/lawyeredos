@@ -107,7 +107,17 @@ class CodexSetupTests(unittest.TestCase):
         self.assertIn(".lawyeredos/config.toml", text)
         self.assertNotIn("Require the `LAWYEREDOS_CONFIG` environment variable", text)
         self.assertNotIn("${LAWYEREDOS_ROOT}", text)
+        self.assertIn("A closed matter remains read-only", text)
+        self.assertIn("without a preliminary full orientation", text)
+        self.assertIn("brief.truncated: true", text)
+        self.assertIn("From address alone does not prove", text)
         self.assertEqual(load_config(result["config"]).mail_adapter, "codex-session-tools")
+
+        tracker = (Path(result["skills"]["tracker"]) / "SKILL.md").read_text(encoding="utf-8")
+        panel = (Path(result["skills"]["review"]) / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("No located hit in the local register fields", tracker)
+        self.assertIn("Disposition every material finding", panel)
+        self.assertIn("panel concern alone never", panel)
 
     def test_codex_setup_maps_portable_imap_without_storing_a_secret(self):
         plan = build_plan(self.answers(mail="gmail-imap"))
