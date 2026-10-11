@@ -3,11 +3,13 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from lawyeredos.calendar_plan import plan
 from lawyeredos.config import load_config
@@ -76,6 +78,181 @@ class TrackerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             commit_mutation(self.database, "timeline", first, first_preview["confirm_token"])
 
+    def test_runtime_tracker_refuses_mode_drift_and_hardlinks(self):
+        original = self.database.read_bytes()
+        self.database.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "migrate this existing path explicitly"):
+            read_show(self.database, "2030-001")
+        self.assertEqual(self.database.read_bytes(), original)
+        self.database.chmod(0o600)
+        alias = self.root / "alias.sqlite3"
+        os.link(self.database, alias)
+        result = verify(self.database)
+        self.assertFalse(result["ok"])
+        self.assertIn("multiple hard links", result["problems"][0])
+        self.assertEqual(self.database.read_bytes(), original)
+
+    def test_commit_rechecks_private_file_after_preview(self):
+        for substitution in ("mode", "hardlink", "symlink"):
+            with self.subTest(substitution=substitution):
+                database = self.root / f"commit-recheck-{substitution}.sqlite3"
+                initialize(database)
+                args = mutation_args(database, "create")
+                approved = preview_mutation(database, "create", args)
+                original = database.read_bytes()
+
+                if substitution == "mode":
+                    database.chmod(0o640)
+                    error = "migrate this existing path explicitly"
+                    protected = database
+                else:
+                    outside = self.root / f"outside-{substitution}.sqlite3"
+                    outside.write_bytes(original)
+                    outside.chmod(0o600)
+                    database.unlink()
+                    if substitution == "hardlink":
+                        os.link(outside, database)
+                        error = "multiple hard links"
+                    else:
+                        database.symlink_to(outside)
+                        error = "symlink or not a regular file"
+                    protected = outside
+
+                with self.assertRaisesRegex(ValueError, error):
+                    commit_mutation(database, "create", args, approved["confirm_token"])
+                self.assertEqual(protected.read_bytes(), original)
+
+    def test_workflow_clear_disposes_next_action_and_date_atomically(self):
+        self.create_matter()
+        update = mutation_args(
+            self.database, "update",
+            set_values=["next_action=Serve fictional draft", "next_action_date=2030-01-10"],
+        )
+        approved = preview_mutation(self.database, "update", update)
+        commit_mutation(self.database, "update", update, approved["confirm_token"])
+        workflow = mutation_args(
+            self.database, "workflow", next_action="", next_action_date=None,
+            clear_next_action=True, event_date="2030-01-09",
+            text="User explicitly disposed of the fictional next action.",
+        )
+        approved = preview_mutation(self.database, "workflow", workflow)
+        self.assertEqual(approved["payload"]["current_workflow"], {
+            "next_action": "Serve fictional draft", "next_action_date": "2030-01-10",
+        })
+        self.assertEqual(approved["payload"]["resulting_workflow"], {
+            "next_action": "", "next_action_date": "",
+        })
+        result = commit_mutation(
+            self.database, "workflow", workflow, approved["confirm_token"],
+        )
+        self.assertTrue(result["committed"])
+        matter = read_show(self.database, "2030-001")
+        self.assertEqual((matter["next_action"], matter["next_action_date"]), ("", ""))
+        self.assertEqual(
+            matter["timeline"][-1]["text"],
+            "User explicitly disposed of the fictional next action.",
+        )
+
+    def test_post_commit_readback_failure_is_not_reported_as_retry_safe(self):
+        args = mutation_args(self.database, "create")
+        preview = preview_mutation(self.database, "create", args)
+        output = io.StringIO()
+        with patch(
+            "lawyeredos.tracker_cli.read_show",
+            side_effect=sqlite3.OperationalError("fictional read failure"),
+        ):
+            with redirect_stdout(output):
+                exit_code = tracker_main([
+                    "create", "--database", str(self.database),
+                    "--file-number", args.file_number,
+                    "--client", args.client,
+                    "--description", args.description,
+                    "--matter-folder", args.matter_folder,
+                    "--opposing-party", args.opposing_party,
+                    "--other-parties", args.other_parties,
+                    "--primary-email", args.primary_email,
+                    "--confirm-token", preview["confirm_token"],
+                ])
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 3)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["committed"])
+        self.assertEqual(result["commit_state"], "committed")
+        self.assertEqual(result["verification_state"], "readback_failed")
+        self.assertEqual(result["audit_verification_state"], "not_performed")
+        self.assertIsInstance(result["audit_id"], int)
+        self.assertFalse(result["retry_safe"])
+        self.assertFalse(result["recovery"]["retry_mutation"])
+        self.assertEqual(result["commit_evidence"]["revision"], 1)
+        self.assertEqual(read_show(self.database, "2030-001")["client"], args.client)
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            commit_mutation(self.database, "create", args, preview["confirm_token"])
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM audit").fetchone()[0], 1)
+
+    def test_successful_commit_only_claims_matter_readback_verification(self):
+        result = self.create_matter()
+        self.assertEqual(result["verification_state"], "readback_verified")
+        self.assertEqual(result["audit_verification_state"], "not_performed")
+        self.assertFalse(result["retry_safe"])
+        with sqlite3.connect(self.database) as connection:
+            audit = connection.execute(
+                "SELECT id, revision, action, file_number FROM audit WHERE id=?",
+                (result["audit_id"],),
+            ).fetchone()
+        self.assertEqual(audit, (result["audit_id"], 1, "create", "2030-001"))
+
+    def test_pre_commit_failure_has_canonical_not_committed_receipt(self):
+        args = mutation_args(self.database, "create")
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = tracker_main([
+                "create", "--database", str(self.database),
+                "--file-number", args.file_number,
+                "--client", args.client,
+                "--description", args.description,
+                "--matter-folder", args.matter_folder,
+                "--confirm-token", "wrong-token",
+            ])
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(result["committed"])
+        self.assertEqual(result["commit_state"], "not_committed")
+        self.assertIsNone(result["audit_id"])
+        self.assertFalse(result["retry_safe"])
+        with sqlite3.connect(self.database) as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM audit").fetchone()[0], 0)
+
+    def test_commit_call_error_is_unknown_whether_before_or_after_durability(self):
+        for durable in (False, True):
+            with self.subTest(durable=durable):
+                database = self.root / f"commit-{durable}.sqlite3"
+                initialize(database)
+                args = mutation_args(database, "create")
+                preview = preview_mutation(database, "create", args)
+
+                def ambiguous_commit(connection):
+                    if durable:
+                        connection.execute("COMMIT")
+                    raise sqlite3.OperationalError("fictional COMMIT transport failure")
+
+                with patch("lawyeredos.tracker_cli._commit_transaction", side_effect=ambiguous_commit):
+                    result = commit_mutation(database, "create", args, preview["confirm_token"])
+
+                self.assertFalse(result["ok"])
+                self.assertIsNone(result["committed"])
+                self.assertEqual(result["commit_state"], "outcome_unknown")
+                self.assertIsInstance(result["audit_id"], int)
+                self.assertFalse(result["retry_safe"])
+                self.assertEqual(
+                    result["recovery"]["required_inspection"],
+                    ["show", "history", "verify"],
+                )
+                with sqlite3.connect(database) as connection:
+                    audit_count = connection.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
+                self.assertEqual(audit_count, int(durable))
+
     def test_conflict_screening_searches_party_fields_and_closed_matters(self):
         args = mutation_args(
             self.database,
@@ -124,7 +301,10 @@ class WorkflowTests(unittest.TestCase):
         matter = workspace / "2030-001-northstar"
         matter.mkdir(parents=True)
         scratch.mkdir()
-        (matter / "_matter-brief.md").write_text("# Fictional matter\n", encoding="utf-8")
+        (matter / "_matter-brief.md").write_text(
+            "# Northstar Bakery Ltd.\n\n## Status\n\nFictional matter.\n",
+            encoding="utf-8",
+        )
         database = workspace / "matters.sqlite3"
         initialize(database)
         with sqlite3.connect(database) as connection:
@@ -165,6 +345,25 @@ external_ai = false
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "ok_read_only")
         self.assertTrue(result["brief"]["present"])
+        self.assertEqual(
+            result["brief"]["characters"],
+            len("# Northstar Bakery Ltd.\n\n## Status\n\nFictional matter.\n"),
+        )
+        self.assertRegex(result["brief"]["sha256"], r"^[0-9a-f]{64}$")
+
+    def test_orientation_marks_truncated_brief_and_hashes_full_source(self):
+        config = self.config()
+        brief = self.root / "workspace" / "2030-001-northstar" / "_matter-brief.md"
+        content = "# 2030-001 — Fictional matter\n\n## Background\n\n" + ("bounded detail\n" * 3000)
+        brief.write_text(content, encoding="utf-8")
+        result = orient(config, "2030-001", 10)
+        self.assertTrue(result["brief"]["truncated"])
+        self.assertEqual(result["brief"]["characters"], len(content))
+        self.assertLessEqual(result["brief"]["coverage"]["selected_characters"], 30000)
+        self.assertEqual(result["brief"]["coverage"]["selection"],
+                         "section_aware_complete_sections_or_passages")
+        self.assertTrue(result["brief"]["coverage"]["omitted"])
+        self.assertRegex(result["brief"]["sha256"], r"^[0-9a-f]{64}$")
 
     def test_orientation_name_resolution_is_unicode_case_insensitive(self):
         config = self.config()
@@ -173,6 +372,8 @@ external_ai = false
             connection.execute(
                 "UPDATE matters SET client='Étoile Foods Ltd.' WHERE file_number='2030-001'"
             )
+        brief = self.root / "workspace" / "2030-001-northstar" / "_matter-brief.md"
+        brief.write_text("# Étoile Foods Ltd.\n\n## Status\n\nFictional matter.\n", encoding="utf-8")
         result = orient(config, "étoile", 10)
         self.assertTrue(result["ok"])
         self.assertEqual(result["matter"]["file_number"], "2030-001")
@@ -190,6 +391,7 @@ external_ai = false
         args.confirm_token = preview["confirm_token"]
         result = commit_output(args)
         self.assertTrue(result["committed"])
+        self.assertEqual(Path(result["path"]).stat().st_mode & 0o777, 0o600)
         with self.assertRaises(ValueError):
             preview_output(args)
         escaped = argparse.Namespace(

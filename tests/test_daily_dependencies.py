@@ -138,7 +138,11 @@ class DailyDependencyTests(unittest.TestCase):
                 }]}), encoding="utf-8")
         report = self.root / "report.json"
         result = collect(tasks, results, report)
-        self.assertTrue(result["ok"])
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["collection_complete"])
+        self.assertFalse(result["ready"])
+        self.assertFalse(result["authorizes_action"])
+        self.assertIn("critical or material findings remain unresolved", result["readiness_reasons"])
         self.assertTrue(result["deliverable_unchanged"])
         self.assertEqual(result["finding_count"], 4)
         invalid_path = results / f"{next(iter(LENSES))}.json"
@@ -147,6 +151,157 @@ class DailyDependencyTests(unittest.TestCase):
         invalid_path.write_text(json.dumps(invalid), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "invalid severity; expected one of"):
             collect(tasks, results, self.root / "invalid-report.json")
+
+    def test_review_readiness_blocks_missing_sources_gaps_and_questions(self):
+        draft = self.root / "draft.txt"
+        draft.write_text("Fictional draft.", encoding="utf-8")
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps(create_manifest(draft, [], self.root)), encoding="utf-8")
+        tasks = self.root / "tasks.json"
+        prepare(manifest, tasks)
+        results = self.root / "results"
+        results.mkdir()
+        for index, lens in enumerate(LENSES):
+            (results / f"{lens}.json").write_text(json.dumps({
+                "lens": lens,
+                "coverage_gaps": ["fictional attachment unavailable"] if index == 0 else [],
+                "questions": ["Which fictional date controls?"] if index == 1 else [],
+                "findings": [],
+            }), encoding="utf-8")
+
+        collected = collect(tasks, results, self.root / "report.json")
+        self.assertFalse(collected["ok"])
+        self.assertTrue(collected["collection_complete"])
+        self.assertFalse(collected["ready"])
+        self.assertEqual(collected["blocking_finding_count"], 0)
+        self.assertEqual(collected["readiness_reasons"], [
+            "no controlling sources were supplied",
+            "review coverage gaps remain",
+            "review questions remain unresolved",
+        ])
+
+    def test_review_with_sources_and_only_optional_findings_can_be_ready_but_never_authorizes(self):
+        source = self.root / "source.txt"
+        source.write_text("Fictional source.", encoding="utf-8")
+        draft = self.root / "draft.txt"
+        draft.write_text("Fictional draft.", encoding="utf-8")
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps(create_manifest(draft, [source], self.root)), encoding="utf-8")
+        tasks = self.root / "tasks.json"
+        prepare(manifest, tasks)
+        results = self.root / "results"
+        results.mkdir()
+        for lens in LENSES:
+            (results / f"{lens}.json").write_text(json.dumps({
+                "lens": lens,
+                "coverage_gaps": [],
+                "questions": [],
+                "findings": [{
+                    "severity": "optional",
+                    "title": "Style refinement",
+                    "observation": "A fictional sentence could be shorter.",
+                    "source_path": str(draft.resolve()),
+                    "location": "line 1",
+                    "countervailing_evidence": "The current sentence remains understandable.",
+                    "consequence": "This affects style only.",
+                }],
+            }), encoding="utf-8")
+
+        collected = collect(tasks, results, self.root / "report.json")
+        self.assertTrue(collected["collection_complete"])
+        self.assertTrue(collected["ready"])
+        self.assertFalse(collected["authorizes_action"])
+
+    def test_review_rejects_empty_or_subset_task_bundles(self):
+        source = self.root / "source.txt"
+        source.write_text("Fictional source.", encoding="utf-8")
+        draft = self.root / "draft.txt"
+        draft.write_text("Fictional draft.", encoding="utf-8")
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps(create_manifest(draft, [source], self.root)), encoding="utf-8")
+        original_tasks = self.root / "original-tasks.json"
+        prepare(manifest, original_tasks)
+        bundle = json.loads(original_tasks.read_text(encoding="utf-8"))
+        results = self.root / "results"
+        results.mkdir()
+
+        for name, tasks in (("empty", []), ("subset", bundle["tasks"][:-1])):
+            tampered = {**bundle, "tasks": tasks}
+            tasks_path = self.root / f"{name}-tasks.json"
+            tasks_path.write_text(json.dumps(tampered), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "each expected lens exactly once"):
+                collect(tasks_path, results, self.root / f"{name}-report.json")
+
+    def test_review_rejects_schema_not_bound_to_host(self):
+        source = self.root / "source.txt"
+        source.write_text("Fictional source.", encoding="utf-8")
+        draft = self.root / "draft.txt"
+        draft.write_text("Fictional draft.", encoding="utf-8")
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps(create_manifest(draft, [source], self.root)), encoding="utf-8")
+        tasks = self.root / "tasks.json"
+        prepare(manifest, tasks, host="claude")
+        bundle = json.loads(tasks.read_text(encoding="utf-8"))
+        bundle["host"] = "codex"
+        tasks.write_text(json.dumps(bundle), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "invalid schema"):
+            collect(tasks, self.root / "results", self.root / "report.json")
+
+    def test_review_rejects_tampered_task_authority_and_evidence(self):
+        source = self.root / "source.txt"
+        source.write_text("Fictional source.", encoding="utf-8")
+        other = self.root / "other.txt"
+        other.write_text("Different fictional evidence.", encoding="utf-8")
+        draft = self.root / "draft.txt"
+        draft.write_text("Fictional draft.", encoding="utf-8")
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps(create_manifest(draft, [source], self.root)), encoding="utf-8")
+        original_tasks = self.root / "tasks.json"
+        prepare(manifest, original_tasks)
+        original = json.loads(original_tasks.read_text(encoding="utf-8"))
+
+        mutations = {
+            "agent": lambda task: task.__setitem__("agent", "untrusted-agent"),
+            "read-only": lambda task: task.__setitem__("read_only", False),
+            "evidence": lambda task: task.__setitem__(
+                "sources", [{"path": str(other.resolve()), "size": other.stat().st_size, "sha256": "0" * 64}]
+            ),
+            "result-schema": lambda task: task["result_schema"].__setitem__(
+                "severity_allowed", ["optional"]
+            ),
+        }
+        for name, mutate in mutations.items():
+            with self.subTest(name=name):
+                bundle = json.loads(json.dumps(original))
+                mutate(bundle["tasks"][0])
+                tampered = self.root / f"tampered-{name}.json"
+                tampered.write_text(json.dumps(bundle), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "does not match the canonical"):
+                    collect(tampered, self.root / "results", self.root / f"report-{name}.json")
+
+    def test_review_rejects_cross_host_manifest_at_prepare_and_collect(self):
+        source = self.root / "source.txt"
+        source.write_text("Fictional source.", encoding="utf-8")
+        draft = self.root / "draft.txt"
+        draft.write_text("Fictional draft.", encoding="utf-8")
+        claude_manifest = self.root / "claude-manifest.json"
+        claude_manifest.write_text(
+            json.dumps(create_manifest(draft, [source], self.root, host="claude")),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ValueError, "manifest schema does not match"):
+            prepare(claude_manifest, self.root / "codex-tasks.json", host="codex")
+
+        tasks = self.root / "claude-tasks.json"
+        prepare(claude_manifest, tasks, host="claude")
+        bundle = json.loads(tasks.read_text(encoding="utf-8"))
+        bundle["host"] = "codex"
+        bundle["schema"] = "codex-review-tasks-v1"
+        for task in bundle["tasks"]:
+            task["agent"] = "independent-codex-reviewer"
+        tasks.write_text(json.dumps(bundle), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "manifest schema does not match"):
+            collect(tasks, self.root / "results", self.root / "report.json")
 
 
 if __name__ == "__main__":

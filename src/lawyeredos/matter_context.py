@@ -9,6 +9,7 @@ from typing import Any
 
 from .common import confined_path, emit
 from .config import load_config
+from .matter_brief import BriefError, load_matter_brief
 from .tracker_cli import connect, row_dict, verify
 
 
@@ -64,32 +65,98 @@ def orient(config_path: Path, identifier: str, recent_limit: int) -> dict[str, A
                 for row in matches[:20]
             ],
         }
-    matter = matches[0]
+    matched = matches[0]
+    with connect(config.tracker_database) as connection:
+        connection.execute("BEGIN")
+        current = connection.execute(
+            "SELECT * FROM matters WHERE file_number=?", (matched["file_number"],)
+        ).fetchone()
+        if current is None:
+            connection.rollback()
+            return {"ok": False, "status": "tracker_changed_during_orientation"}
+        matter = row_dict(current)
+        timeline = [dict(item) for item in connection.execute(
+            "SELECT id, event_date, text, created_at FROM timeline "
+            "WHERE file_number=? ORDER BY id", (matter["file_number"],)
+        )]
+        tracker_revision = int(connection.execute(
+            "SELECT value FROM meta WHERE key='revision'"
+        ).fetchone()[0])
+        connection.rollback()
     try:
         folder = confined_path(config.workspace_root, matter["matter_folder"])
     except ValueError:
         return {"ok": False, "status": "folder_unavailable", "matter": matter}
     if not folder.is_dir():
         return {"ok": False, "status": "folder_unavailable", "matter": matter}
-    brief_path = next(
-        (candidate for candidate in (folder / "_matter-brief.md", folder / "matter-brief.md") if candidate.is_file()),
-        folder / "_matter-brief.md",
-    )
+    brief_candidates = (folder / "_matter-brief.md", folder / "matter-brief.md")
+    present_briefs = [candidate for candidate in brief_candidates if candidate.exists() or candidate.is_symlink()]
+    if len(present_briefs) > 1:
+        return {"ok": False, "status": "brief_ambiguous",
+                "error": "multiple matter brief paths are present", "matter": matter, "folder": str(folder)}
+    brief_path = present_briefs[0] if present_briefs else None
+    if brief_path is not None and (brief_path.is_symlink() or not brief_path.is_file()):
+        return {"ok": False, "status": "brief_source_unsafe",
+                "error": "matter brief is not a regular non-symlink file",
+                "matter": matter, "folder": str(folder)}
     brief: dict[str, Any]
-    if brief_path.is_file() and not brief_path.is_symlink():
-        text = brief_path.read_text(encoding="utf-8", errors="replace")
-        brief = {"present": True, "path": str(brief_path), "text": text[:30000], "truncated": len(text) > 30000}
+    if brief_path is None:
+        brief = {"present": False, "identity": {"verified": False, "reason": "brief_missing"}}
     else:
-        brief = {"present": False}
+        try:
+            brief = load_matter_brief(
+                brief_path,
+                file_number=matter["file_number"],
+                client=matter["client"],
+                sidecars=(folder / "_matter-decisions.md", folder / "_matter-comms.md"),
+            )
+        except BriefError as exc:
+            return {
+                "ok": False,
+                "status": exc.status,
+                "error": str(exc),
+                "matter": matter,
+                "folder": str(folder),
+            }
+    live_state = {
+        "snapshot": {"tracker_revision": tracker_revision, "internally_consistent": True,
+                     "currentness_unverified": True,
+                     "reason": "files and external systems are not part of the tracker snapshot"},
+        "status": {"value": matter["status"], "source": "tracker.matters.status", "unverified": False},
+        "next_action": {"value": matter["next_action"], "source": "tracker.matters.next_action",
+                        "unverified": True,
+                        "reason": "tracker value read; completion and currentness not verified"},
+        "next_action_date": {"value": matter["next_action_date"],
+                             "source": "tracker.matters.next_action_date",
+                             "unverified": True,
+                             "reason": "governing source and deadline calculation not verified"},
+        "limitation_date": {"value": matter["limitation_date"],
+                            "source": "tracker.matters.limitation_date", "unverified": True,
+                            "reason": "governing source and legal calculation not verified"},
+        "court_deadlines": {"value": matter["court_deadlines"],
+                            "source": "tracker.matters.court_deadlines", "unverified": True,
+                            "reason": "governing source and legal calculation not verified"},
+        "timeline": [{**item, "source": f"tracker.timeline[{item['id']}]", "unverified": True}
+                     for item in timeline],
+    }
     return {
         "ok": True,
         "status": "ok_read_only",
         "matter": matter,
         "folder": str(folder),
         "brief": brief,
+        "identity": {
+            "tracker_file_number": matter["file_number"],
+            "tracker_matter_folder": matter["matter_folder"],
+            "resolved_folder": str(folder),
+            "brief_header_verified": bool(brief.get("identity", {}).get("verified")) if brief.get("present") else False,
+        },
+        "live_state": live_state,
         "recent_files": safe_recent_files(folder, recent_limit),
         "integrations": {
             "mail": config.mail_adapter,
+            "mail_context": {"adapter": config.mail_adapter, "state": "not_checked",
+                             "availability": "unknown" if config.mail_adapter != "unavailable" else "unavailable"},
             "calendar": config.calendar_adapter,
             "practice_manager": config.practice_manager_adapter,
         },

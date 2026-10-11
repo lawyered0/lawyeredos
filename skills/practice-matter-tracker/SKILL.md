@@ -26,7 +26,9 @@ Use names only to locate candidates. For conflict screening, search with
 file number, client, description, opposing party, other parties, and primary
 email in this local register. It does not do fuzzy or alias matching, query
 external sources, maintain a clearance-status field, or make the lawyer's
-final conflict decision. Mutate by exact file number.
+final conflict decision. Report “No located hit in the local register fields
+searched,” never “no conflict,” “clear,” or equivalent. Mutate by exact file
+number.
 
 ## Link the first existing matter folder
 
@@ -44,7 +46,7 @@ the user must correct.
 
 ## Writes
 
-`create`, `update`, `timeline`, `close`, and `reopen` require a dry run and a
+`create`, `update`, `timeline`, `workflow`, `close`, and `reopen` require a dry run and a
 matching current-revision token. Present the exact proposed values and
 downstream effects before committing. A stale token fails closed.
 
@@ -60,6 +62,26 @@ PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredo
 Always re-read after commit. Close, reopen, deadline changes, calendar changes,
 and external practice-manager writes require exact current approval. Do not
 retry an ambiguous result blindly; inspect `history`, `show`, and `verify`.
+The CLI treats SQLite `COMMIT` as the durable boundary. If its post-commit
+readback fails, it reports `committed: true`, `verification_state:
+readback_failed`, and structured recovery evidence. That result is not safe to
+retry: inspect the stated revision with the read commands before doing anything
+else. A successful matter readback reports `verification_state:
+readback_verified`; that narrow state does not verify the audit/history, so the
+result also reports `audit_verification_state: not_performed`.
+If the `COMMIT` call itself raises, the outcome may be durable or rolled back;
+the CLI reports `committed: null`, `commit_state: outcome_unknown`, and
+`retry_safe: false`. Do not infer an outcome or retry. Run all three mandatory
+read-only recovery checks in the result (`show`, `history`, and `verify`) and
+reconcile the reported revision and provisional `audit_id` first.
+
+`workflow` atomically combines explicitly requested next-action fields and an
+optional timeline entry in one tracker revision. It does not infer a change from
+matter or message content. Clearing a nonempty next action requires the exact
+empty value, `--clear-next-action`, and a disposition timeline entry. When the
+same request also saves a durable matter file, route the coordinated preview and
+commit through `lawyeredos.matter_write` as described in
+`lawyeredos:practice-work-on-matter`.
 
 `court_deadlines` is JSON data, not a verified legal calculation. The register
 stores facts and sources; jurisdiction-specific rules live in separate profiles.

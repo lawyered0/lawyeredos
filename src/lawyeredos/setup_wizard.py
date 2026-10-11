@@ -9,16 +9,28 @@ import platform
 import shlex
 import shutil
 import sqlite3
+import stat
 import sys
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from lawyeredos.config import load_config
 from lawyeredos.tracker_cli import initialize
+from lawyeredos.private_fs import (
+    assert_private_directory,
+    assert_private_file,
+    assert_private_tree,
+    copy_private_file,
+    copy_private_tree,
+    create_private_file,
+    ensure_private_directory,
+    replace_private_file,
+)
 
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 MODULES = ("matter", "tracker", "letters", "redline", "calendar", "review")
 MODULE_SKILLS = {
     "matter": "practice-work-on-matter",
@@ -38,6 +50,7 @@ PROJECT_SKILLS = {
 }
 PROJECT_AGENT = "lawyeredos-legal-review-lens"
 EXCLUDE = {".venv", ".demo", ".git", "__pycache__", ".pytest_cache", "qa"}
+TEMPLATE_MANIFEST = ".lawyeredos-template-manifest.json"
 
 
 @dataclass(frozen=True)
@@ -91,8 +104,26 @@ def package_digest(root: Path) -> str:
     return digest.hexdigest()
 
 
-def managed_fingerprint(path: Path) -> str:
-    """Hash a managed file or directory without following symlinks."""
+def write_template_manifest(plugin: Path) -> Path:
+    """Bind the bundled neutral template to this immutable installed core."""
+    template = plugin / "assets" / "neutral-letterhead.docx"
+    if template.is_symlink() or not template.is_file():
+        raise ValueError(f"bundled neutral template must be a regular file: {template}")
+    manifest = plugin / TEMPLATE_MANIFEST
+    if manifest.exists() or manifest.is_symlink():
+        raise ValueError(f"template manifest already exists in candidate payload: {manifest}")
+    content = {
+        "schema_version": 1,
+        "algorithm": "sha256",
+        "template": "assets/neutral-letterhead.docx",
+        "sha256": hashlib.sha256(template.read_bytes()).hexdigest(),
+    }
+    manifest.write_text(json.dumps(content, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest
+
+
+def legacy_managed_fingerprint(path: Path) -> str:
+    """Released v1 typed hash, retained only to verify older rollback state."""
     digest = hashlib.sha256()
     if path.is_symlink():
         digest.update(b"symlink\0")
@@ -122,6 +153,188 @@ def managed_fingerprint(path: Path) -> str:
         digest.update(len(content).to_bytes(8, "big"))
         digest.update(content)
     return digest.hexdigest()
+
+
+def managed_fingerprint(path: Path) -> str:
+    """Hash every included filesystem entry without following symlinks."""
+    digest = hashlib.sha256()
+    if path.is_symlink():
+        digest.update(b"symlink\0")
+        digest.update(os.readlink(path).encode())
+        return digest.hexdigest()
+    if path.is_file():
+        digest.update(b"file\0")
+        digest.update(path.read_bytes())
+        return digest.hexdigest()
+    if not path.is_dir():
+        raise ValueError(f"managed path is unavailable or has an unsupported type: {path}")
+    digest.update(b"directory-v2\0")
+    for item in sorted(path.rglob("*")):
+        relative_path = item.relative_to(path)
+        if any(part in EXCLUDE for part in relative_path.parts):
+            continue
+        if item.name.endswith((".pyc", ".pyo", ".egg-info")):
+            continue
+        relative = relative_path.as_posix().encode()
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        if item.is_symlink():
+            raise ValueError(f"managed directory contains a symlink: {item}")
+        if item.is_dir():
+            digest.update(b"directory\0")
+            continue
+        if item.is_file():
+            digest.update(b"file\0")
+            content = item.read_bytes()
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+            continue
+        raise ValueError(f"managed directory contains an unsupported filesystem entry: {item}")
+    return digest.hexdigest()
+
+
+def _validate_managed_paths(directories: tuple[Path, ...], files: tuple[Path, ...]) -> None:
+    """Reject path substitutions before any setup write or backup operation."""
+    for path in directories:
+        if path.is_symlink():
+            raise ValueError(f"managed directory must not be a symlink: {path}")
+        if path.exists() and not path.is_dir():
+            raise ValueError(f"managed directory path is not a directory: {path}")
+    for path in files:
+        if path.is_symlink():
+            raise ValueError(f"managed file must not be a symlink: {path}")
+        if path.exists() and not path.is_file():
+            raise ValueError(f"managed file path is not a file: {path}")
+
+
+def path_snapshot(path: Path) -> dict[str, str]:
+    if path.is_symlink():
+        return {"kind": "symlink", "target": os.readlink(path)}
+    if path.is_file():
+        return {"kind": "file", "fingerprint": managed_fingerprint(path)}
+    if path.is_dir():
+        return {"kind": "directory", "fingerprint": managed_fingerprint(path)}
+    return {"kind": "absent"}
+
+
+def assert_preflight_paths(expected: dict[str, dict[str, str]]) -> None:
+    for raw, snapshot in expected.items():
+        path = Path(raw)
+        if path_snapshot(path) != snapshot:
+            raise ValueError(f"managed path changed after preview; build a new plan: {path}")
+
+
+def initialize_tracker_exclusive(path: Path) -> None:
+    """Build off-path, then claim the final tracker name without overwriting."""
+    temporary_root = Path(tempfile.mkdtemp(prefix=".lawyeredos-tracker-", dir=path.parent))
+    temporary_tracker = temporary_root / path.name
+    try:
+        initialize(temporary_tracker)
+        os.link(temporary_tracker, path)
+    except FileExistsError as exc:
+        raise ValueError(f"tracker path appeared after preview; refusing to overwrite: {path}") from exc
+    finally:
+        shutil.rmtree(temporary_root)
+    assert_private_file(path)
+
+
+def _load_project_discovery(
+    discovery: Path,
+    allowed_paths: set[Path],
+    state_path: Path,
+) -> tuple[set[str], dict[str, str]]:
+    """Load only provenance-backed paths from the exact Claude project namespace."""
+    if discovery.is_symlink():
+        raise ValueError(f"managed discovery file must not be a symlink: {discovery}")
+    if not discovery.exists():
+        return set(), {}
+    if not discovery.is_file():
+        raise ValueError(f"managed discovery path is not a file: {discovery}")
+    data = json.loads(discovery.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("schema_version") not in {1, 2}:
+        raise ValueError(f"unsupported LawyeredOS discovery schema: {discovery}")
+    package_digest_value = data.get("package_digest")
+    if not isinstance(package_digest_value, str) or len(package_digest_value) != 64 or any(
+        character not in "0123456789abcdef" for character in package_digest_value
+    ):
+        raise ValueError(f"invalid package digest in LawyeredOS discovery: {discovery}")
+    raw_paths = data.get("managed_paths")
+    if not isinstance(raw_paths, list) or not all(isinstance(item, str) for item in raw_paths):
+        raise ValueError(f"invalid managed_paths in LawyeredOS discovery: {discovery}")
+    if len(raw_paths) != len(set(raw_paths)):
+        raise ValueError(f"duplicate managed_paths in LawyeredOS discovery: {discovery}")
+    allowed = {str(path.absolute()) for path in allowed_paths}
+    managed: set[str] = set()
+    for raw in raw_paths:
+        candidate = Path(raw)
+        if not candidate.is_absolute() or str(candidate.absolute()) != raw or raw not in allowed:
+            raise ValueError(f"discovery path is outside the LawyeredOS Claude namespace: {raw}")
+        managed.add(raw)
+    raw_fingerprints = data.get("managed_fingerprints", {})
+    if not isinstance(raw_fingerprints, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+        for key, value in raw_fingerprints.items()
+    ):
+        raise ValueError(f"invalid managed_fingerprints in LawyeredOS discovery: {discovery}")
+    if not set(raw_fingerprints).issubset(managed):
+        raise ValueError(f"discovery fingerprints include an unmanaged path: {discovery}")
+    fingerprints = dict(raw_fingerprints)
+    # Released schema-v1 installs recorded ownership hashes in setup-state.json.
+    # Use those only for the already confined discovery paths; never infer ownership
+    # from a filename or from discovery alone.
+    if managed - set(fingerprints):
+        if state_path.is_symlink():
+            raise ValueError(f"managed setup state must not be a symlink: {state_path}")
+        if state_path.is_file():
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state_fingerprints = state.get("managed_fingerprints", {})
+            if isinstance(state_fingerprints, dict):
+                for raw in managed - set(fingerprints):
+                    value = state_fingerprints.get(raw)
+                    if isinstance(value, str):
+                        fingerprints[raw] = value
+    if managed - set(fingerprints):
+        plugin_root = discovery.parent / "plugins"
+        package_digest_value = data["package_digest"]
+        matching_plugins = []
+        if plugin_root.is_dir() and not plugin_root.is_symlink():
+            for candidate in plugin_root.iterdir():
+                marker = candidate / ".lawyeredos-package.json"
+                if candidate.is_symlink() or not marker.is_file():
+                    continue
+                marker_data = json.loads(marker.read_text(encoding="utf-8"))
+                if marker_data.get("digest") == package_digest_value:
+                    matching_plugins.append(candidate)
+        for raw in managed - set(fingerprints):
+            path = Path(raw)
+            if not path.exists() and not path.is_symlink():
+                continue
+            trusted = False
+            if path.is_symlink():
+                target = path.resolve(strict=True)
+                trusted = any(
+                    target == (plugin / ".lawyeredos-project" / "skills" / path.name).resolve()
+                    for plugin in matching_plugins
+                )
+            elif path.name == f"{PROJECT_AGENT}.md" and path.is_file():
+                trusted = any(
+                    (plugin / ".lawyeredos-project" / "agents" / path.name).is_file()
+                    and path.read_bytes() == (plugin / ".lawyeredos-project" / "agents" / path.name).read_bytes()
+                    for plugin in matching_plugins
+                )
+            if trusted:
+                fingerprints[raw] = managed_fingerprint(path)
+    for raw in managed:
+        path = Path(raw)
+        if not path.exists() and not path.is_symlink():
+            continue
+        expected = fingerprints.get(raw)
+        if expected is None:
+            raise ValueError(f"managed discovery path has no trusted fingerprint: {path}")
+        if managed_fingerprint(path) != expected:
+            raise ValueError(f"managed discovery path fingerprint changed: {path}")
+    return managed, fingerprints
 
 
 def _projectize_skill(source: Path, destination: Path, project_name: str) -> None:
@@ -158,6 +371,24 @@ def _prepare_project_payload(plugin: Path, modules: set[str]) -> Path:
         agent_text = agent_text.replace("name: legal-review-lens", f"name: {PROJECT_AGENT}", 1)
         (agents_root / f"{PROJECT_AGENT}.md").write_text(agent_text, encoding="utf-8")
     return root
+
+
+def expected_claude_plugin_fingerprint(source: Path, modules: tuple[str, ...], digest: str) -> str:
+    with tempfile.TemporaryDirectory() as temporary:
+        plugin = Path(temporary) / "plugin"
+        shutil.copytree(source, plugin, ignore=_ignored)
+        selected = set(modules)
+        for module, skill in MODULE_SKILLS.items():
+            if module not in selected:
+                shutil.rmtree(plugin / "skills" / skill)
+        if "review" not in selected:
+            shutil.rmtree(plugin / "agents")
+        write_template_manifest(plugin)
+        _prepare_project_payload(plugin, selected)
+        (plugin / ".lawyeredos-package.json").write_text(json.dumps({
+            "version": VERSION, "digest": digest, "modules": list(modules),
+        }, indent=2) + "\n", encoding="utf-8")
+        return managed_fingerprint(plugin)
 
 
 def dependency_report(modules: tuple[str, ...] = ()) -> list[dict[str, str | bool]]:
@@ -263,6 +494,7 @@ def render_config(answers: Answers, plugin_target: Path) -> str:
         f"database = {_toml_string(str(setup_root / 'data' / 'matters.sqlite3'))}",
         "", "[documents]",
         f"template = {_toml_string(str(plugin_target / 'assets' / 'neutral-letterhead.docx'))}",
+        f"template_manifest = {_toml_string(str(plugin_target / TEMPLATE_MANIFEST))}",
         'author = "Authorized reviewer"', "", "[branding]",
         f"mode = {_toml_string(answers.branding_mode)}",
         f"label = {_toml_string(label)}", "", "[jurisdiction]",
@@ -312,6 +544,8 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         raise ValueError(f"configuration already exists: {config_path}")
     if config_exists and answers.existing_config == "reuse":
         loaded = load_config(config_path)
+        if loaded.tracker_database.exists() or loaded.tracker_database.is_symlink():
+            assert_private_file(loaded.tracker_database)
         if loaded.workspace_root != workspace:
             raise ValueError(
                 "existing configuration belongs to a different workspace; "
@@ -332,6 +566,9 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     digest = package_digest(source)
     selection_digest = hashlib.sha256(",".join(effective.modules).encode()).hexdigest()
     plugin_target = setup_root / "plugins" / f"lawyeredos-{VERSION}-{digest[:8]}-{selection_digest[:6]}"
+    plugin_fingerprint = expected_claude_plugin_fingerprint(source, effective.modules, digest)
+    if plugin_target.exists() and managed_fingerprint(plugin_target) != plugin_fingerprint:
+        raise ValueError(f"installed versioned plugin content changed: {plugin_target}")
     launcher = setup_root / "launch-lawyeredos.sh"
     terminal_launcher = setup_root / "launch-lawyeredos-terminal.sh"
     claude_root = workspace / ".claude"
@@ -345,14 +582,10 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         claude_root / "skills",
         claude_root / "agents",
     )
-    for path in managed_directories:
-        if path.is_symlink():
-            raise ValueError(f"managed directory must not be a symlink: {path}")
-        if path.exists() and not path.is_dir():
-            raise ValueError(f"managed directory path is not a directory: {path}")
-    for path in (config_path, launcher, terminal_launcher, setup_root / "project-discovery.json"):
-        if path.is_symlink():
-            raise ValueError(f"managed file must not be a symlink: {path}")
+    _validate_managed_paths(
+        managed_directories,
+        (config_path, launcher, terminal_launcher, setup_root / "project-discovery.json"),
+    )
     project_skill_paths = {
         module: claude_root / "skills" / PROJECT_SKILLS[module]
         for module in effective.modules
@@ -362,10 +595,13 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     if settings_local.is_symlink():
         raise ValueError(f"Claude project settings must not be a symlink: {settings_local}")
     discovery_state = setup_root / "project-discovery.json"
-    prior_discovery = {}
-    if discovery_state.is_file():
-        prior_discovery = json.loads(discovery_state.read_text(encoding="utf-8"))
-    prior_managed = set(prior_discovery.get("managed_paths", []))
+    all_project_paths = {
+        *(claude_root / "skills" / name for name in PROJECT_SKILLS.values()),
+        project_agent,
+    }
+    prior_managed, prior_fingerprints = _load_project_discovery(
+        discovery_state, all_project_paths, setup_root / "setup-state.json"
+    )
     candidate_paths = set(str(path) for path in project_skill_paths.values())
     if "review" in effective.modules:
         candidate_paths.add(str(project_agent))
@@ -380,7 +616,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         if "env" in settings_data and not isinstance(settings_data["env"], dict):
             raise ValueError(f"Claude project settings env must contain a JSON object: {settings_local}")
         managed_env = {"LAWYEREDOS_ROOT", "LAWYEREDOS_CONFIG", "LAWYEREDOS_PYTHON"}
-        if managed_env.intersection(settings_data.get("env", {})) and not prior_discovery:
+        if managed_env.intersection(settings_data.get("env", {})) and not prior_managed:
             raise ValueError("Claude project settings already define LawyeredOS variables without managed state")
     # Preserve the virtual-environment entrypoint itself. Resolving the final
     # symlink would bypass pyvenv.cfg and lose the packages checked above.
@@ -396,6 +632,8 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     config_action = "reuse" if config_exists and answers.existing_config == "reuse" else ("replace_with_backup" if config_exists else "create")
     operations.append({"action": config_action, "path": str(config_path)})
     tracker = setup_root / "data" / "matters.sqlite3"
+    if tracker.exists() or tracker.is_symlink():
+        assert_private_file(tracker)
     if not tracker.exists() and config_action != "reuse":
         operations.append({"action": "initialize_empty_tracker", "path": str(tracker)})
     operations.append({"action": "create_or_update_launcher_with_backup", "path": str(launcher)})
@@ -410,6 +648,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "require_new_workspace": require_new_workspace,
         "package_version": VERSION,
         "package_digest": digest,
+        "plugin_fingerprint": plugin_fingerprint,
         "selection_digest": selection_digest,
         "source": str(source),
         "workspace": str(workspace),
@@ -423,6 +662,14 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "settings_local": str(settings_local),
         "discovery_state": str(discovery_state),
         "prior_managed": sorted(prior_managed),
+        "prior_fingerprints": prior_fingerprints,
+        "preflight_paths": {
+            str(path): path_snapshot(path)
+            for path in (
+                config_path, tracker, launcher, terminal_launcher, settings_local,
+                discovery_state, setup_root / "setup-state.json",
+            )
+        },
         "runtime_python": str(runtime_python),
         "answers": {**asdict(effective), "workspace": str(workspace), "modules": list(effective.modules)},
         "dependencies": dependency_report(effective.modules),
@@ -512,10 +759,57 @@ def print_preview(plan: dict) -> None:
     print("\nNo changes have been made.")
 
 
-def _backup(path: Path, backup_root: Path, backups: list[dict[str, str]]) -> None:
+def _tree_mode_metadata(path: Path) -> dict[str, dict[str, int | str]]:
+    metadata: dict[str, dict[str, int | str]] = {}
+    for item in (path, *sorted(path.rglob("*"))):
+        if item.is_symlink():
+            raise ValueError(f"backup source tree contains a symlink: {item}")
+        details = item.stat(follow_symlinks=False)
+        if item.is_dir():
+            kind = "directory"
+        elif item.is_file():
+            kind = "file"
+        else:
+            raise ValueError(f"backup source tree contains a special filesystem entry: {item}")
+        mode = stat.S_IMODE(details.st_mode)
+        if mode > 0o777:
+            raise ValueError(f"backup source tree contains unsupported special mode bits: {item}")
+        metadata["." if item == path else item.relative_to(path).as_posix()] = {
+            "kind": kind,
+            "mode": mode,
+        }
+    return metadata
+
+
+def _restore_original_modes(path: Path, metadata: dict[str, dict[str, int | str]]) -> None:
+    files: list[tuple[Path, int]] = []
+    directories: list[tuple[Path, int]] = []
+    for relative, expected in metadata.items():
+        item = path if relative == "." else path / relative
+        if item.is_symlink():
+            raise ValueError(f"restored path became a symlink: {item}")
+        mode = int(expected["mode"])
+        if mode < 0 or mode > 0o777:
+            raise ValueError(f"restored path mode is invalid: {item}")
+        if expected["kind"] == "file" and item.is_file():
+            files.append((item, mode))
+        elif expected["kind"] == "directory" and item.is_dir():
+            directories.append((item, mode))
+        else:
+            raise ValueError(f"restored path type changed: {item}")
+    for item, mode in files:
+        os.chmod(item, mode, follow_symlinks=False)
+    for item, mode in sorted(directories, key=lambda value: len(value[0].parts), reverse=True):
+        os.chmod(item, mode, follow_symlinks=False)
+
+
+def _backup(path: Path, backup_root: Path, backups: list[dict]) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    backup_root.mkdir(parents=True, exist_ok=True)
+    if backup_root.exists() or backup_root.is_symlink():
+        assert_private_directory(backup_root)
+    else:
+        ensure_private_directory(backup_root)
     destination = backup_root / path.name
     counter = 1
     while destination.exists():
@@ -523,15 +817,72 @@ def _backup(path: Path, backup_root: Path, backups: list[dict[str, str]]) -> Non
         counter += 1
     if path.is_symlink():
         destination = destination.with_name(destination.name + ".symlink")
-        destination.write_text(os.readlink(path), encoding="utf-8")
+        create_private_file(destination, os.readlink(path).encode("utf-8"))
         kind = "symlink"
+        metadata = None
     elif path.is_dir():
-        shutil.copytree(path, destination)
+        metadata = _tree_mode_metadata(path)
+        copy_private_tree(path, destination)
         kind = "directory"
     else:
-        shutil.copy2(path, destination)
+        original_mode = stat.S_IMODE(path.stat().st_mode)
+        if original_mode > 0o777:
+            raise ValueError(f"backup source contains unsupported special mode bits: {path}")
+        metadata = {".": {"kind": "file", "mode": original_mode}}
+        copy_private_file(path, destination)
         kind = "file"
-    backups.append({"original": str(path), "backup": str(destination), "kind": kind})
+    record = {"original": str(path), "backup": str(destination), "kind": kind}
+    if metadata is not None:
+        record["original_modes"] = metadata
+    backups.append(record)
+
+
+def _validate_backup_artifact(item: dict, backups_root: Path) -> None:
+    backup = Path(item.get("backup", ""))
+    kind = item.get("kind")
+    if kind not in {"file", "directory", "symlink"}:
+        raise ValueError(f"rollback backup kind is invalid: {backup}")
+    cursor = backup.parent
+    while True:
+        assert_private_directory(cursor)
+        if cursor == backups_root:
+            break
+        if backups_root not in cursor.parents:
+            raise ValueError(f"rollback backup path is outside the private backup tree: {backup}")
+        cursor = cursor.parent
+    if kind == "directory":
+        assert_private_tree(backup)
+    else:
+        assert_private_file(backup)
+    metadata = item.get("original_modes")
+    if kind == "symlink":
+        if metadata is not None:
+            raise ValueError(f"symlink backup must not contain mode metadata: {backup}")
+        return
+    if not isinstance(metadata, dict) or not metadata:
+        raise ValueError(f"rollback backup mode metadata is missing: {backup}")
+    normalized: dict[str, str] = {}
+    for relative, entry in metadata.items():
+        relative_path = Path(relative) if isinstance(relative, str) else Path("/")
+        if (
+            not isinstance(relative, str)
+            or (relative != "." and (relative_path.is_absolute() or ".." in relative_path.parts
+                                     or relative_path.as_posix() != relative))
+            or not isinstance(entry, dict)
+            or entry.get("kind") not in {"file", "directory"}
+            or isinstance(entry.get("mode"), bool)
+            or not isinstance(entry.get("mode"), int)
+            or not 0 <= entry["mode"] <= 0o777
+        ):
+            raise ValueError(f"rollback backup mode metadata is invalid: {backup}")
+        normalized[relative] = entry["kind"]
+    if kind == "file":
+        if normalized != {".": "file"}:
+            raise ValueError(f"rollback file backup metadata is incomplete: {backup}")
+    else:
+        actual = {relative: str(entry["kind"]) for relative, entry in _tree_mode_metadata(backup).items()}
+        if normalized != actual:
+            raise ValueError(f"rollback directory backup metadata is incomplete: {backup}")
 
 
 def _undo_failed_apply(plan: dict) -> list[str]:
@@ -539,6 +890,17 @@ def _undo_failed_apply(plan: dict) -> list[str]:
     created = transaction.get("created", [])
     backups = transaction.get("backups", [])
     problems: list[str] = []
+    backup_root = transaction.get("backup_root")
+    if backups:
+        try:
+            if not backup_root:
+                raise ValueError("recovery backup root is missing")
+            root = Path(backup_root).parent
+            assert_private_directory(root)
+            for item in backups:
+                _validate_backup_artifact(item, root)
+        except (OSError, ValueError) as exc:
+            return [f"validate recovery backups: {exc}"]
     for item in reversed(backups):
         original = Path(item["original"])
         backup = Path(item["backup"])
@@ -555,7 +917,9 @@ def _undo_failed_apply(plan: dict) -> list[str]:
                 original.symlink_to(backup.read_text(encoding="utf-8"), target_is_directory=True)
             else:
                 shutil.copy2(backup, original)
-        except OSError as exc:
+            if item.get("original_modes"):
+                _restore_original_modes(original, item["original_modes"])
+        except (OSError, ValueError) as exc:
             problems.append(f"restore {original}: {exc}")
     state_path = Path(plan["setup_root"]) / "setup-state.json"
     previous_state = transaction.get("previous_state")
@@ -568,7 +932,6 @@ def _undo_failed_apply(plan: dict) -> list[str]:
             state_path.chmod(mode)
     except OSError as exc:
         problems.append(f"restore {state_path}: {exc}")
-    backup_root = transaction.get("backup_root")
     if backup_root and not problems:
         try:
             shutil.rmtree(backup_root, ignore_errors=False)
@@ -596,7 +959,20 @@ def _undo_failed_apply(plan: dict) -> list[str]:
 
 def _transactional_apply(function):
     def wrapped(plan: dict) -> dict:
-        state_path = Path(plan["setup_root"]) / "setup-state.json"
+        workspace = Path(plan["workspace"])
+        setup_root = Path(plan["setup_root"])
+        _validate_managed_paths((workspace, setup_root), ())
+        assert_preflight_paths(plan.get("preflight_paths", {}))
+        state_path = setup_root / "setup-state.json"
+        expected_state = plan.get("preflight_paths", {}).get(str(state_path))
+        if expected_state is not None and path_snapshot(state_path) != expected_state:
+            raise ValueError(f"managed path changed after preview; build a new plan: {state_path}")
+        if setup_root.exists() or setup_root.is_symlink():
+            assert_private_directory(setup_root)
+        if state_path.is_symlink():
+            raise ValueError(f"managed setup state must not be a symlink: {state_path}")
+        if state_path.exists():
+            assert_private_file(state_path)
         previous_state = (
             (state_path.read_bytes(), state_path.stat().st_mode)
             if state_path.is_file() else None
@@ -636,9 +1012,43 @@ def apply_plan(plan: dict) -> dict:
     settings_local = Path(plan["settings_local"])
     discovery_state = Path(plan["discovery_state"])
     tracker = setup_root / "data" / "matters.sqlite3"
-    if workspace.exists() and not workspace.is_dir():
-        raise ValueError(f"workspace exists but is not a directory: {workspace}")
+    managed_directories = (
+        workspace, setup_root, setup_root / "scratch", setup_root / "data",
+        setup_root / "plugins", setup_root / "backups", workspace / ".claude",
+        workspace / ".claude" / "skills", workspace / ".claude" / "agents", plugin,
+    )
+    _validate_managed_paths(
+        managed_directories,
+        (config, launcher, terminal_launcher, discovery_state, settings_local),
+    )
+    for directory in (
+        setup_root, setup_root / "scratch", setup_root / "data",
+        setup_root / "plugins", setup_root / "backups",
+    ):
+        if directory.exists() or directory.is_symlink():
+            assert_private_directory(directory)
+    for private_file in (config, tracker, discovery_state, setup_root / "setup-state.json"):
+        if private_file.exists() or private_file.is_symlink():
+            assert_private_file(private_file)
+    assert_preflight_paths(plan.get("preflight_paths", {}))
+    allowed_project_paths = {
+        *(workspace / ".claude" / "skills" / name for name in PROJECT_SKILLS.values()),
+        workspace / ".claude" / "agents" / f"{PROJECT_AGENT}.md",
+    }
+    current_managed, current_fingerprints = _load_project_discovery(
+        discovery_state, allowed_project_paths, setup_root / "setup-state.json"
+    )
+    if current_managed != set(plan.get("prior_managed", [])) or current_fingerprints != plan.get("prior_fingerprints", {}):
+        raise ValueError("LawyeredOS discovery state changed after preview; build a new plan")
+    planned_project_paths = {Path(raw) for raw in plan["project_skills"].values()}
+    if plan["project_agent"]:
+        planned_project_paths.add(Path(plan["project_agent"]))
+    for path in planned_project_paths:
+        if (path.exists() or path.is_symlink()) and str(path) not in current_managed:
+            raise ValueError(f"Claude discovery target appeared after preview and is not managed: {path}")
     marker = plugin / ".lawyeredos-package.json"
+    if plugin.exists() and managed_fingerprint(plugin) != plan["plugin_fingerprint"]:
+        raise ValueError(f"installed versioned plugin content changed after preview: {plugin}")
     if plugin.exists() and (
         not marker.is_file()
         or json.loads(marker.read_text(encoding="utf-8")).get("digest") != plan["package_digest"]
@@ -656,7 +1066,7 @@ def apply_plan(plan: dict) -> dict:
     backup_root = setup_root / "backups" / transaction_id
     transaction = plan["_active_transaction"]
     created: list[str] = transaction["created"]
-    backups: list[dict[str, str]] = transaction["backups"]
+    backups: list[dict] = transaction["backups"]
     changed: list[str] = []
     transaction["backup_root"] = str(backup_root)
     if not workspace.exists():
@@ -667,8 +1077,13 @@ def apply_plan(plan: dict) -> dict:
         workspace / ".claude", workspace / ".claude" / "skills", workspace / ".claude" / "agents",
     ):
         if not directory.exists():
-            directory.mkdir(parents=True)
+            if directory == setup_root or setup_root in directory.parents:
+                ensure_private_directory(directory)
+            else:
+                directory.mkdir(parents=True)
             created.append(str(directory))
+        elif directory == setup_root or setup_root in directory.parents:
+            assert_private_directory(directory)
     if plugin.exists():
         pass
     else:
@@ -680,11 +1095,14 @@ def apply_plan(plan: dict) -> dict:
                 shutil.rmtree(plugin / "skills" / skill)
         if "review" not in selected:
             shutil.rmtree(plugin / "agents")
+        write_template_manifest(plugin)
         _prepare_project_payload(plugin, selected)
         marker.write_text(json.dumps({
             "version": VERSION, "digest": plan["package_digest"],
             "modules": plan["answers"]["modules"],
         }, indent=2) + "\n", encoding="utf-8")
+        if managed_fingerprint(plugin) != plan["plugin_fingerprint"]:
+            raise ValueError(f"installed versioned plugin does not match the approved build: {plugin}")
         changed.append(str(plugin))
 
     project_paths = {Path(path) for path in plan["project_skills"].values()}
@@ -750,9 +1168,13 @@ def apply_plan(plan: dict) -> dict:
         changed.append(str(settings_local))
 
     discovery = {
-        "schema_version": 1,
+        "schema_version": 2,
         "package_digest": plan["package_digest"],
         "managed_paths": sorted(str(path) for path in project_paths),
+        "managed_fingerprints": {
+            str(path): managed_fingerprint(path)
+            for path in sorted(project_paths)
+        },
     }
     discovery_text = json.dumps(discovery, indent=2, sort_keys=True) + "\n"
     if not discovery_state.exists() or discovery_state.read_text(encoding="utf-8") != discovery_text:
@@ -760,7 +1182,7 @@ def apply_plan(plan: dict) -> dict:
             _backup(discovery_state, backup_root, backups)
         else:
             created.append(str(discovery_state))
-        discovery_state.write_text(discovery_text, encoding="utf-8")
+        replace_private_file(discovery_state, discovery_text.encode("utf-8"))
         changed.append(str(discovery_state))
     if plan["config_preview"] is not None:
         if config.exists():
@@ -769,11 +1191,11 @@ def apply_plan(plan: dict) -> dict:
             created.append(str(config))
         new_config = plan["config_preview"]
         if not config.exists() or config.read_text(encoding="utf-8") != new_config:
-            config.write_text(new_config, encoding="utf-8")
+            replace_private_file(config, new_config.encode("utf-8"))
             changed.append(str(config))
         if not tracker.exists():
+            initialize_tracker_exclusive(tracker)
             created.append(str(tracker))
-            initialize(tracker)
             changed.append(str(tracker))
     launcher_text = render_launcher(plan)
     if launcher.exists() and launcher.read_text(encoding="utf-8") != launcher_text:
@@ -801,7 +1223,7 @@ def apply_plan(plan: dict) -> dict:
             plugin,
         }
         state = {
-            "schema_version": 1, "transaction_id": transaction_id,
+            "schema_version": 1, "fingerprint_version": 2, "transaction_id": transaction_id,
             "package_version": VERSION, "package_digest": plan["package_digest"],
             "selection_digest": plan["selection_digest"],
             "created": created, "backups": backups, "changed": changed,
@@ -813,7 +1235,10 @@ def apply_plan(plan: dict) -> dict:
             "config": str(config), "plugin": str(plugin), "launcher": str(launcher),
             "terminal_launcher": str(terminal_launcher),
         }
-        state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        replace_private_file(
+            state_path,
+            (json.dumps(state, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        )
     loaded = load_config(config)
     with sqlite3.connect(loaded.tracker_database) as connection:
         connection.execute("PRAGMA quick_check").fetchone()
@@ -827,23 +1252,104 @@ def apply_plan(plan: dict) -> dict:
 
 
 def rollback(workspace: Path) -> dict:
-    workspace = workspace.expanduser().resolve()
+    requested_workspace = workspace.expanduser().absolute()
+    if requested_workspace.is_symlink():
+        raise ValueError(f"workspace must not be a symlink for rollback: {requested_workspace}")
+    workspace = requested_workspace.resolve()
     setup_root = workspace / ".lawyeredos"
+    _validate_managed_paths(
+        (
+            workspace, setup_root, setup_root / "data", setup_root / "scratch",
+            setup_root / "plugins", setup_root / "backups", workspace / ".claude",
+            workspace / ".claude" / "skills", workspace / ".claude" / "agents",
+        ),
+        (),
+    )
+    assert_private_directory(setup_root)
     state_path = setup_root / "setup-state.json"
+    if state_path.is_symlink():
+        raise ValueError(f"managed setup state must not be a symlink: {state_path}")
     if not state_path.is_file():
         raise ValueError(f"no rollback state found: {state_path}")
+    assert_private_file(state_path)
     state = json.loads(state_path.read_text(encoding="utf-8"))
+    if not isinstance(state, dict) or state.get("schema_version") != 1:
+        raise ValueError(f"unsupported rollback state schema: {state_path}")
+    plugin = Path(state.get("plugin", ""))
+    plugins_root = setup_root / "plugins"
+    if (
+        not plugin.is_absolute()
+        or plugin.parent != plugins_root
+        or not plugin.name.startswith("lawyeredos-")
+    ):
+        raise ValueError(f"rollback plugin path is outside the managed namespace: {plugin}")
+    allowed_files = {
+        setup_root / "config.toml",
+        setup_root / "launch-lawyeredos.sh",
+        setup_root / "launch-lawyeredos-terminal.sh",
+        setup_root / "project-discovery.json",
+        setup_root / "data" / "matters.sqlite3",
+        workspace / ".claude" / "settings.local.json",
+        workspace / ".claude" / "agents" / f"{PROJECT_AGENT}.md",
+        *(workspace / ".claude" / "skills" / name for name in PROJECT_SKILLS.values()),
+        plugin,
+    }
+    allowed_created = {
+        workspace, setup_root, setup_root / "scratch", setup_root / "data",
+        setup_root / "plugins", setup_root / "backups", workspace / ".claude",
+        workspace / ".claude" / "skills", workspace / ".claude" / "agents",
+        *allowed_files,
+    }
+
+    def require_allowed(raw: str, allowed: set[Path], label: str) -> Path:
+        if not isinstance(raw, str):
+            raise ValueError(f"rollback {label} path is invalid")
+        path = Path(raw)
+        if not path.is_absolute() or str(path.absolute()) != raw or path not in allowed:
+            raise ValueError(f"rollback {label} path is outside the managed namespace: {raw}")
+        return path
+
+    for raw in state.get("created", []):
+        require_allowed(raw, allowed_created, "created")
+    for raw in state.get("changed", []):
+        require_allowed(raw, allowed_files, "changed")
+    fingerprints = state.get("managed_fingerprints", {})
+    if fingerprints and not isinstance(fingerprints, dict):
+        raise ValueError(f"invalid managed fingerprints in rollback state: {state_path}")
+    for raw in fingerprints:
+        require_allowed(raw, allowed_files, "fingerprint")
+    backups_root = setup_root / "backups"
+    assert_private_directory(backups_root)
+    for item in state.get("backups", []):
+        if not isinstance(item, dict):
+            raise ValueError(f"invalid backup record in rollback state: {state_path}")
+        require_allowed(item.get("original"), allowed_files, "backup original")
+        backup = Path(item.get("backup", ""))
+        if (
+            not backup.is_absolute()
+            or str(backup.absolute()) != str(backup)
+            or not _inside(backup, backups_root)
+        ):
+            raise ValueError(f"rollback backup path is outside the managed namespace: {backup}")
+        cursor = backup.parent
+        while cursor != backups_root:
+            if cursor.is_symlink():
+                raise ValueError(f"rollback backup parent must not be a symlink: {cursor}")
+            cursor = cursor.parent
+        if backup.is_symlink():
+            raise ValueError(f"rollback backup artifact must not be a symlink: {backup}")
+        _validate_backup_artifact(item, backups_root)
     restored: list[str] = []
     removed: list[str] = []
     preserved_modified: list[str] = []
-    fingerprints = state.get("managed_fingerprints", {})
 
     def unchanged(path: Path) -> bool:
         expected = fingerprints.get(str(path))
         if expected is None or not path.exists():
             return False
         try:
-            return managed_fingerprint(path) == expected
+            fingerprint = managed_fingerprint if state.get("fingerprint_version") == 2 else legacy_managed_fingerprint
+            return fingerprint(path) == expected
         except (OSError, ValueError):
             return False
 
@@ -898,6 +1404,8 @@ def rollback(workspace: Path) -> dict:
                 original.symlink_to(backup.read_text(encoding="utf-8"), target_is_directory=True)
             else:
                 shutil.copy2(backup, original)
+            if item.get("original_modes"):
+                _restore_original_modes(original, item["original_modes"])
             restored.append(str(original))
     backup_originals = {item["original"] for item in state.get("backups", [])}
     for raw in reversed(state.get("created", [])):
@@ -924,7 +1432,10 @@ def rollback(workspace: Path) -> dict:
                 except OSError:
                     pass
     state["rolled_back_at"] = datetime.now(UTC).isoformat()
-    state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    replace_private_file(
+        state_path,
+        (json.dumps(state, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+    )
     return {
         "ok": True,
         "restored": restored,

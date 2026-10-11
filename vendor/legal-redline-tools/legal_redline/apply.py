@@ -1,8 +1,15 @@
 """Apply tracked changes (redlines) to Word documents via OOXML manipulation."""
 
 import copy
+import io
+import os
 import re
+import stat
+import tempfile
+import zipfile
 from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
+from xml.etree import ElementTree
 
 from docx import Document
 from docx.oxml import OxmlElement
@@ -12,6 +19,162 @@ from docx.text.run import Run
 
 
 _rev_id_counter = 100000
+MAX_DOCX_BYTES = 100 * 1024 * 1024
+MAX_DOCX_ENTRY_BYTES = 50 * 1024 * 1024
+MAX_DOCX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+MAX_DOCX_ENTRIES = 10_000
+REQUIRED_DOCX_PARTS = {"[Content_Types].xml", "_rels/.rels", "word/document.xml"}
+CONTENT_TYPES_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+MAIN_DOCUMENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+OFFICE_DOCUMENT_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+_WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_EXISTING_REVIEW_ELEMENTS = {
+    "ins", "del", "moveFrom", "moveTo", "moveFromRangeStart",
+    "moveFromRangeEnd", "moveToRangeStart", "moveToRangeEnd", "cellIns",
+    "cellDel", "cellMerge", "conflictIns", "conflictDel",
+    "customXmlInsRangeStart", "customXmlInsRangeEnd",
+    "customXmlDelRangeStart", "customXmlDelRangeEnd", "customXmlMoveFromRangeStart",
+    "customXmlMoveFromRangeEnd", "customXmlMoveToRangeStart",
+    "customXmlMoveToRangeEnd", "numberingChange", "pPrChange", "rPrChange",
+    "sectPrChange", "tblPrChange", "tblPrExChange", "tblGridChange",
+    "trPrChange", "tcPrChange",
+    "commentRangeStart", "commentRangeEnd", "commentReference",
+}
+
+
+def existing_review_markup(input_path):
+    """Return revision/comment markers found anywhere in a DOCX package."""
+    markers = set()
+    package_source = io.BytesIO(input_path) if isinstance(input_path, bytes) else input_path
+    try:
+        with zipfile.ZipFile(package_source) as package:
+            infos = package.infolist()
+            if len(infos) > MAX_DOCX_ENTRIES:
+                raise ValueError("DOCX package contains too many entries")
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)):
+                raise ValueError("DOCX package contains duplicate entries")
+            if not REQUIRED_DOCX_PARTS.issubset(names):
+                raise ValueError("input is not a valid Word DOCX package")
+            total = 0
+            for info in infos:
+                parsed = PurePosixPath(info.filename)
+                if parsed.is_absolute() or ".." in parsed.parts or "\\" in info.filename:
+                    raise ValueError("DOCX package contains an unsafe member name")
+                if info.file_size > MAX_DOCX_ENTRY_BYTES:
+                    raise ValueError("DOCX package entry exceeds the uncompressed safety limit")
+                total += info.file_size
+                if total > MAX_DOCX_UNCOMPRESSED_BYTES:
+                    raise ValueError("DOCX package exceeds the uncompressed safety limit")
+            types = ElementTree.fromstring(package.read("[Content_Types].xml"))
+            relationships = ElementTree.fromstring(package.read("_rels/.rels"))
+            document = ElementTree.fromstring(package.read("word/document.xml"))
+            overrides = {
+                (item.get("PartName"), item.get("ContentType"))
+                for item in types.findall(f"{{{CONTENT_TYPES_NS}}}Override")
+            }
+            office_targets = {
+                item.get("Target", "").lstrip("/")
+                for item in relationships.findall(f"{{{PACKAGE_REL_NS}}}Relationship")
+                if item.get("Type") == OFFICE_DOCUMENT_REL and not item.get("TargetMode")
+            }
+            if (
+                types.tag != f"{{{CONTENT_TYPES_NS}}}Types"
+                or ("/word/document.xml", MAIN_DOCUMENT_TYPE) not in overrides
+                or relationships.tag != f"{{{PACKAGE_REL_NS}}}Relationships"
+                or "word/document.xml" not in office_targets
+                or document.tag != f"{{{_WORD_NS}}}document"
+            ):
+                raise ValueError("input is not a valid Word DOCX package")
+            for name in names:
+                if name.startswith("word/comments") and name.endswith(".xml"):
+                    markers.add("comments part")
+                if not name.startswith("word/") or not name.endswith(".xml"):
+                    continue
+                root = ElementTree.fromstring(package.read(name))
+                for element in root.iter():
+                    if not element.tag.startswith(f"{{{_WORD_NS}}}"):
+                        continue
+                    local = element.tag.rsplit("}", 1)[-1]
+                    if local in _EXISTING_REVIEW_ELEMENTS:
+                        markers.add(local)
+    except (zipfile.BadZipFile, ElementTree.ParseError) as exc:
+        raise ValueError("input is not a valid DOCX package") from exc
+    return sorted(markers)
+
+
+def _reject_symlink_parents(path):
+    current = path.parent
+    root = Path(path.anchor)
+    while current != current.parent:
+        if current.is_symlink():
+            metadata = current.lstat()
+            if current.parent != root or getattr(metadata, "st_uid", -1) != 0:
+                raise ValueError(f"output parent must not contain a symlink: {current}")
+        current = current.parent
+
+
+def _save_document_new(doc, output_path):
+    """Serialize then create output exclusively; never follow or replace a link."""
+    path = Path(output_path).expanduser().absolute()
+    if path.exists() or path.is_symlink():
+        raise ValueError(f"output already exists: {path}")
+    if not path.parent.is_dir():
+        raise ValueError(f"output parent does not exist: {path.parent}")
+    _reject_symlink_parents(path)
+    serialized = io.BytesIO()
+    doc.save(serialized)
+    descriptor, staged_name = tempfile.mkstemp(prefix=".legal-redline-", dir=path.parent)
+    staged = Path(staged_name)
+    created = os.fstat(descriptor)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            descriptor = -1
+            stream.write(serialized.getvalue())
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(staged, path, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise ValueError(f"output already exists: {path}") from exc
+    except BaseException:
+        raise
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            current = staged.stat(follow_symlinks=False)
+            if (created.st_dev, created.st_ino) == (current.st_dev, current.st_ino):
+                staged.unlink()
+        except OSError:
+            pass
+
+
+def read_regular_bytes(input_path):
+    path = Path(input_path).expanduser().absolute()
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("input must be a regular, non-symlink DOCX file") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("input must be a regular, non-symlink DOCX file")
+        if metadata.st_size > MAX_DOCX_BYTES:
+            raise ValueError(f"input exceeds the {MAX_DOCX_BYTES}-byte safety limit")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = -1
+            data = stream.read(MAX_DOCX_BYTES + 1)
+            if len(data) > MAX_DOCX_BYTES:
+                raise ValueError(f"input exceeds the {MAX_DOCX_BYTES}-byte safety limit")
+            return data
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def next_rev_id():
@@ -591,7 +754,14 @@ def apply_redlines(input_path, output_path, redlines, author="Reviewer"):
     Returns:
         List of (status, description) tuples
     """
-    doc = Document(input_path)
+    source_bytes = read_regular_bytes(input_path)
+    existing = existing_review_markup(source_bytes)
+    if existing:
+        raise ValueError(
+            "input contains pre-existing revision/comment markup; resolve it before "
+            "applying a new redline: " + ", ".join(existing)
+        )
+    doc = Document(io.BytesIO(source_bytes))
     enable_track_revisions(doc)
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -670,7 +840,7 @@ def apply_redlines(input_path, output_path, redlines, author="Reviewer"):
             results.append(("ERROR", desc))
             print(f"  [ERROR] {desc}")
 
-    doc.save(output_path)
+    _save_document_new(doc, output_path)
     print(f"\nSaved: {output_path}")
     print(f"Applied: {sum(1 for s, _ in results if s == 'OK')}/{len(results)} redlines")
     return results

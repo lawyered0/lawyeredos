@@ -12,6 +12,8 @@ This matrix records the private gate completed before Codex 0.2.0 beta.1 was
 published. `Pass` identifies actual evidence; `Pending` is not accepted; and
 `Excluded` records an intentional boundary. Publication rows describe that
 historical checkpoint, not the current visibility of the source repository.
+The repository is now public; the current dual-host candidate remains an
+unreleased draft pull request.
 
 | Area | Layer | Status | Evidence |
 | --- | --- | --- | --- |
@@ -36,13 +38,13 @@ historical checkpoint, not the current visibility of the source repository.
 | Live Gmail or other live connectors | External integration | Delegated path pass; ordinary host pending | One bounded user-created Gmail self-test used the already-authorized connector in the delegated development session. Search, message read, attachment retrieval, actual model acknowledgement of all three DOCX chunks plus the body, final reconciliation, and repeat deduplication passed. This is not ordinary-host or portable-IMAP acceptance. Setup never treats configuration as proof of connection. |
 | OCR creation | Optional dependency | Excluded | OCRmyPDF was not installed on the accepted host. |
 | Other operating systems, Python versions, Codex versions, or cloud hosts | Platform coverage | Excluded | No compatibility claim without an actual host run. |
-| Public release, site download, or merge | Publication | Excluded | Candidate remains private, draft, and unmerged. |
+| Public release, site download, or merge | Publication | Excluded | The repository and draft pull request are public, but the candidate is unreleased and unmerged; no site download points to it. |
 
 ## Release gate
 
-The private candidate has passed the release-critical gates within the stated
+The historical candidate passed its recorded gates within the stated
 macOS, Python, Codex CLI, fictional-data, and user-reported Desktop evidence
-boundaries. Public release still requires an explicit publication decision and
+boundaries. The current public draft remains unreleased. Release still requires an explicit publication decision and
 must preserve the exclusions above. Any review coverage gap remains a
 matter-specific caution rather than a software failure, provided it is shown
 to the user and the integrity checks pass.

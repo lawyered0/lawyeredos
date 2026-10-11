@@ -27,7 +27,7 @@ def main() -> int:
     matter_folder.mkdir(parents=True)
     scratch.mkdir(parents=True)
     (matter_folder / "_matter-brief.md").write_text(
-        "# Northstar Bakery Ltd.\n\n"
+        "# 2030-001 — Northstar Bakery Ltd.\n\n"
         "## Status\n\nReviewing a fictional commercial supply agreement.\n\n"
         "## Next action\n\nConfirm whether the revised delivery clause is acceptable.\n",
         encoding="utf-8",

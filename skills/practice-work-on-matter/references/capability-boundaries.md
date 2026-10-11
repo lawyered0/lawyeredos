@@ -1,8 +1,9 @@
 # Capability boundaries
 
-- **Mail:** setup records one of three states: unavailable by explicit skip;
-  Claude Gmail connector configured but not locally verifiable; or experimental
-  local `gmail.readonly` REST adapter. Only a successful bounded read in the
+- **Mail:** setup records exactly one configured route: unavailable by explicit
+  skip; a host session tool selected but not locally verifiable; experimental
+  local `gmail.readonly` REST; or experimental portable read-only Gmail IMAP.
+  Only a successful bounded read in the
   active session establishes a connection for that request. Preserve ambiguity
   and never draft, send, reply, forward, label, archive, or delete from the
   matter-orientation workflow.
@@ -10,6 +11,14 @@
   used only when actually present and authorized. Missing bodies, attachment
   bytes, pages, or supported extraction keep the local complete checkpoint from
   advancing. No route polls in the background or changes Gmail state.
+  The portable IMAP route has comprehensive synthetic coverage and one narrowly
+  accepted user-created thread on each supported desktop host. Conservative
+  local reply state distinguishes draft, scheduled, sent, received, not-sent,
+  and unknown records; provider ordering is persisted, unresolved ordering
+  fails closed, and a Sent marker never proves delivery. That evidence is
+  limited to the tested account, thread, launcher, and host. Current-audience
+  reconciliation, broader account coverage, live REST/session-tool acceptance,
+  sending, delivery confirmation, and mutation remain unaccepted.
 - **Calendar:** orientation may inspect or propose; it may not create, update,
   or delete events.
 - **Practice manager:** unavailable by default. Never treat a tracker write as

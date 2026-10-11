@@ -17,6 +17,10 @@ tag found:
 
 The local changes improve tracked-change placement and validation, document
 rendering behavior, command-line handling, normalization, summaries,
-documentation, packaging, and regression coverage. They remain distributed
+documentation, packaging, and regression coverage. In particular, applying a
+new redline now refuses source packages that already contain revision/comment
+markup, reads one immutable source snapshot, fully stages multi-format outputs
+beside their targets before no-replace publication, and refuses existing, duplicate,
+source-colliding, or symlinked output targets. They remain distributed
 under the upstream MIT terms. This inventory records technical provenance; it
 does not determine copyright ownership of AI-assisted changes.

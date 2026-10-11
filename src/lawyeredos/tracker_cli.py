@@ -7,9 +7,10 @@ import sys
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 from .common import emit, preview_token
+from .private_fs import assert_private_file, create_private_file
 
 
 SCHEMA_VERSION = 1
@@ -34,6 +35,7 @@ def now() -> str:
 
 @contextmanager
 def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+    assert_private_file(path)
     if write:
         connection = sqlite3.connect(path, timeout=5, isolation_level=None)
     else:
@@ -52,11 +54,13 @@ def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
 
 
 def initialize(path: Path) -> None:
-    if path.exists():
+    if path.exists() or path.is_symlink():
         raise ValueError("database already exists")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as connection:
-        connection.executescript(
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    create_private_file(path)
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.executescript(
             """
             PRAGMA foreign_keys = ON;
             CREATE TABLE meta (
@@ -100,7 +104,11 @@ def initialize(path: Path) -> None:
             CREATE INDEX timeline_file_idx ON timeline(file_number, id);
             CREATE INDEX audit_file_idx ON audit(file_number, id);
             """
-        )
+            )
+        assert_private_file(path)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
 
 
 def revision(connection: sqlite3.Connection) -> int:
@@ -211,11 +219,46 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
             raise ValueError("timeline date and text are required")
         payload["event_date"] = args.event_date.strip()
         payload["text"] = args.text.strip()
+    elif action == "workflow":
+        changes: dict[str, str] = {}
+        if args.next_action is not None:
+            changes["next_action"] = args.next_action.strip()
+        if args.next_action_date is not None:
+            changes["next_action_date"] = args.next_action_date.strip()
+        event_date = args.event_date.strip()
+        text = args.text.strip()
+        if bool(event_date) != bool(text):
+            raise ValueError("workflow timeline date and text must be supplied together")
+        if not changes and not text:
+            raise ValueError("workflow requires a next-action change or timeline entry")
+        if changes.get("next_action") == "":
+            if not args.clear_next_action:
+                raise ValueError("clearing a next action requires --clear-next-action")
+            if not text:
+                raise ValueError("clearing a next action requires a disposition timeline entry")
+            if changes.get("next_action_date", ""):
+                raise ValueError("a cleared next action cannot retain a next-action date")
+            changes["next_action_date"] = ""
+        elif args.clear_next_action:
+            raise ValueError("--clear-next-action only applies to an empty next action")
+        payload["changes"] = changes
+        if text:
+            payload["timeline"] = {"event_date": event_date, "text": text}
     elif action in {"close", "reopen"}:
         payload["new_status"] = "closed" if action == "close" else "open"
     else:
         raise ValueError(f"unsupported action: {action}")
     return payload
+
+
+def bind_workflow_state(payload: dict[str, Any], row: Mapping[str, Any]) -> None:
+    if payload["action"] != "workflow":
+        return
+    current = {"next_action": row["next_action"], "next_action_date": row["next_action_date"]}
+    resulting = dict(current)
+    resulting.update(payload["changes"])
+    payload["current_workflow"] = current
+    payload["resulting_workflow"] = resulting
 
 
 def validate_payload(connection: sqlite3.Connection, payload: dict[str, Any]) -> None:
@@ -239,6 +282,8 @@ def validate_payload(connection: sqlite3.Connection, payload: dict[str, Any]) ->
     else:
         if row is None:
             raise ValueError("matter not found")
+        if action == "workflow" and row["status"] != "open":
+            raise ValueError("matter is closed; reopen it before changing workflow state")
         if action == "close" and row["status"] != "open":
             raise ValueError("matter is not open")
         if action == "reopen" and row["status"] != "closed":
@@ -250,10 +295,22 @@ def preview_mutation(path: Path, action: str, args: argparse.Namespace) -> dict[
         current_revision = revision(connection)
         payload = mutation_payload(action, args, current_revision)
         validate_payload(connection, payload)
+        row = get_matter(connection, payload["file_number"])
+        if row is not None:
+            bind_workflow_state(payload, row)
     return {"ok": True, "dry_run": True, "payload": payload, "confirm_token": preview_token(action, payload)}
 
 
+def _commit_transaction(connection: sqlite3.Connection) -> None:
+    """Isolated for deterministic testing of SQLite's ambiguous COMMIT errors."""
+    connection.execute("COMMIT")
+
+
 def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: str) -> dict[str, Any]:
+    # Preview validation is not authority to keep using the same pathname. Rebind
+    # the confidentiality and single-link invariants immediately before SQLite
+    # opens the database so a post-preview path or mode substitution fails closed.
+    assert_private_file(path)
     connection = sqlite3.connect(path, timeout=5, isolation_level=None)
     connection.row_factory = sqlite3.Row
     try:
@@ -261,6 +318,9 @@ def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: st
         current_revision = revision(connection)
         payload = mutation_payload(action, args, current_revision)
         validate_payload(connection, payload)
+        row = get_matter(connection, payload["file_number"])
+        if row is not None:
+            bind_workflow_state(payload, row)
         expected = preview_token(action, payload)
         if token != expected:
             raise ValueError("confirmation token is missing, stale, or does not match this mutation")
@@ -296,6 +356,25 @@ def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: st
             connection.execute(
                 "UPDATE matters SET updated_at=? WHERE file_number=?", (timestamp, file_number)
             )
+        elif action == "workflow":
+            changes = payload["changes"]
+            if changes:
+                assignments = ", ".join(f"{FIELDS[key]}=?" for key in sorted(changes))
+                values = [changes[key] for key in sorted(changes)]
+                connection.execute(
+                    f"UPDATE matters SET {assignments}, updated_at=? WHERE file_number=?",
+                    (*values, timestamp, file_number),
+                )
+            else:
+                connection.execute(
+                    "UPDATE matters SET updated_at=? WHERE file_number=?", (timestamp, file_number)
+                )
+            if "timeline" in payload:
+                timeline = payload["timeline"]
+                connection.execute(
+                    "INSERT INTO timeline(file_number, event_date, text, created_at) VALUES (?, ?, ?, ?)",
+                    (file_number, timeline["event_date"], timeline["text"], timestamp),
+                )
         elif action in {"close", "reopen"}:
             connection.execute(
                 "UPDATE matters SET status=?, updated_at=? WHERE file_number=?",
@@ -303,17 +382,86 @@ def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: st
             )
         new_revision = current_revision + 1
         connection.execute("UPDATE meta SET value=? WHERE key='revision'", (str(new_revision),))
-        connection.execute(
+        audit_cursor = connection.execute(
             "INSERT INTO audit(revision, action, file_number, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
             (new_revision, action, file_number, json.dumps(payload, sort_keys=True), timestamp),
         )
-        connection.execute("COMMIT")
+        audit_id = int(audit_cursor.lastrowid)
+        recovery = {
+            "retry_mutation": False,
+            "database": str(path),
+            "file_number": file_number,
+            "expected_revision": new_revision,
+            "audit_id": audit_id,
+            "required_inspection": ["show", "history", "verify"],
+        }
+        try:
+            _commit_transaction(connection)
+        except Exception as exc:
+            # A COMMIT call can fail before or after SQLite made the transaction
+            # durable. Neither a rollback attempt nor the exception alone can
+            # distinguish those outcomes, so require read-only recovery checks.
+            try:
+                connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            return {
+                "ok": False,
+                "committed": None,
+                "commit_state": "outcome_unknown",
+                "verification_state": "not_performed",
+                "audit_verification_state": "not_performed",
+                "audit_id": audit_id,
+                "retry_safe": False,
+                "revision": new_revision,
+                "action": action,
+                "file_number": file_number,
+                "commit_error": str(exc),
+                "recovery": recovery,
+            }
+        # COMMIT is the durable boundary. A later readback failure must never be
+        # reported as an uncommitted, safely retryable mutation: blindly
+        # replaying the approved command could create a second timeline entry or
+        # apply a later revision than the user approved.
+        commit_evidence = {
+            "revision": new_revision,
+            "action": action,
+            "file_number": file_number,
+            "audit_id": audit_id,
+            "audit_created_at": timestamp,
+        }
+        try:
+            matter = read_show(path, file_number)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "committed": True,
+                "commit_state": "committed",
+                "verification_state": "readback_failed",
+                "audit_verification_state": "not_performed",
+                "audit_id": audit_id,
+                "retry_safe": False,
+                "revision": new_revision,
+                "action": action,
+                "file_number": file_number,
+                "commit_evidence": commit_evidence,
+                "verification_error": str(exc),
+                "recovery": recovery,
+            }
         return {
             "ok": True,
             "committed": True,
+            "commit_state": "committed",
+            "verification_state": "readback_verified",
+            "audit_verification_state": "not_performed",
+            "audit_id": audit_id,
+            "retry_safe": False,
             "revision": new_revision,
             "action": action,
-            "matter": read_show(path, file_number),
+            "file_number": file_number,
+            "commit_evidence": commit_evidence,
+            "recovery": recovery,
+            "matter": matter,
         }
     except Exception:
         try:
@@ -368,6 +516,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_mutation_options(timeline)
     timeline.add_argument("--event-date", required=True)
     timeline.add_argument("--text", required=True)
+    workflow = sub.add_parser("workflow")
+    add_mutation_options(workflow)
+    workflow.add_argument("--next-action")
+    workflow.add_argument("--next-action-date")
+    workflow.add_argument("--event-date", default="")
+    workflow.add_argument("--text", default="")
+    workflow.add_argument("--clear-next-action", action="store_true")
     close = sub.add_parser("close")
     add_mutation_options(close)
     reopen = sub.add_parser("reopen")
@@ -423,10 +578,19 @@ def main(argv: list[str] | None = None) -> int:
             if args.dry_run:
                 emit(preview_mutation(path, args.command, args))
             else:
-                emit(commit_mutation(path, args.command, args, args.confirm_token))
+                result = commit_mutation(path, args.command, args, args.confirm_token)
+                emit(result)
+                return 0 if result["ok"] else 3
         return 0
     except (ValueError, sqlite3.Error, OSError, json.JSONDecodeError) as exc:
-        emit({"ok": False, "committed": False, "error": str(exc)})
+        emit({
+            "ok": False,
+            "committed": False,
+            "commit_state": "not_committed",
+            "audit_id": None,
+            "retry_safe": False,
+            "error": str(exc),
+        })
         return 2
 
 

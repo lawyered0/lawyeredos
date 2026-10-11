@@ -7,6 +7,9 @@ description: Apply established edits as genuine Word tracked changes, verify mar
 
 This skill applies established changes; it does not decide negotiation or legal
 positions. Require an editable `.docx`. Do not reconstruct a contract from PDF.
+Hash the exact source before generation and confirm it is unchanged after all
+outputs are produced. Existing revisions are a separate source state; do not
+silently edit through or accept another reviewer's changes.
 
 The pinned MIT engine is under
 `${LAWYEREDOS_ROOT}/vendor/legal-redline-tools`. Preserve its `LICENSE` and
@@ -21,7 +24,20 @@ PYTHONPATH="$PKG" "${LAWYEREDOS_PYTHON:-python3}" -m legal_redline.cli apply \
 
 Use exact, unique text spans. The change-set JSON remains scratch material and
 must not contain internal rationale in a counterparty artifact. A failed or
-partial apply is not repaired by hand-editing OOXML.
+partial apply is not repaired by hand-editing OOXML. A source containing any
+pre-existing revision or comment markup is a distinct review state: stop and
+have the user choose an authoritative clean source or separately resolve the
+existing review. The engine refuses existing, duplicate, symlinked, or
+source-colliding output paths and stages all requested outputs before publishing.
+Input snapshots are bounded at 100 MiB compressed, 50 MiB per package entry,
+and 200 MiB total uncompressed. Oversized, duplicate-member, unsafe-path,
+truncated, or non-DOCX packages fail without output.
+
+Keep counterparty-facing marked/clean files separate from internal rationale,
+walkaway positions, or privileged notes. Generate and persist only the outputs
+the user requested. A Word comment or unresolved revision makes a
+counterparty-facing artifact not ready unless the user expressly decides to
+retain it after review.
 
 Verification requires:
 
@@ -41,8 +57,18 @@ Generate a clean copy and verify it separately:
   --output-dir "<empty clean render directory>"
 ```
 
+The clean-copy helper accepts insertion/deletion/move wrappers, removes the
+track-revisions setting, validates the entire Word XML package, and fails
+without output if comments, unsupported property revisions, or any residual
+revision/tracking marker remain. It also fails closed when a removed revision
+contains relationship-backed or package content (such as an image, object,
+hyperlink, footnote/endnote reference, or external chunk), because hiding the
+visible revision would not safely remove the related package bytes.
+
 Persist only requested, verified, versioned outputs with the
-guarded writer. Never send or negotiate.
+guarded writer. On a collision or stale preview, inspect the current target and
+preview again; never overwrite newer work or bypass a protected-path or symlink
+refusal. Never send or negotiate.
 
 Read [`references/change-set.md`](references/change-set.md) before building a
 change list.

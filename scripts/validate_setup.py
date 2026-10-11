@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -38,6 +39,23 @@ def main() -> int:
             errors.extend(f"tracker: {item}" for item in health["problems"])
     if not config.document_template.is_file():
         warnings.append("document template is missing; correspondence unavailable")
+    if config.document_template_manifest is None:
+        errors.append("document template manifest is not configured; correspondence unavailable")
+    elif not config.document_template_manifest.is_file():
+        errors.append("document template manifest is missing; correspondence unavailable")
+    elif config.document_template.is_file():
+        try:
+            manifest = json.loads(config.document_template_manifest.read_text(encoding="utf-8"))
+            expected_path = (config.document_template_manifest.parent / manifest["template"]).resolve()
+            if (
+                manifest.get("schema_version") != 1
+                or manifest.get("algorithm") != "sha256"
+                or expected_path != config.document_template
+                or hashlib.sha256(config.document_template.read_bytes()).hexdigest() != manifest.get("sha256")
+            ):
+                errors.append("document template does not match its integrity manifest")
+        except (OSError, KeyError, TypeError, json.JSONDecodeError):
+            errors.append("document template integrity manifest is invalid")
     if importlib.util.find_spec("docx") is None:
         warnings.append("python-docx is not installed; correspondence and redline features unavailable")
     if importlib.util.find_spec("lxml") is None:

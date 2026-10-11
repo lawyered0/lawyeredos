@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import sqlite3
@@ -22,6 +23,8 @@ from lawyeredos.setup_wizard import (
     render_launcher,
     render_terminal_launcher,
     rollback,
+    _backup,
+    _undo_failed_apply,
 )
 
 
@@ -177,6 +180,13 @@ class SetupWizardTests(unittest.TestCase):
         skill_text = (project_skill / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("name: lawyeredos-contract-redline", skill_text)
         self.assertIn("${LAWYEREDOS_ROOT}", skill_text)
+        matter_text = (
+            self.workspace / ".claude" / "skills" / "lawyeredos-work-on-matter" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("A closed matter remains read-only", matter_text)
+        self.assertIn("without a preliminary full orientation", matter_text)
+        self.assertIn("brief.truncated: true", matter_text)
+        self.assertIn("From address alone does not prove", matter_text)
         settings = json.loads((self.workspace / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
         self.assertEqual(settings["env"]["LAWYEREDOS_ROOT"], str(plugin))
         agent = self.workspace / ".claude" / "agents" / "lawyeredos-legal-review-lens.md"
@@ -293,6 +303,101 @@ class SetupWizardTests(unittest.TestCase):
         self.assertEqual(settings["env"]["EXAMPLE"], "kept")
         self.assertIn("LAWYEREDOS_CONFIG", settings["env"])
 
+    def test_rollback_restores_preexisting_settings_bytes_and_mode(self):
+        settings_path = self.workspace / ".claude" / "settings.local.json"
+        settings_path.parent.mkdir(parents=True)
+        original = json.dumps({"theme": "dark", "env": {"EXAMPLE": "kept"}}).encode()
+        settings_path.write_bytes(original)
+        settings_path.chmod(0o644)
+        apply_plan(build_plan(self.answers()))
+        rollback(self.workspace)
+        self.assertEqual(settings_path.read_bytes(), original)
+        self.assertEqual(settings_path.stat().st_mode & 0o777, 0o644)
+
+    def test_rollback_rejects_insecure_state_before_any_mutation(self):
+        result = apply_plan(build_plan(self.answers()))
+        state = Path(result["rollback_state"])
+        config = Path(result["config"])
+        config_before = config.read_bytes()
+        state.chmod(0o644)
+        with self.assertRaisesRegex(ValueError, "migrate this existing path explicitly"):
+            rollback(self.workspace)
+        self.assertEqual(config.read_bytes(), config_before)
+        self.assertTrue(Path(result["plugin"]).exists())
+        self.assertEqual(state.stat().st_mode & 0o777, 0o644)
+
+    def test_rollback_rejects_special_backup_before_any_mutation(self):
+        first = apply_plan(build_plan(self.answers()))
+        launcher = Path(first["launcher"])
+        launcher.write_text("private launcher content\n", encoding="utf-8")
+        result = apply_plan(build_plan(self.answers()))
+        state_path = Path(result["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        record = next(item for item in state["backups"] if item["original"] == str(launcher))
+        backup = Path(record["backup"])
+        backup.unlink()
+        os.mkfifo(backup, 0o600)
+        launcher_before = launcher.read_bytes()
+        with self.assertRaisesRegex(ValueError, "not a regular file"):
+            rollback(self.workspace)
+        self.assertEqual(launcher.read_bytes(), launcher_before)
+        self.assertTrue(Path(result["plugin"]).exists())
+
+    def test_rollback_rejects_corrupt_mode_metadata_before_any_mutation(self):
+        first = apply_plan(build_plan(self.answers()))
+        launcher = Path(first["launcher"])
+        launcher.write_text("private launcher content\n", encoding="utf-8")
+        result = apply_plan(build_plan(self.answers()))
+        state_path = Path(result["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        record = next(item for item in state["backups"] if item["original"] == str(launcher))
+        record["original_modes"]["."]["mode"] = 0o7777
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        launcher_before = launcher.read_bytes()
+        with self.assertRaisesRegex(ValueError, "mode metadata is invalid"):
+            rollback(self.workspace)
+        self.assertEqual(launcher.read_bytes(), launcher_before)
+        self.assertTrue(Path(result["plugin"]).exists())
+
+    def test_failed_apply_recovery_restores_file_and_skill_tree_modes(self):
+        setup_root = self.workspace / ".lawyeredos"
+        setup_root.mkdir(parents=True)
+        setup_root.chmod(0o700)
+        backup_root = setup_root / "backups" / "fictional-transaction"
+        backup_root.parent.mkdir(mode=0o700)
+        settings = self.workspace / ".claude" / "settings.local.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_bytes(b'{"theme":"dark"}\n')
+        settings.chmod(0o644)
+        skill = self.workspace / ".claude" / "skills" / "managed-fictional"
+        skill.mkdir(parents=True)
+        skill.chmod(0o750)
+        skill_file = skill / "SKILL.md"
+        skill_file.write_text("fictional managed skill\n", encoding="utf-8")
+        skill_file.chmod(0o640)
+        backups = []
+        _backup(settings, backup_root, backups)
+        _backup(skill, backup_root, backups)
+        settings.write_text("changed\n", encoding="utf-8")
+        settings.chmod(0o600)
+        skill_file.write_text("changed\n", encoding="utf-8")
+        skill.chmod(0o700)
+        skill_file.chmod(0o600)
+        plan = {
+            "setup_root": str(setup_root),
+            "plugin": str(setup_root / "plugins" / "unused"),
+            "_active_transaction": {
+                "created": [], "backups": backups, "backup_root": str(backup_root),
+                "previous_state": None,
+            },
+        }
+        self.assertEqual(_undo_failed_apply(plan), [])
+        self.assertEqual(settings.read_bytes(), b'{"theme":"dark"}\n')
+        self.assertEqual(settings.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(skill.stat().st_mode & 0o777, 0o750)
+        self.assertEqual(skill_file.read_text(encoding="utf-8"), "fictional managed skill\n")
+        self.assertEqual(skill_file.stat().st_mode & 0o777, 0o640)
+
     def test_apply_preserves_unrelated_private_skill_and_settings(self):
         private_skill = self.workspace / ".claude" / "skills" / "private-existing-skill"
         private_skill.mkdir(parents=True)
@@ -316,6 +421,172 @@ class SetupWizardTests(unittest.TestCase):
         (self.workspace / ".claude").symlink_to(outside, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, "must not be a symlink"):
             build_plan(self.answers())
+
+    def test_apply_rechecks_managed_directories_after_preview_symlink_swap(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        outside = self.root / "outside"
+        outside.mkdir()
+        marker = outside / "keep.txt"
+        marker.write_text("preserve", encoding="utf-8")
+        self.workspace.mkdir()
+        (self.workspace / ".claude").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            apply_plan(plan)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
+        self.assertEqual(list(outside.iterdir()), [marker])
+
+    def test_apply_rejects_setup_root_swap_before_transaction_state_read(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        outside = self.root / "outside-state"
+        outside.mkdir()
+        marker = outside / "setup-state.json"
+        marker.write_text("private", encoding="utf-8")
+        self.workspace.mkdir()
+        (self.workspace / ".lawyeredos").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            apply_plan(plan)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "private")
+        self.assertEqual(list(outside.iterdir()), [marker])
+
+    def test_apply_refuses_discovery_skill_symlink_created_after_preview(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        outside = self.root / "outside-skill"
+        outside.mkdir()
+        marker = outside / "SKILL.md"
+        marker.write_text("private", encoding="utf-8")
+        skill = Path(plan["project_skills"]["matter"])
+        skill.parent.mkdir(parents=True)
+        skill.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "appeared after preview"):
+            apply_plan(plan)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "private")
+
+    def test_apply_refuses_private_files_that_appear_after_preview(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        config = Path(plan["config"])
+        launcher = Path(plan["launcher"])
+        config.parent.mkdir(parents=True)
+        config.write_text("private config", encoding="utf-8")
+        launcher.write_text("private launcher", encoding="utf-8")
+        launcher.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(config.read_text(encoding="utf-8"), "private config")
+        self.assertEqual(launcher.read_text(encoding="utf-8"), "private launcher")
+        self.assertEqual(launcher.stat().st_mode & 0o777, 0o640)
+
+    def test_apply_refuses_valid_discovery_file_that_appears_after_preview(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        discovery = Path(plan["discovery_state"])
+        discovery.parent.mkdir(parents=True)
+        content = json.dumps({
+            "schema_version": 2,
+            "package_digest": plan["package_digest"],
+            "managed_paths": [],
+            "managed_fingerprints": {},
+        })
+        discovery.write_text(content, encoding="utf-8")
+        discovery.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(discovery.read_text(encoding="utf-8"), content)
+        self.assertEqual(discovery.stat().st_mode & 0o777, 0o640)
+
+    def test_apply_refuses_setup_state_that_appears_before_transaction_read(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        state = self.workspace / ".lawyeredos" / "setup-state.json"
+        state.parent.mkdir(parents=True)
+        content = json.dumps({"schema_version": 1, "private": True})
+        state.write_text(content, encoding="utf-8")
+        state.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(state.read_text(encoding="utf-8"), content)
+        self.assertEqual(state.stat().st_mode & 0o777, 0o640)
+
+    def test_malicious_discovery_cannot_claim_or_delete_external_path(self):
+        external = self.root / "external-private.txt"
+        external.write_text("preserve", encoding="utf-8")
+        external.chmod(0o640)
+        discovery = self.workspace / ".lawyeredos" / "project-discovery.json"
+        discovery.parent.mkdir(parents=True)
+        discovery.write_text(json.dumps({
+            "schema_version": 2,
+            "package_digest": "0" * 64,
+            "managed_paths": [str(external)],
+            "managed_fingerprints": {},
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "outside the LawyeredOS Claude namespace"):
+            build_plan(self.answers(existing_config="error"))
+        self.assertEqual(external.read_text(encoding="utf-8"), "preserve")
+        self.assertEqual(external.stat().st_mode & 0o777, 0o640)
+
+    def test_discovery_fingerprint_change_fails_closed(self):
+        first = apply_plan(build_plan(self.answers()))
+        agent = self.workspace / ".claude" / "agents" / "lawyeredos-legal-review-lens.md"
+        agent.write_text("private replacement", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "fingerprint changed"):
+            build_plan(self.answers())
+        self.assertEqual(agent.read_text(encoding="utf-8"), "private replacement")
+        self.assertTrue(Path(first["plugin"]).is_dir())
+
+    def test_schema_one_discovery_uses_setup_state_fingerprints_and_migrates(self):
+        first = apply_plan(build_plan(self.answers()))
+        discovery_path = self.workspace / ".lawyeredos" / "project-discovery.json"
+        discovery = json.loads(discovery_path.read_text(encoding="utf-8"))
+        discovery["schema_version"] = 1
+        discovery.pop("managed_fingerprints")
+        discovery_path.write_text(json.dumps(discovery), encoding="utf-8")
+        # Faithful released sequence: a later config-only replacement rewrote
+        # setup-state.json without retaining unchanged project-artifact hashes.
+        state_path = Path(first["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        project_prefixes = (
+            str(self.workspace / ".claude" / "skills"),
+            str(self.workspace / ".claude" / "agents"),
+        )
+        state["managed_fingerprints"] = {
+            path: value for path, value in state["managed_fingerprints"].items()
+            if not path.startswith(project_prefixes)
+        }
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        repeated = apply_plan(build_plan(self.answers()))
+        self.assertTrue(repeated["ok"])
+        migrated = json.loads(discovery_path.read_text(encoding="utf-8"))
+        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(set(migrated["managed_paths"]), set(migrated["managed_fingerprints"]))
+        self.assertTrue(Path(first["plugin"]).is_dir())
+
+    def test_rollback_refuses_setup_root_symlink_swap(self):
+        result = apply_plan(build_plan(self.answers()))
+        setup_root = self.workspace / ".lawyeredos"
+        state_text = Path(result["rollback_state"]).read_text(encoding="utf-8")
+        retained = self.root / "retained-setup"
+        setup_root.rename(retained)
+        outside = self.root / "outside-rollback"
+        outside.mkdir()
+        marker = outside / "private.txt"
+        marker.write_text("preserve", encoding="utf-8")
+        (outside / "setup-state.json").write_text(
+            state_text, encoding="utf-8"
+        )
+        setup_root.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+            rollback(self.workspace)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "preserve")
+
+    def test_rollback_rejects_external_state_paths_before_deletion(self):
+        result = apply_plan(build_plan(self.answers()))
+        external = self.root / "external-rollback.txt"
+        external.write_text("preserve", encoding="utf-8")
+        state_path = Path(result["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["created"].append(str(external))
+        state["managed_fingerprints"][str(external)] = "0" * 64
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "outside the managed namespace"):
+            rollback(self.workspace)
+        self.assertEqual(external.read_text(encoding="utf-8"), "preserve")
 
     def test_trial_requires_new_or_empty_workspace(self):
         self.workspace.mkdir()
@@ -373,10 +644,9 @@ class SetupWizardTests(unittest.TestCase):
     def test_upgrade_keeps_old_plugin_and_updates_launcher(self):
         first = apply_plan(build_plan(self.answers()))
         old_plugin = Path(first["plugin"])
-        plan = build_plan(self.answers())
-        plan["package_digest"] = "f" * 64
-        new_plugin = Path(plan["setup_root"]) / "plugins" / f"lawyeredos-0.2.1-{'f' * 8}-upgrade"
-        plan["plugin"] = str(new_plugin)
+        with patch("lawyeredos.setup_wizard.package_digest", return_value="f" * 64):
+            plan = build_plan(self.answers())
+        new_plugin = Path(plan["plugin"])
         upgraded = apply_plan(plan)
         self.assertTrue(old_plugin.is_dir())
         self.assertTrue(new_plugin.is_dir())
@@ -385,6 +655,85 @@ class SetupWizardTests(unittest.TestCase):
         project_skill = self.workspace / ".claude" / "skills" / "lawyeredos-work-on-matter"
         self.assertTrue(project_skill.is_symlink())
         self.assertTrue(str(project_skill.resolve()).startswith(str(new_plugin)))
+
+    def test_installed_claude_core_has_bound_template_manifest(self):
+        result = apply_plan(build_plan(self.answers()))
+        config = load_config(result["config"])
+        self.assertIsNotNone(config.document_template_manifest)
+        manifest = json.loads(config.document_template_manifest.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["template"], "assets/neutral-letterhead.docx")
+        self.assertEqual(
+            manifest["sha256"],
+            hashlib.sha256(config.document_template.read_bytes()).hexdigest(),
+        )
+
+    def test_validation_fails_when_template_manifest_binding_is_removed(self):
+        result = apply_plan(build_plan(self.answers()))
+        config_path = Path(result["config"])
+        config_path.write_text(
+            "\n".join(
+                line for line in config_path.read_text(encoding="utf-8").splitlines()
+                if not line.startswith("template_manifest =")
+            ) + "\n",
+            encoding="utf-8",
+        )
+        validation = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parents[1] / "scripts" / "validate_setup.py"),
+                "--config", str(config_path),
+            ],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(validation.returncode, 2)
+        self.assertIn("document template manifest is not configured", validation.stdout)
+
+    def test_repeat_install_rejects_tampered_versioned_plugin(self):
+        first = apply_plan(build_plan(self.answers()))
+        skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\nprivate tamper\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "versioned plugin content changed"):
+            build_plan(self.answers())
+        self.assertIn("private tamper", skill.read_text(encoding="utf-8"))
+
+    def test_apply_rechecks_versioned_plugin_after_preview(self):
+        first = apply_plan(build_plan(self.answers()))
+        plan = build_plan(self.answers())
+        skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\npost-preview tamper\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertIn("post-preview tamper", skill.read_text(encoding="utf-8"))
+
+    def test_repeat_preview_rejects_empty_directory_and_special_entry_in_plugin(self):
+        first = apply_plan(build_plan(self.answers()))
+        plugin = Path(first["plugin"])
+        empty = plugin / "PRIVATE-EMPTY"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "versioned plugin content changed"):
+            build_plan(self.answers())
+        empty.rmdir()
+        fifo = plugin / "PRIVATE-FIFO"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "unsupported filesystem entry"):
+            build_plan(self.answers())
+        fifo.unlink()
+
+    def test_apply_rejects_post_preview_empty_directory_and_special_entry_in_plugin(self):
+        first = apply_plan(build_plan(self.answers()))
+        plugin = Path(first["plugin"])
+        plan = build_plan(self.answers())
+        empty = plugin / "PRIVATE-EMPTY"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        empty.rmdir()
+        plan = build_plan(self.answers())
+        fifo = plugin / "PRIVATE-FIFO"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "unsupported filesystem entry"):
+            apply_plan(plan)
+        fifo.unlink()
 
     def test_cancelled_apply_has_no_side_effects(self):
         argv = [

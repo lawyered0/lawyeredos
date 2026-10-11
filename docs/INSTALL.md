@@ -166,6 +166,10 @@ Before client use, create a fictional folder inside the workspace:
   source-note.txt
 ```
 
+Start the brief with one identity heading, such as
+`# 2030-001 — Northstar Bakery Ltd.`. The read-only orientation refuses a
+missing, duplicate, or conflicting matter heading.
+
 Ask Claude to link that existing folder as matter `2030-001`, show the exact
 tracker preview, and wait for approval. Then ask for a read-only orientation.
 The expected result identifies one exact folder, summarizes only the sources it

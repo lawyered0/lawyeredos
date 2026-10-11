@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import io
 import json
 import re
+import shutil
 import sys
 import tempfile
 import unittest
@@ -11,6 +13,8 @@ import zipfile
 from contextlib import redirect_stderr
 from pathlib import Path
 from urllib.parse import unquote
+
+from lawyeredos.codex_setup import _projectize_skill
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +30,24 @@ def load_script(name: str):
 
 
 class DistributionTests(unittest.TestCase):
+    def test_codex_projectization_rewrites_nested_skill_references(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "lawyeredos-work-on-matter"
+            _projectize_skill(
+                ROOT / "skills" / "practice-work-on-matter",
+                destination,
+                "lawyeredos-work-on-matter",
+            )
+            nested = (destination / "references" / "mail-intake.md").read_text(encoding="utf-8")
+            boundaries = (
+                destination / "references" / "capability-boundaries.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn('".lawyeredos/lawyeredos-run" -m lawyeredos.mail_intake plan', nested)
+            self.assertIn(".lawyeredos/current-codex/scripts/extract_pdf.py", boundaries)
+            self.assertNotIn("LAWYEREDOS_ROOT", nested + boundaries)
+            self.assertNotIn("LAWYEREDOS_PYTHON", nested + boundaries)
+            self.assertNotIn("LAWYEREDOS_CONFIG", nested + boundaries)
+
     def test_setup_entrypoints_reject_old_python_before_core_import(self):
         for name in ("setup_wizard", "setup_codex"):
             text = (ROOT / "scripts" / f"{name}.py").read_text(encoding="utf-8")
@@ -74,6 +96,24 @@ class DistributionTests(unittest.TestCase):
         self.assertIn("lawyeredos:practice-adversarial-panel", combined_body)
         self.assertIn("lawyeredos:legal-review-lens", combined_body)
         self.assertNotIn("panel-lens", combined_body)
+
+    def test_public_skills_preserve_portable_practice_guardrails(self):
+        work = (ROOT / "skills" / "practice-work-on-matter" / "SKILL.md").read_text(encoding="utf-8")
+        tracker = (ROOT / "skills" / "practice-matter-tracker" / "SKILL.md").read_text(encoding="utf-8")
+        panel = (ROOT / "skills" / "practice-adversarial-panel" / "SKILL.md").read_text(encoding="utf-8")
+        letter = (ROOT / "skills" / "practice-letterhead" / "SKILL.md").read_text(encoding="utf-8")
+        redline = (ROOT / "skills" / "practice-contract-redline" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("A closed matter remains read-only", work)
+        self.assertIn("without a preliminary full orientation", work)
+        self.assertIn("brief.truncated: true", work)
+        self.assertIn("From address alone does not prove", work)
+        self.assertIn("No located hit in the local register fields", tracker)
+        self.assertIn("Disposition every material finding", panel)
+        self.assertIn("panel concern alone never", panel)
+        self.assertIn("Correct every FAIL in original prose", letter)
+        self.assertIn("Hash the exact source before generation", redline)
+        self.assertRegex(letter, r"never overwrite newer\s+work")
+        self.assertRegex(redline, r"never overwrite newer\s+work")
 
     def test_bootstrap_setup_skill_is_project_local(self):
         setup_skill = ROOT / ".claude" / "skills" / "lawyeredos-setup" / "SKILL.md"
@@ -229,11 +269,19 @@ class DistributionTests(unittest.TestCase):
         creator = load_script("create_letter")
         with tempfile.TemporaryDirectory() as temporary:
             temporary = Path(temporary)
+            template = temporary / "neutral-letterhead.docx"
+            shutil.copy2(ROOT / "assets" / "neutral-letterhead.docx", template)
+            manifest = temporary / "template-manifest.json"
+            manifest.write_text(json.dumps({
+                "schema_version": 1, "algorithm": "sha256", "template": template.name,
+                "sha256": hashlib.sha256(template.read_bytes()).hexdigest(),
+            }), encoding="utf-8")
             body = temporary / "body.txt"
             output = temporary / "letter.docx"
             body.write_text("This is a fictional test letter.\n", encoding="utf-8")
             args = type("Args", (), {
-                "template": str(ROOT / "assets" / "neutral-letterhead.docx"),
+                "template": str(template),
+                "template_manifest": str(manifest),
                 "body_file": str(body),
                 "output": str(output),
                 "organization": "Northstar Legal Lab",

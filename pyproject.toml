@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lawyeredos"
-version = "0.2.1"
+version = "0.2.2"
 description = "Local-first shared workflow core for LawyeredOS on Claude and Codex"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
@@ -26,7 +26,9 @@ practice-tracker-xlsx = "lawyeredos.tracker_xlsx:main"
 practice-integrations = "lawyeredos.integrations:main"
 practice-documents = "lawyeredos.document_helpers:main"
 practice-memory = "lawyeredos.memory_search:main"
+practice-matter-write = "lawyeredos.matter_write:main"
 practice-voice-lint = "lawyeredos.voice_lint:main"
+practice-audience = "lawyeredos.audience_reconciliation:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

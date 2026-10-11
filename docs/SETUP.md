@@ -73,7 +73,9 @@ stores and private configuration stay outside plugin directories.
 
 The guided wizard implements this layout automatically. Its default `reuse`
 policy preserves existing configuration byte-for-byte, while `replace` creates
-a backup first. Its rollback command affects only paths recorded in the most
-recent managed transaction and preserves any managed artifact that changed
-after setup. See `LIFECYCLE.md` for update, rollback, disable, and uninstall
-procedures that preserve matter data by default.
+a backup first. Claude rollback affects only paths recorded in the most recent
+managed transaction and preserves any managed artifact that changed after
+setup. Codex records each successful managed upgrade and offers a separate
+fingerprint-checked `--rollback-upgrade --yes` operation that repoints only its
+owned discovery and links. See `LIFECYCLE.md` for update, rollback, disable,
+and uninstall procedures that preserve matter data by default.

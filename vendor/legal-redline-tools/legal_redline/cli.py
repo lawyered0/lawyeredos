@@ -4,10 +4,17 @@ import argparse
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 from docx import Document
 
-from legal_redline.apply import apply_redlines, placement_problems
+from legal_redline.apply import (
+    apply_redlines,
+    existing_review_markup,
+    placement_problems,
+    read_regular_bytes,
+)
 from legal_redline.compare import compare_agreements, format_comparison_report
 from legal_redline.diff import diff_documents
 from legal_redline.markdown import generate_markdown
@@ -16,6 +23,10 @@ from legal_redline.remap import remap_redlines
 from legal_redline.render import render_redline_pdf
 from legal_redline.scan import scan_document
 from legal_redline.summary import generate_summary_pdf
+
+
+class OutputIsInputError(ValueError):
+    pass
 
 
 def main():
@@ -160,9 +171,41 @@ def _cmd_apply(args):
               "--insert-after, or --from-json.")
         sys.exit(1)
 
+    outputs = {
+        "docx": None if args.no_docx else args.output,
+        "pdf": args.pdf,
+        "summary": args.summary_pdf,
+        "memo": args.memo_pdf,
+        "markdown": args.markdown,
+    }
+    try:
+        _validate_output_targets(args.input, outputs.values())
+        source_bytes = read_regular_bytes(args.input)
+        review_markers = existing_review_markup(source_bytes)
+    except OutputIsInputError as exc:
+        print(f"Error: {exc}. Nothing was generated.")
+        sys.exit(1)
+    except (OSError, ValueError) as exc:
+        print(f"Error: {exc}. Nothing was generated.")
+        sys.exit(2)
+
+    staging = tempfile.TemporaryDirectory(prefix="legal-redline-")
+    staged_source = Path(staging.name) / "source.docx"
+    staged_source.write_bytes(source_bytes)
+    if review_markers:
+        print("Error: input contains pre-existing revision/comment markup; resolve "
+              "it before applying a new redline: " + ", ".join(review_markers))
+        print("Nothing was generated.")
+        sys.exit(2)
+
+    staged = {
+        name: str(Path(staging.name) / f"{name}{Path(path).suffix or '.tmp'}")
+        for name, path in outputs.items() if path
+    }
+
     # 2026-10-07: a repeated span changed the first clause holding it while the
     # schedule named the intended section. Refuse before any output is written.
-    problems = placement_problems(Document(args.input), redlines)
+    problems = placement_problems(Document(staged_source), redlines)
     if problems:
         for _, msg in problems:
             print(f"  [REFUSED] {msg}")
@@ -183,13 +226,13 @@ def _cmd_apply(args):
                   "a new path. Nothing was generated.")
             sys.exit(1)
         print("--- .docx with tracked changes ---")
-        results = apply_redlines(args.input, args.output, redlines, args.author)
+        results = apply_redlines(staged_source, staged["docx"], redlines, args.author)
         print()
         # 2026-10-07: a partial run exited 0 and the schedule, markdown and PDF
         # were still built from the JSON, listing changes the DOCX did not take.
         unapplied = [(status, desc) for status, desc in results if status != "OK"]
         if unapplied:
-            os.remove(args.output)
+            os.remove(staged["docx"])
             print(f"FAILED: {len(unapplied)} of {len(redlines)} change(s) not applied:")
             for status, desc in unapplied:
                 print(f"  [{status}] {desc}")
@@ -204,7 +247,7 @@ def _cmd_apply(args):
     if args.pdf:
         print("--- Full-document redline PDF ---")
         render_redline_pdf(
-            args.input, redlines, args.pdf,
+            staged_source, redlines, staged["pdf"],
             header_text=args.header or args.doc_title,
             author=args.author,
         )
@@ -214,7 +257,7 @@ def _cmd_apply(args):
     if args.summary_pdf:
         print("--- Summary redline PDF ---")
         generate_summary_pdf(
-            redlines, args.summary_pdf,
+            redlines, staged["summary"],
             doc_title=args.doc_title,
             author=args.author,
             doc_parties=args.doc_parties,
@@ -226,7 +269,7 @@ def _cmd_apply(args):
     if args.memo_pdf:
         print("--- Internal memo PDF ---")
         generate_memo_pdf(
-            redlines, args.memo_pdf,
+            redlines, staged["memo"],
             doc_title=args.doc_title,
             author=args.author,
             doc_parties=args.doc_parties,
@@ -243,9 +286,102 @@ def _cmd_apply(args):
             doc_parties=args.doc_parties,
             mode=args.mode,
         )
-        with open(args.markdown, "w") as f:
+        with open(staged["markdown"], "w") as f:
             f.write(md)
         print(f"Markdown: {args.markdown}")
+
+    try:
+        _publish_all_new([
+            (Path(staged[name]), Path(final_path))
+            for name, final_path in outputs.items() if final_path
+        ])
+    except (OSError, ValueError) as exc:
+        print(f"Error: {exc}. Staged outputs were not allowed to overwrite the target.")
+        sys.exit(2)
+    finally:
+        staging.cleanup()
+
+
+def _reject_symlink_parents(path):
+    current = path.parent
+    root = Path(path.anchor)
+    while current != current.parent:
+        if current.is_symlink():
+            metadata = current.lstat()
+            if current.parent != root or getattr(metadata, "st_uid", -1) != 0:
+                raise ValueError(f"output parent must not contain a symlink: {current}")
+        current = current.parent
+
+
+def _validate_output_targets(input_path, output_paths):
+    source = Path(input_path).expanduser().absolute()
+    seen = set()
+    for raw in output_paths:
+        if not raw:
+            continue
+        path = Path(raw).expanduser().absolute()
+        key = os.path.normcase(str(path))
+        if key in seen:
+            raise ValueError(f"output paths must be distinct: {path}")
+        seen.add(key)
+        if key == os.path.normcase(str(source)):
+            raise OutputIsInputError("an output path is the input file")
+        if path.exists() or path.is_symlink():
+            raise ValueError(f"output already exists: {path}")
+        if not path.parent.is_dir():
+            raise ValueError(f"output parent does not exist: {path.parent}")
+        _reject_symlink_parents(path)
+
+
+def _unlink_if_same(output, identity):
+    try:
+        current = output.stat(follow_symlinks=False)
+        if (identity.st_dev, identity.st_ino) == (current.st_dev, current.st_ino):
+            output.unlink()
+    except OSError:
+        pass
+
+
+def _publish_all_new(items):
+    """Fully stage beside every target, then publish complete files no-replace."""
+    prepared = []
+    published = []
+    try:
+        for source_path, raw_output in items:
+            output = raw_output.expanduser().absolute()
+            _reject_symlink_parents(output)
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".legal-redline-publish-", dir=output.parent,
+            )
+            temporary = Path(temporary_name)
+            identity = os.fstat(descriptor)
+            prepared.append((temporary, output, identity))
+            try:
+                with source_path.open("rb") as source:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        remaining = memoryview(chunk)
+                        while remaining:
+                            written = os.write(descriptor, remaining)
+                            remaining = remaining[written:]
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        for temporary, output, identity in prepared:
+            try:
+                os.link(temporary, output, follow_symlinks=False)
+            except FileExistsError as exc:
+                raise ValueError(f"output already exists: {output}") from exc
+            published.append((output, identity))
+    except BaseException:
+        for output, identity in published:
+            _unlink_if_same(output, identity)
+        raise
+    finally:
+        for temporary, _, identity in prepared:
+            _unlink_if_same(temporary, identity)
 
 
 def _cmd_diff(args):

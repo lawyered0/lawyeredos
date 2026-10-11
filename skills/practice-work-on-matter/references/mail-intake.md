@@ -12,7 +12,8 @@ PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredo
 ```
 
 The plan supplies the exact matter, conservative paired-term query, bounded window, prior complete
-checkpoint, and normalized bundle schema. Stop on an ambiguous or missing
+checkpoint, normalized bundle schema, and at most 100 already tracked thread IDs with their stable
+message markers. Stop on an ambiguous or missing
 matter. Never broaden the query to unrelated mail.
 
 ## 2. Use only the configured route
@@ -36,7 +37,12 @@ matter. Never broaden the query to unrelated mail.
   already-authorized MCP or plugin mail read/search tool. Codex does not define
   a built-in Gmail tool contract; never invent or name a hypothetical tool.
 
-For a session tool, run the exact planned query. Retrieve stable message and
+For a session tool, run the exact planned query. Then, only if the tool supports an exact stable
+thread-ID read, probe each `tracked_threads` entry without a date cutoff and return messages after
+its `marker_message_id`; read the newest message as a bounded tail when there is nothing after the
+marker. Never substitute a broader mailbox query. If exact-thread access, a marker, a page, or a
+record cannot be verified, set `coverage.tracked_threads.complete` false and state the limitation.
+Retrieve stable message and
 thread IDs, provider arrival time, headers, complete current body, attachment
 metadata, and attachment bytes when the tool exposes them. Include an
 `account_fingerprint` equal to the lowercase hexadecimal SHA-256 of a stable
@@ -54,6 +60,18 @@ PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredo
   --delete-bundle
 ```
 
+For every message also include provider label evidence when exposed:
+`provider_labels`, `provider_labels_known`, `from_account`, and the message's original
+`header_date`. An absent draft is not proof of sending; authorship is not transmission; a Sent
+label means sent, not delivered; a future-dated Sent item is scheduled; and unavailable labels
+mean unknown. Mark exact records with `acquisition_basis` = `thread_probe`, or `thread_tail` for
+the bounded quiet-thread tail; ordinary search hits use `matched_messages`. Echo the exact planned
+thread/marker pairs in `coverage.tracked_threads.request` and provide one detail per thread with
+`marker_before`, provider-ordered `ordered_candidate_ids`, and `complete`. The core advances a
+frontier only when that exact, contiguous candidate set has complete retrieval and completed review.
+The candidate IDs must be in the provider's thread order from oldest to newest. The core persists
+that ordering as a tie-break when provider arrival timestamps are identical; never reorder the IDs
+by lexical message ID or by the order in which message bodies happened to be fetched.
 Set `coverage.complete` to `false` for any cap, failed page, missing body,
 authorization interruption, or uncertain result. Never invent attachment bytes
 or mark metadata-only access complete. A configured route is not proof that the
@@ -61,6 +79,26 @@ tool is available. `--delete-bundle` refuses paths outside the managed private
 scratch subtree and removes the transient body/attachment copy after processing,
 including after a processing error. Without that flag, the core never deletes a
 caller-supplied file.
+
+When a draft, response, filing, or other proposed deliverable depends on the
+current audience, freeze that proposed complete `from`, `to`, and `cc` audience
+as a JSON object and reconcile it against the exact current normalized message:
+
+```bash
+PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredos.audience_reconciliation \
+  --message "<private normalized bundle>" --message-id "<stable message id>" \
+  --expected "<private proposed-audience JSON>"
+```
+
+Continue only on `state: verified`. Treat `mismatch` as a changed audience that
+must be resolved, `unknown` as absent or incomplete retrieved headers, and
+`ambiguous` as unparseable retrieved or proposed addresses. Display names,
+case, order, and duplicate copies of the same address do not change identity;
+From, To, and Cc roles remain distinct. Never fill a missing header from the
+body, signature, quoted history, subject, thread name, or provider label. The
+result binds retrieved header evidence separately from the proposal and always
+reports authorization, delivery, and service as not established. A verified
+audience is not authority to send, file, serve, sign, or mutate an account.
 
 ## 3. Complete the hash-bound review queue
 
@@ -132,7 +170,10 @@ The local
 checkpoint advances only after complete search coverage, complete processing,
 and hash-bound host-model acknowledgements for every chunk of every relevant
 returned message. The local ledger stores extracted chunks and acknowledgement
-evidence so review can resume after interruption. It records review, not reply
-or delivery.
+evidence so review can resume after interruption. It separately records conservative mailbox
+transmission observations so a restart can reconcile draft, sent, scheduled, received, and
+unknown states without re-reviewing unchanged evidence. `we_sent_last_delivery_unproven` never
+means delivered. Exact tracked-thread coverage must be complete before making a no-reply or
+current-reply-state claim.
 Never send, draft, forward, label, archive, delete, mark read, or change an
 external account from this workflow.

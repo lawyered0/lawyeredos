@@ -7,12 +7,14 @@ DOCX did not contain. Any unapplied change now exits 2 and leaves no output.
 
 import json
 import sys
+import zipfile
 
 import pytest
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+import legal_redline.cli as cli_module
 from legal_redline.cli import main
 
 
@@ -64,8 +66,7 @@ def test_unapplied_change_exits_2_and_writes_nothing(tmp_dir, monkeypatch, capsy
     assert not any(path.exists() for path in out.values())
 
 
-def test_straddled_revision_is_reported_as_such(tmp_dir, monkeypatch, capsys):
-    """An ERROR is not blamed on the engine's reach into tables and footers."""
+def test_preexisting_revision_is_refused_before_output(tmp_dir, monkeypatch, capsys):
     src = tmp_dir / "del.docx"
     doc = Document()
     para = doc.add_paragraph("The Supplier shall ")
@@ -88,7 +89,7 @@ def test_straddled_revision_is_reported_as_such(tmp_dir, monkeypatch, capsys):
     out = _outputs(tmp_dir)
     assert _run(monkeypatch, *_args(src, out, redlines)) == 2
     printed = capsys.readouterr().out
-    assert "[ERROR]" in printed and "straddles an existing tracked change" in printed
+    assert "pre-existing revision/comment markup" in printed
     assert "body paragraphs only" not in printed
     assert not any(path.exists() for path in out.values())
 
@@ -145,6 +146,109 @@ def test_output_must_not_be_the_input(tmp_dir, monkeypatch):
                 "--replace", "30 days", "60 days")
     assert code == 1
     assert src.read_bytes() == before
+
+
+def test_existing_or_symlink_output_is_refused_before_any_output(tmp_dir, monkeypatch, capsys):
+    src = _source(tmp_dir, "Invoices are payable within 30 days.")
+    redlines = tmp_dir / "redlines.json"
+    redlines.write_text(json.dumps([
+        {"type": "replace", "old": "30 days", "new": "60 days"},
+    ]))
+    out = _outputs(tmp_dir)
+    out["summary"].write_bytes(b"existing summary")
+    assert _run(monkeypatch, *_args(src, out, redlines)) == 2
+    assert out["summary"].read_bytes() == b"existing summary"
+    assert not out["docx"].exists()
+    assert not out["markdown"].exists()
+    assert "output already exists" in capsys.readouterr().out
+
+    out["summary"].unlink()
+    victim = tmp_dir / "victim.docx"
+    victim.write_bytes(b"source-like bytes")
+    out["docx"].symlink_to(victim)
+    assert _run(monkeypatch, *_args(src, out, redlines)) == 2
+    assert victim.read_bytes() == b"source-like bytes"
+    assert out["docx"].is_symlink()
+    assert not out["summary"].exists()
+    assert not out["markdown"].exists()
+
+
+def test_publish_collision_exposes_no_partial_file_and_rolls_back(tmp_dir, monkeypatch):
+    staged_one = tmp_dir / "staged-one"
+    staged_two = tmp_dir / "staged-two"
+    staged_one.write_bytes(b"complete one")
+    staged_two.write_bytes(b"complete two")
+    output_one = tmp_dir / "output-one"
+    output_two = tmp_dir / "output-two"
+    original_link = cli_module.os.link
+
+    def collide_on_second(source, destination, **kwargs):
+        destination = type(output_two)(destination)
+        if destination == output_two:
+            destination.write_bytes(b"concurrent file")
+            raise FileExistsError("fictional collision")
+        return original_link(source, destination, **kwargs)
+
+    monkeypatch.setattr(cli_module.os, "link", collide_on_second)
+    with pytest.raises(ValueError, match="output already exists"):
+        cli_module._publish_all_new([
+            (staged_one, output_one),
+            (staged_two, output_two),
+        ])
+    assert not output_one.exists()
+    assert output_two.read_bytes() == b"concurrent file"
+    assert not list(tmp_dir.glob(".legal-redline-publish-*"))
+
+
+def test_truncated_and_oversized_sources_fail_cleanly_without_output(tmp_dir, monkeypatch, capsys):
+    broken = tmp_dir / "broken.docx"
+    broken.write_bytes(b"PK\x03\x04truncated")
+    output = tmp_dir / "output.docx"
+    assert _run(
+        monkeypatch, str(broken), str(output), "--author", "Test Reviewer",
+        "--replace", "old", "new",
+    ) == 2
+    assert "not a valid DOCX package" in capsys.readouterr().out
+    assert not output.exists()
+
+    with zipfile.ZipFile(broken, "w") as package:
+        package.writestr("notes.txt", "not a Word package")
+    assert _run(
+        monkeypatch, str(broken), str(output), "--author", "Test Reviewer",
+        "--replace", "old", "new",
+    ) == 2
+    assert "not a valid Word DOCX package" in capsys.readouterr().out
+    assert not output.exists()
+
+    with zipfile.ZipFile(broken, "w") as package:
+        package.writestr("[Content_Types].xml", "<Types/>")
+        package.writestr("_rels/.rels", "<Relationships/>")
+        package.writestr("word/document.xml", "<document/>")
+    assert _run(
+        monkeypatch, str(broken), str(output), "--author", "Test Reviewer",
+        "--replace", "old", "new",
+    ) == 2
+    assert "not a valid Word DOCX package" in capsys.readouterr().out
+    assert not output.exists()
+
+    source = _source(tmp_dir, "Invoices are payable within 30 days.")
+    apply_module = __import__("legal_redline.apply", fromlist=["MAX_DOCX_BYTES"])
+    monkeypatch.setattr(apply_module, "MAX_DOCX_BYTES", 64)
+    assert _run(
+        monkeypatch, str(source), str(output), "--author", "Test Reviewer",
+        "--replace", "30 days", "60 days",
+    ) == 2
+    assert "64-byte safety limit" in capsys.readouterr().out
+    assert not output.exists()
+
+    monkeypatch.setattr(apply_module, "MAX_DOCX_BYTES", 100 * 1024 * 1024)
+    monkeypatch.setattr(apply_module, "MAX_DOCX_UNCOMPRESSED_BYTES", 64)
+    assert _run(
+        monkeypatch, str(source), str(output), "--author", "Test Reviewer",
+        "--replace", "30 days", "60 days",
+    ) == 2
+    assert "uncompressed safety limit" in capsys.readouterr().out
+    assert not output.exists()
 
 
 def test_full_apply_writes_every_requested_output(tmp_dir, monkeypatch, capsys):
