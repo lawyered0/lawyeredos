@@ -191,7 +191,7 @@ class GuardedMatterWriteTests(unittest.TestCase):
         self.assertEqual(result["file_verification_state"], "readback_verified")
         self.assertFalse(result["retry_safe"])
 
-    def test_hardlinks_special_files_and_live_obligation_clear_are_rejected(self):
+    def test_hardlinks_special_files_and_missing_dispositions_are_rejected(self):
         hardlink = Path(self.temp.name) / "source-hardlink.md"
         os.link(self.source, hardlink)
         with self.assertRaisesRegex(ValueError, "hard links"):

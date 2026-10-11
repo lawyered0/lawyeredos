@@ -307,6 +307,10 @@ def _commit_transaction(connection: sqlite3.Connection) -> None:
 
 
 def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: str) -> dict[str, Any]:
+    # Preview validation is not authority to keep using the same pathname. Rebind
+    # the confidentiality and single-link invariants immediately before SQLite
+    # opens the database so a post-preview path or mode substitution fails closed.
+    assert_private_file(path)
     connection = sqlite3.connect(path, timeout=5, isolation_level=None)
     connection.row_factory = sqlite3.Row
     try:

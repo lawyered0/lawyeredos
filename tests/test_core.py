@@ -92,6 +92,36 @@ class TrackerTests(unittest.TestCase):
         self.assertIn("multiple hard links", result["problems"][0])
         self.assertEqual(self.database.read_bytes(), original)
 
+    def test_commit_rechecks_private_file_after_preview(self):
+        for substitution in ("mode", "hardlink", "symlink"):
+            with self.subTest(substitution=substitution):
+                database = self.root / f"commit-recheck-{substitution}.sqlite3"
+                initialize(database)
+                args = mutation_args(database, "create")
+                approved = preview_mutation(database, "create", args)
+                original = database.read_bytes()
+
+                if substitution == "mode":
+                    database.chmod(0o640)
+                    error = "migrate this existing path explicitly"
+                    protected = database
+                else:
+                    outside = self.root / f"outside-{substitution}.sqlite3"
+                    outside.write_bytes(original)
+                    outside.chmod(0o600)
+                    database.unlink()
+                    if substitution == "hardlink":
+                        os.link(outside, database)
+                        error = "multiple hard links"
+                    else:
+                        database.symlink_to(outside)
+                        error = "symlink or not a regular file"
+                    protected = outside
+
+                with self.assertRaisesRegex(ValueError, error):
+                    commit_mutation(database, "create", args, approved["confirm_token"])
+                self.assertEqual(protected.read_bytes(), original)
+
     def test_workflow_clear_disposes_next_action_and_date_atomically(self):
         self.create_matter()
         update = mutation_args(
