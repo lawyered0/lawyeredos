@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -200,6 +202,62 @@ class CodexSetupTests(unittest.TestCase):
         self.assertIn("No located hit in the local register fields", tracker)
         self.assertIn("Disposition every material finding", panel)
         self.assertIn("panel concern alone never", panel)
+
+    def test_installed_codex_skill_tree_projectizes_nested_runtime_references(self):
+        result = apply_plan(build_plan(self.answers(
+            modules_raw="matter,tracker,letters,redline,calendar,review",
+        )))
+        installed = Path(result["plugin"]) / ".lawyeredos-codex-project" / "skills"
+        unresolved = []
+        for path in installed.rglob("*"):
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            if any(token in text for token in (
+                "LAWYEREDOS_ROOT", "LAWYEREDOS_PYTHON", "LAWYEREDOS_CONFIG",
+            )):
+                unresolved.append(str(path.relative_to(installed)))
+        self.assertEqual(unresolved, [])
+
+        mail_reference = (
+            installed / "lawyeredos-work-on-matter" / "references" / "mail-intake.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'PYTHONPATH=".lawyeredos/current-codex/src" ".lawyeredos/lawyeredos-run" '
+            '-m lawyeredos.mail_intake plan',
+            mail_reference,
+        )
+        tracker_reference = (
+            installed / "lawyeredos-matter-tracker" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("database path from `.lawyeredos/config.toml`", tracker_reference)
+
+        matter = self.workspace / "2032-001-northstar"
+        matter.mkdir()
+        database = self.workspace / ".lawyeredos" / "data" / "matters.sqlite3"
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """INSERT INTO matters(file_number, client, description, matter_folder,
+                status, opposing_party, primary_email, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?)""",
+                (
+                    "2032-001", "Northstar Bakery Ltd.", "Fictional supply dispute",
+                    "2032-001-northstar", "Harbor Paper Co.", "client@example.invalid",
+                    "2032-01-01", "2032-01-01",
+                ),
+            )
+        completed = subprocess.run(
+            [
+                str(self.workspace / ".lawyeredos" / "lawyeredos-run"),
+                "-m", "lawyeredos.mail_intake", "plan",
+                "--config", ".lawyeredos/config.toml", "--identifier", "Northstar",
+            ],
+            cwd=self.workspace, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        planned = json.loads(completed.stdout)
+        self.assertEqual(planned["status"], "mail_unavailable")
+        self.assertNotIn("ModuleNotFoundError", completed.stderr)
 
     def test_codex_setup_maps_portable_imap_without_storing_a_secret(self):
         plan = build_plan(self.answers(mail="gmail-imap"))

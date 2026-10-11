@@ -201,24 +201,6 @@ def _projectize_skill(source: Path, destination: Path, project_name: str) -> Non
     shutil.copytree(source, destination)
     skill_path = destination / "SKILL.md"
     text = skill_path.read_text(encoding="utf-8")
-    replacements = {
-        "lawyeredos:practice-work-on-matter": "lawyeredos-work-on-matter",
-        "lawyeredos:practice-matter-tracker": "lawyeredos-matter-tracker",
-        "lawyeredos:practice-letterhead": "lawyeredos-letterhead",
-        "lawyeredos:practice-contract-redline": "lawyeredos-contract-redline",
-        "lawyeredos:practice-calendar-sync": "lawyeredos-calendar-sync",
-        "lawyeredos:practice-adversarial-panel": "lawyeredos-adversarial-panel",
-        "${LAWYEREDOS_ROOT}": f".lawyeredos/{CURRENT_LINK}",
-        "$LAWYEREDOS_ROOT": f".lawyeredos/{CURRENT_LINK}",
-        "${LAWYEREDOS_PYTHON:-python3}": f".lawyeredos/{RUNNER_FILE}",
-        "$LAWYEREDOS_CONFIG": ".lawyeredos/config.toml",
-        "Claude-only": "Codex-only",
-        "Claude-Only": "Codex-Only",
-        "Claude reviewers": "Codex reviewers",
-        "Claude Code": "Codex",
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
     old_name = project_name.replace("lawyeredos-", "practice-", 1)
     text = text.replace(f"name: {old_name}", f"name: {project_name}", 1)
     if project_name == "lawyeredos-work-on-matter":
@@ -263,6 +245,36 @@ def _projectize_skill(source: Path, destination: Path, project_name: str) -> Non
         )
         text = text.replace("\n## Review\n", boundary + "\n## Review\n")
     skill_path.write_text(text, encoding="utf-8")
+    replacements = {
+        "lawyeredos:practice-work-on-matter": "lawyeredos-work-on-matter",
+        "lawyeredos:practice-matter-tracker": "lawyeredos-matter-tracker",
+        "lawyeredos:practice-letterhead": "lawyeredos-letterhead",
+        "lawyeredos:practice-contract-redline": "lawyeredos-contract-redline",
+        "lawyeredos:practice-calendar-sync": "lawyeredos-calendar-sync",
+        "lawyeredos:practice-adversarial-panel": "lawyeredos-adversarial-panel",
+        "${LAWYEREDOS_ROOT}": f".lawyeredos/{CURRENT_LINK}",
+        "$LAWYEREDOS_ROOT": f".lawyeredos/{CURRENT_LINK}",
+        "${LAWYEREDOS_PYTHON:-python3}": f".lawyeredos/{RUNNER_FILE}",
+        "$LAWYEREDOS_CONFIG": ".lawyeredos/config.toml",
+        "`LAWYEREDOS_CONFIG`": "`.lawyeredos/config.toml`",
+        "LAWYEREDOS_ROOT": f".lawyeredos/{CURRENT_LINK}",
+        "LAWYEREDOS_PYTHON": f".lawyeredos/{RUNNER_FILE}",
+        "LAWYEREDOS_CONFIG": ".lawyeredos/config.toml",
+        "Claude-only": "Codex-only",
+        "Claude-Only": "Codex-Only",
+        "Claude reviewers": "Codex reviewers",
+        "Claude Code": "Codex",
+    }
+    for path in sorted(destination.rglob("*")):
+        if not path.is_file():
+            continue
+        try:
+            transformed = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for old, new in replacements.items():
+            transformed = transformed.replace(old, new)
+        path.write_text(transformed, encoding="utf-8")
 
 
 def _prepare_payload(plugin: Path, modules: set[str]) -> None:

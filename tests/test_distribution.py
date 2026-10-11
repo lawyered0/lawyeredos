@@ -12,6 +12,8 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from urllib.parse import unquote
 
+from lawyeredos.codex_setup import _projectize_skill
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,6 +28,24 @@ def load_script(name: str):
 
 
 class DistributionTests(unittest.TestCase):
+    def test_codex_projectization_rewrites_nested_skill_references(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "lawyeredos-work-on-matter"
+            _projectize_skill(
+                ROOT / "skills" / "practice-work-on-matter",
+                destination,
+                "lawyeredos-work-on-matter",
+            )
+            nested = (destination / "references" / "mail-intake.md").read_text(encoding="utf-8")
+            boundaries = (
+                destination / "references" / "capability-boundaries.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn('".lawyeredos/lawyeredos-run" -m lawyeredos.mail_intake plan', nested)
+            self.assertIn(".lawyeredos/current-codex/scripts/extract_pdf.py", boundaries)
+            self.assertNotIn("LAWYEREDOS_ROOT", nested + boundaries)
+            self.assertNotIn("LAWYEREDOS_PYTHON", nested + boundaries)
+            self.assertNotIn("LAWYEREDOS_CONFIG", nested + boundaries)
+
     def test_setup_entrypoints_reject_old_python_before_core_import(self):
         for name in ("setup_wizard", "setup_codex"):
             text = (ROOT / "scripts" / f"{name}.py").read_text(encoding="utf-8")
