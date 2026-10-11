@@ -5,6 +5,18 @@ their own reviewed version and checksum boundaries.
 
 ## 0.2.1 beta.1 — unreleased
 
+- Add normalized, hash-bound From/To/Cc audience reconciliation with explicit
+  verified, mismatch, unknown, and ambiguous states. The result never grants
+  send, delivery, filing, service, signature, or account-mutation authority.
+- Add targeted one-lens, quick two-lens, and procedural micro-correspondence
+  review packets alongside the existing full four-lens mode. Each manifest,
+  task bundle, and report binds the exact ordered lens set and source hashes.
+- Bind the installed neutral letter template to a generated path/hash manifest
+  checked by setup validation and letter creation; private replacement
+  templates remain untrusted until separately reviewed and bound.
+- Add a fingerprint-checked Codex successful-upgrade rollback that restores
+  only installer-owned discovery and links while preserving configuration,
+  tracker and matter data, unrelated files, and both versioned cores.
 - Quote and escape the discovered Gmail `\\All` mailbox before issuing the
   read-only IMAP `EXAMINE` command, including localized names containing
   spaces, quotes, or backslashes.

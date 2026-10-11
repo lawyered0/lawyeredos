@@ -48,9 +48,21 @@ unmanaged skill collisions, symlinked managed directories, modified launchers,
 missing configuration, and unreviewed config replacement. A failed apply
 removes newly created paths and restores replaced managed links/files.
 
-There is no general Codex rollback command. If an accepted upgrade must be
-reversed, stop, preserve the workspace, and propose a reviewed migration back
-to the retained core; do not hand-edit symlinks or discovery state.
+After reviewing the managed workspace, the latest successful Codex upgrade can
+be rolled back with:
+
+```bash
+python3 scripts/setup_codex.py \
+  --workspace /absolute/path/to/workspace --rollback-upgrade --yes
+```
+
+This is not a general time-travel or uninstall command. It proceeds only when
+the current discovery record, managed links, and current/prior core
+fingerprints still match the recorded upgrade. It repoints only installer-owned
+links and restores prior discovery metadata; it does not replace configuration,
+tracker data, matter files, unrelated files, or either retained versioned core.
+Drift causes a refusal before mutation, and a discovery-write failure restores
+the upgraded link state.
 
 ## Disable without deleting data
 
