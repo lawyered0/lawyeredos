@@ -54,8 +54,10 @@ relevant reference prose, with independent reviewers assigned distinct sections.
 Only neutral generic behavior was rewritten for this candidate. Private source
 locators and examples are not included in the repository.
 
-Candidate checks are editorial, identity/text review and static file/link/catalog
-inspection. No project code, regression/security tests, build, installer, host
-workflow, live account, client matter, browser or website operation was executed.
-Read-only declared CLI/schema and host mapping inspection established interface
-limits; it is not runtime acceptance. See [release plan](WORKFLOW-RELEASE-PLAN.md).
+Initial candidate checks were editorial, identity/text review and static
+file/link/catalog inspection; no project code was executed during that phase.
+The separate `0.2.3 beta.1` release gate uses the existing unchanged CI/build/install
+acceptance procedure. Outcomes and exact artifact evidence must be reported,
+not inferred from prose coverage. No live-account, client-matter, browser or
+website result is claimed. Declared interface inspection alone is not runtime
+acceptance. See [release plan](WORKFLOW-RELEASE-PLAN.md).

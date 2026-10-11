@@ -3,7 +3,7 @@
 All notable source changes are recorded here. Published host packages retain
 their own reviewed version and checksum boundaries.
 
-## Unreleased — portable workflow instructions
+## 0.2.3 beta.1 — release candidate
 
 - Add shared scope, source-verification, client-advice/delivery, date,
   semantic-record/handoff and intake/closure contracts to existing workflows.
@@ -15,8 +15,9 @@ their own reviewed version and checksum boundaries.
   instructions without adding adapters, commands, schema fields or native setup
   module keys. All authoritative record changes keep existing approval gates.
 - Document all fifteen workflow gap dispositions, manual discovery dependencies
-  and release limits. No project/runtime tests, builds or host runs were performed
-  for this candidate; the published 0.2.2 beta.1 archives remain unchanged.
+  and release limits. The initial instruction review did not execute project
+  checks; ordinary unchanged release validation is a separate candidate gate.
+  The published 0.2.2 beta.1 archives remain unchanged.
 
 ## 0.2.2 beta.1 — 2026-10-11
 

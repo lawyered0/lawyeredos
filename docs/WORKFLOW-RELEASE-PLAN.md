@@ -1,9 +1,10 @@
 # Instruction candidate release plan
 
-This candidate is a documentation/instruction addition to the published
-`v0.2.2-beta.1` baseline. It is presented as a draft pull request for exact-source
-review. It changes no Python runtime, native installer/config mappings, database
-schema, published archive/checksum or website. No version is assigned here.
+This `0.2.3 beta.1` candidate is a documentation/instruction addition to the
+published `v0.2.2-beta.1` baseline. It is presented as a draft pull request for
+exact-source review. Only static package-version values change in Python;
+runtime behavior, native installer/config mappings, database schema, published
+archive/checksum and website remain unchanged.
 
 ## Candidate review performed in this scope
 
@@ -16,27 +17,29 @@ interface/catalog review checks named operations against
 declared public interfaces and the six existing host mappings. Diff whitespace
 checks do not substitute for runtime validation.
 
-The repository's ordinary test/build/host-acceptance procedure is deliberately
-not executed under this prose-only task. No runtime, regression/security test,
-installer, host trial or live connector result is claimed. The original published
-release remains available unchanged. A source PR is reviewable independently of
-new package acceptance.
+The initial prose-review phase did not execute project checks. Ordinary release
+validation now uses the existing unchanged CI/build/install acceptance commands,
+without adding an exploratory investigation. A planned or running check is not
+a pass. Exact-head outcomes, archive hash and installed-reference coverage must
+be reported before release approval. Live connectors and new substantive model
+behavior remain unverified unless separately established. The original published
+release remains available unchanged.
 
 ## Proposed next release steps
 
 1. Review the exact draft PR and the fifteen-area
    [disposition matrix](WORKFLOW-COMPLETENESS.md). Resolve editorial findings;
    do not infer unsupported operations from the new prose.
-2. Choose whether the next artifact is an explicitly manual instruction
-   supplement or a new host package. Native discovery of added modules needs
+2. Prepare host package candidate `v0.2.3-beta.1` with versioned Claude and Codex
+   archive names. Native discovery of added modules needs
    separately scoped installer/config/projectization work; it is not implemented
    by this candidate. Keep broader mail, legal computation and other integrations
    unavailable unless their own support is established.
-3. For a package, review its exact version, immutable files/checksum and an
-   authorized validation scope before building or installing it. Any ordinary
-   executable acceptance that cannot be performed within allowed scope remains
-   a disclosed release limitation, not a pass. Broader executable validation
-   requires its own allowed scope rather than being inferred from prose review.
+3. Review its exact source head, immutable archive checksum, the required strict
+   `test` status and ordinary validation results. Keep branch protection intact.
+   Any acceptance that cannot be performed within allowed scope remains a
+   disclosed limitation. A platform denial is reported without moving the denied
+   action to another execution route. Broader investigations remain separate.
 4. Preserve 0.2.2 beta.1 and all historical assets. Publish a new artifact only
    after maintainer review of that exact candidate; never replace released bytes.
 5. Update website/source/download links together only for the reviewed artifact.
