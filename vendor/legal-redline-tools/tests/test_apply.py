@@ -2,6 +2,7 @@
 
 import copy
 
+import pytest
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -24,6 +25,28 @@ from legal_redline.apply import (
 AUTHOR = "Test Reviewer"
 DATE = "2025-01-01T00:00:00Z"
 MC_ALTERNATE_CONTENT = "{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent"
+
+
+def test_apply_refuses_existing_and_symlink_outputs(tmp_dir):
+    source = tmp_dir / "source.docx"
+    doc = Document()
+    doc.add_paragraph("Invoices are payable within 30 days.")
+    doc.save(str(source))
+    redlines = [{"type": "replace", "old": "30 days", "new": "60 days"}]
+
+    existing = tmp_dir / "existing.docx"
+    existing.write_bytes(b"do not replace")
+    with pytest.raises(ValueError, match="output already exists"):
+        apply_redlines(str(source), str(existing), redlines, author=AUTHOR)
+    assert existing.read_bytes() == b"do not replace"
+
+    victim = tmp_dir / "victim.docx"
+    victim.write_bytes(b"victim")
+    linked = tmp_dir / "linked.docx"
+    linked.symlink_to(victim)
+    with pytest.raises(ValueError, match="output already exists"):
+        apply_redlines(str(source), str(linked), redlines, author=AUTHOR)
+    assert victim.read_bytes() == b"victim"
 
 
 def _para_xml_tags(para):
@@ -442,13 +465,12 @@ class TestPlacementUniqueness:
         assert span_occurrences(Document(str(src)), "payable within 30 days",
                                 whole_paragraph=True) == 2
         out = tmp_dir / "out.docx"
-        results = apply_redlines(str(src), str(out), [
-            {"type": "replace", "old": "payable within 30 days of receipt",
-             "new": "payable within 45 days of receipt", "section": "9.3"},
-        ], author=AUTHOR)
-        assert results[0][0] == "AMBIGUOUS"
-        assert _revision_tags(out) == _revision_tags(src) == (1, 0)
-        assert Document(str(out)).paragraphs[0].text == self.PAYMENT
+        with pytest.raises(ValueError, match="pre-existing revision/comment"):
+            apply_redlines(str(src), str(out), [
+                {"type": "replace", "old": "payable within 30 days of receipt",
+                 "new": "payable within 45 days of receipt", "section": "9.3"},
+            ], author=AUTHOR)
+        assert not out.exists()
 
     def test_occurrence_inside_a_hyperlink_counts(self, tmp_dir):
         src = _bridged_docx(tmp_dir, "link.docx", [_hyperlink("legal@example.test")],
@@ -462,19 +484,18 @@ class TestPlacementUniqueness:
         assert results[0][0] == "AMBIGUOUS"
         assert _revision_tags(out) == (0, 0)
 
-    def test_text_inside_an_existing_deletion_is_not_counted(self, tmp_dir):
-        """Deleted text is not in the agreement, so the live copy stays unique."""
+    def test_existing_deletion_refuses_a_new_redline(self, tmp_dir):
         src = _bridged_docx(tmp_dir, "deleted.docx",
                             [_counterparty("w:del", "within 30 days ")],
                             before="Late fees accrue ", after="after notice.",
                             extra=[self.PAYMENT])
         assert span_occurrences(Document(str(src)), "within 30 days") == 1
         out = tmp_dir / "out.docx"
-        results = apply_redlines(str(src), str(out), [
-            {"type": "replace", "old": "within 30 days", "new": "within 45 days"},
-        ], author=AUTHOR)
-        assert results[0][0] == "OK"
-        assert "del" in _para_xml_tags(Document(str(out)).paragraphs[1])
+        with pytest.raises(ValueError, match="pre-existing revision/comment"):
+            apply_redlines(str(src), str(out), [
+                {"type": "replace", "old": "within 30 days", "new": "within 45 days"},
+            ], author=AUTHOR)
+        assert not out.exists()
 
     def test_non_string_span_is_an_error_not_a_crash(self, tmp_dir):
         src = _docx(tmp_dir, "sections.docx", "12. Notices", "13. Term")
@@ -583,15 +604,11 @@ class TestHiddenInlineContent:
     def test_replace_across_counterparty_deletion_is_refused(self, tmp_dir):
         src = _bridged_docx(tmp_dir, "del.docx", [_counterparty("w:del", "not ")])
         out = tmp_dir / "out.docx"
-        results = apply_redlines(str(src), str(out), [
-            {"type": "replace", "old": "shall be liable", "new": "shall be liable only"},
-        ], author=AUTHOR)
-        assert results[0][0] == "ERROR"
-        assert "straddles an existing tracked change" in results[0][1]
-        para = Document(str(out)).paragraphs[0]
-        assert _para_xml_tags(para) == ["r", "del", "r"]
-        assert para._element.find(qn("w:del")).get(qn("w:author")) == "Opposing Counsel"
-        assert para.runs[0].text == "The Supplier shall "
+        with pytest.raises(ValueError, match="pre-existing revision/comment"):
+            apply_redlines(str(src), str(out), [
+                {"type": "replace", "old": "shall be liable", "new": "shall be liable only"},
+            ], author=AUTHOR)
+        assert not out.exists()
 
     def test_counterparty_insertion_and_hyperlink_are_refused(self, tmp_dir):
         cases = [
@@ -603,9 +620,14 @@ class TestHiddenInlineContent:
         for name, hidden, redline in cases:
             src = _bridged_docx(tmp_dir, name, hidden)
             out = tmp_dir / f"out-{name}"
-            results = apply_redlines(str(src), str(out), [redline], author=AUTHOR)
-            assert results[0][0] == "ERROR", name
-            assert len(Document(str(out)).paragraphs[0]._element) == 3, name
+            if name == "ins.docx":
+                with pytest.raises(ValueError, match="pre-existing revision/comment"):
+                    apply_redlines(str(src), str(out), [redline], author=AUTHOR)
+                assert not out.exists()
+            else:
+                results = apply_redlines(str(src), str(out), [redline], author=AUTHOR)
+                assert results[0][0] == "ERROR", name
+                assert len(Document(str(out)).paragraphs[0]._element) == 3, name
 
     def test_refusal_does_not_fall_through_to_a_later_clause(self, tmp_dir):
         src = _bridged_docx(tmp_dir, "later.docx", [_counterparty("w:del", "not ")],

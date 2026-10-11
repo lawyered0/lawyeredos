@@ -21,7 +21,11 @@ PYTHONPATH="$PKG" "${LAWYEREDOS_PYTHON:-python3}" -m legal_redline.cli apply \
 
 Use exact, unique text spans. The change-set JSON remains scratch material and
 must not contain internal rationale in a counterparty artifact. A failed or
-partial apply is not repaired by hand-editing OOXML.
+partial apply is not repaired by hand-editing OOXML. A source containing any
+pre-existing revision or comment markup is a distinct review state: stop and
+have the user choose an authoritative clean source or separately resolve the
+existing review. The engine refuses existing, duplicate, symlinked, or
+source-colliding output paths and stages all requested outputs before publishing.
 
 Verification requires:
 
@@ -40,6 +44,11 @@ Generate a clean copy and verify it separately:
 "${LAWYEREDOS_PYTHON:-python3}" "${LAWYEREDOS_ROOT}/scripts/render_docx.py" clean.docx \
   --output-dir "<empty clean render directory>"
 ```
+
+The clean-copy helper accepts insertion/deletion/move wrappers, removes the
+track-revisions setting, validates the entire Word XML package, and fails
+without output if comments, unsupported property revisions, or any residual
+revision/tracking marker remain.
 
 Persist only requested, verified, versioned outputs with the
 guarded writer. Never send or negotiate.

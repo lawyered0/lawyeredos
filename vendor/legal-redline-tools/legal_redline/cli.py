@@ -4,10 +4,12 @@ import argparse
 import json
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 from docx import Document
 
-from legal_redline.apply import apply_redlines, placement_problems
+from legal_redline.apply import apply_redlines, existing_review_markup, placement_problems
 from legal_redline.compare import compare_agreements, format_comparison_report
 from legal_redline.diff import diff_documents
 from legal_redline.markdown import generate_markdown
@@ -16,6 +18,10 @@ from legal_redline.remap import remap_redlines
 from legal_redline.render import render_redline_pdf
 from legal_redline.scan import scan_document
 from legal_redline.summary import generate_summary_pdf
+
+
+class OutputIsInputError(ValueError):
+    pass
 
 
 def main():
@@ -160,6 +166,34 @@ def _cmd_apply(args):
               "--insert-after, or --from-json.")
         sys.exit(1)
 
+    outputs = {
+        "docx": None if args.no_docx else args.output,
+        "pdf": args.pdf,
+        "summary": args.summary_pdf,
+        "memo": args.memo_pdf,
+        "markdown": args.markdown,
+    }
+    try:
+        _validate_output_targets(args.input, outputs.values())
+        review_markers = existing_review_markup(args.input)
+    except OutputIsInputError as exc:
+        print(f"Error: {exc}. Nothing was generated.")
+        sys.exit(1)
+    except (OSError, ValueError) as exc:
+        print(f"Error: {exc}. Nothing was generated.")
+        sys.exit(2)
+    if review_markers:
+        print("Error: input contains pre-existing revision/comment markup; resolve "
+              "it before applying a new redline: " + ", ".join(review_markers))
+        print("Nothing was generated.")
+        sys.exit(2)
+
+    staging = tempfile.TemporaryDirectory(prefix="legal-redline-")
+    staged = {
+        name: str(Path(staging.name) / f"{name}{Path(path).suffix or '.tmp'}")
+        for name, path in outputs.items() if path
+    }
+
     # 2026-10-07: a repeated span changed the first clause holding it while the
     # schedule named the intended section. Refuse before any output is written.
     problems = placement_problems(Document(args.input), redlines)
@@ -183,13 +217,13 @@ def _cmd_apply(args):
                   "a new path. Nothing was generated.")
             sys.exit(1)
         print("--- .docx with tracked changes ---")
-        results = apply_redlines(args.input, args.output, redlines, args.author)
+        results = apply_redlines(args.input, staged["docx"], redlines, args.author)
         print()
         # 2026-10-07: a partial run exited 0 and the schedule, markdown and PDF
         # were still built from the JSON, listing changes the DOCX did not take.
         unapplied = [(status, desc) for status, desc in results if status != "OK"]
         if unapplied:
-            os.remove(args.output)
+            os.remove(staged["docx"])
             print(f"FAILED: {len(unapplied)} of {len(redlines)} change(s) not applied:")
             for status, desc in unapplied:
                 print(f"  [{status}] {desc}")
@@ -204,7 +238,7 @@ def _cmd_apply(args):
     if args.pdf:
         print("--- Full-document redline PDF ---")
         render_redline_pdf(
-            args.input, redlines, args.pdf,
+            args.input, redlines, staged["pdf"],
             header_text=args.header or args.doc_title,
             author=args.author,
         )
@@ -214,7 +248,7 @@ def _cmd_apply(args):
     if args.summary_pdf:
         print("--- Summary redline PDF ---")
         generate_summary_pdf(
-            redlines, args.summary_pdf,
+            redlines, staged["summary"],
             doc_title=args.doc_title,
             author=args.author,
             doc_parties=args.doc_parties,
@@ -226,7 +260,7 @@ def _cmd_apply(args):
     if args.memo_pdf:
         print("--- Internal memo PDF ---")
         generate_memo_pdf(
-            redlines, args.memo_pdf,
+            redlines, staged["memo"],
             doc_title=args.doc_title,
             author=args.author,
             doc_parties=args.doc_parties,
@@ -243,9 +277,93 @@ def _cmd_apply(args):
             doc_parties=args.doc_parties,
             mode=args.mode,
         )
-        with open(args.markdown, "w") as f:
+        with open(staged["markdown"], "w") as f:
             f.write(md)
         print(f"Markdown: {args.markdown}")
+
+    try:
+        _publish_all_new([
+            (Path(staged[name]), Path(final_path))
+            for name, final_path in outputs.items() if final_path
+        ])
+    except (OSError, ValueError) as exc:
+        print(f"Error: {exc}. Staged outputs were not allowed to overwrite the target.")
+        sys.exit(2)
+    finally:
+        staging.cleanup()
+
+
+def _reject_symlink_parents(path):
+    if path.parent.is_symlink():
+        raise ValueError(f"output parent must not be a symlink: {path.parent}")
+
+
+def _validate_output_targets(input_path, output_paths):
+    source = Path(input_path).expanduser().absolute()
+    seen = set()
+    for raw in output_paths:
+        if not raw:
+            continue
+        path = Path(raw).expanduser().absolute()
+        key = os.path.normcase(str(path))
+        if key in seen:
+            raise ValueError(f"output paths must be distinct: {path}")
+        seen.add(key)
+        if key == os.path.normcase(str(source)):
+            raise OutputIsInputError("an output path is the input file")
+        if path.exists() or path.is_symlink():
+            raise ValueError(f"output already exists: {path}")
+        if not path.parent.is_dir():
+            raise ValueError(f"output parent does not exist: {path.parent}")
+        _reject_symlink_parents(path)
+
+
+def _unlink_reserved(output, descriptor):
+    try:
+        opened = os.fstat(descriptor)
+        current = output.stat(follow_symlinks=False)
+        if (opened.st_dev, opened.st_ino) == (current.st_dev, current.st_ino):
+            output.unlink()
+    except OSError:
+        pass
+
+
+def _publish_all_new(items):
+    """Reserve every target exclusively before writing any staged bytes."""
+    reservations = []
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        for staged, raw_output in items:
+            output = raw_output.expanduser().absolute()
+            _reject_symlink_parents(output)
+            try:
+                descriptor = os.open(output, flags, 0o600)
+            except FileExistsError as exc:
+                raise ValueError(f"output already exists: {output}") from exc
+            reservations.append((staged, output, descriptor))
+        for staged, _, descriptor in reservations:
+            with staged.open("rb") as source:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    remaining = memoryview(chunk)
+                    while remaining:
+                        written = os.write(descriptor, remaining)
+                        remaining = remaining[written:]
+                os.fsync(descriptor)
+    except BaseException:
+        for _, output, descriptor in reservations:
+            _unlink_reserved(output, descriptor)
+        raise
+    finally:
+        for _, _, descriptor in reservations:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
 def _cmd_diff(args):

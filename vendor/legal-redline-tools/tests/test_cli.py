@@ -64,8 +64,7 @@ def test_unapplied_change_exits_2_and_writes_nothing(tmp_dir, monkeypatch, capsy
     assert not any(path.exists() for path in out.values())
 
 
-def test_straddled_revision_is_reported_as_such(tmp_dir, monkeypatch, capsys):
-    """An ERROR is not blamed on the engine's reach into tables and footers."""
+def test_preexisting_revision_is_refused_before_output(tmp_dir, monkeypatch, capsys):
     src = tmp_dir / "del.docx"
     doc = Document()
     para = doc.add_paragraph("The Supplier shall ")
@@ -88,7 +87,7 @@ def test_straddled_revision_is_reported_as_such(tmp_dir, monkeypatch, capsys):
     out = _outputs(tmp_dir)
     assert _run(monkeypatch, *_args(src, out, redlines)) == 2
     printed = capsys.readouterr().out
-    assert "[ERROR]" in printed and "straddles an existing tracked change" in printed
+    assert "pre-existing revision/comment markup" in printed
     assert "body paragraphs only" not in printed
     assert not any(path.exists() for path in out.values())
 
@@ -145,6 +144,31 @@ def test_output_must_not_be_the_input(tmp_dir, monkeypatch):
                 "--replace", "30 days", "60 days")
     assert code == 1
     assert src.read_bytes() == before
+
+
+def test_existing_or_symlink_output_is_refused_before_any_output(tmp_dir, monkeypatch, capsys):
+    src = _source(tmp_dir, "Invoices are payable within 30 days.")
+    redlines = tmp_dir / "redlines.json"
+    redlines.write_text(json.dumps([
+        {"type": "replace", "old": "30 days", "new": "60 days"},
+    ]))
+    out = _outputs(tmp_dir)
+    out["summary"].write_bytes(b"existing summary")
+    assert _run(monkeypatch, *_args(src, out, redlines)) == 2
+    assert out["summary"].read_bytes() == b"existing summary"
+    assert not out["docx"].exists()
+    assert not out["markdown"].exists()
+    assert "output already exists" in capsys.readouterr().out
+
+    out["summary"].unlink()
+    victim = tmp_dir / "victim.docx"
+    victim.write_bytes(b"source-like bytes")
+    out["docx"].symlink_to(victim)
+    assert _run(monkeypatch, *_args(src, out, redlines)) == 2
+    assert victim.read_bytes() == b"source-like bytes"
+    assert out["docx"].is_symlink()
+    assert not out["summary"].exists()
+    assert not out["markdown"].exists()
 
 
 def test_full_apply_writes_every_requested_output(tmp_dir, monkeypatch, capsys):

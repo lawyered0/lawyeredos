@@ -1,8 +1,13 @@
 """Apply tracked changes (redlines) to Word documents via OOXML manipulation."""
 
 import copy
+import io
+import os
 import re
+import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
+from xml.etree import ElementTree
 
 from docx import Document
 from docx.oxml import OxmlElement
@@ -12,6 +17,72 @@ from docx.text.run import Run
 
 
 _rev_id_counter = 100000
+_WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_EXISTING_REVIEW_ELEMENTS = {
+    "ins", "del", "moveFrom", "moveTo", "moveFromRangeStart",
+    "moveFromRangeEnd", "moveToRangeStart", "moveToRangeEnd", "cellIns",
+    "cellDel", "cellMerge", "conflictIns", "conflictDel",
+    "customXmlInsRangeStart", "customXmlInsRangeEnd",
+    "customXmlDelRangeStart", "customXmlDelRangeEnd", "customXmlMoveFromRangeStart",
+    "customXmlMoveFromRangeEnd", "customXmlMoveToRangeStart",
+    "customXmlMoveToRangeEnd", "numberingChange", "pPrChange", "rPrChange",
+    "sectPrChange", "tblPrChange", "tblGridChange", "trPrChange", "tcPrChange",
+    "commentRangeStart", "commentRangeEnd", "commentReference",
+}
+
+
+def existing_review_markup(input_path):
+    """Return revision/comment markers found anywhere in a DOCX package."""
+    markers = set()
+    with zipfile.ZipFile(input_path) as package:
+        for name in package.namelist():
+            if name.startswith("word/comments") and name.endswith(".xml"):
+                markers.add("comments part")
+            if not name.startswith("word/") or not name.endswith(".xml"):
+                continue
+            root = ElementTree.fromstring(package.read(name))
+            for element in root.iter():
+                if not element.tag.startswith(f"{{{_WORD_NS}}}"):
+                    continue
+                local = element.tag.rsplit("}", 1)[-1]
+                if local in _EXISTING_REVIEW_ELEMENTS:
+                    markers.add(local)
+    return sorted(markers)
+
+
+def _reject_symlink_parents(path):
+    if path.parent.is_symlink():
+        raise ValueError(f"output parent must not be a symlink: {path.parent}")
+
+
+def _save_document_new(doc, output_path):
+    """Serialize then create output exclusively; never follow or replace a link."""
+    path = Path(output_path).expanduser().absolute()
+    if path.exists() or path.is_symlink():
+        raise ValueError(f"output already exists: {path}")
+    if not path.parent.is_dir():
+        raise ValueError(f"output parent does not exist: {path.parent}")
+    _reject_symlink_parents(path)
+    staged = io.BytesIO()
+    doc.save(staged)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError as exc:
+        raise ValueError(f"output already exists: {path}") from exc
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(staged.getvalue())
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def next_rev_id():
@@ -591,7 +662,16 @@ def apply_redlines(input_path, output_path, redlines, author="Reviewer"):
     Returns:
         List of (status, description) tuples
     """
-    doc = Document(input_path)
+    source = Path(input_path).expanduser().absolute()
+    if not source.is_file() or source.is_symlink():
+        raise ValueError("input must be a regular, non-symlink DOCX file")
+    existing = existing_review_markup(source)
+    if existing:
+        raise ValueError(
+            "input contains pre-existing revision/comment markup; resolve it before "
+            "applying a new redline: " + ", ".join(existing)
+        )
+    doc = Document(source)
     enable_track_revisions(doc)
 
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -670,7 +750,7 @@ def apply_redlines(input_path, output_path, redlines, author="Reviewer"):
             results.append(("ERROR", desc))
             print(f"  [ERROR] {desc}")
 
-    doc.save(output_path)
+    _save_document_new(doc, output_path)
     print(f"\nSaved: {output_path}")
     print(f"Applied: {sum(1 for s, _ in results if s == 'OK')}/{len(results)} redlines")
     return results
