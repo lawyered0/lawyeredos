@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
+import io
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 from xml.etree import ElementTree
 
 
@@ -105,8 +109,17 @@ class DocumentSafetyTests(unittest.TestCase):
 
             linked_template = folder / "linked-template.docx"
             linked_template.symlink_to(template)
-            with self.assertRaisesRegex(ValueError, "template must be a regular file"):
+            with self.assertRaisesRegex(ValueError, "template must be a regular, non-symlink file"):
                 creator.create(letter_args(linked_template, body, output))
+            self.assertFalse(output.exists())
+
+            property_template = self._template(folder)
+            document = Document(property_template)
+            paragraph = document.paragraphs[0]
+            paragraph._p.get_or_add_pPr().append(OxmlElement("w:tblPrExChange"))
+            document.save(property_template)
+            with self.assertRaisesRegex(ValueError, "revision marker tblPrExChange"):
+                creator.create(letter_args(property_template, body, output))
             self.assertFalse(output.exists())
 
     def test_acceptance_removes_revisions_and_track_revisions_setting(self):
@@ -147,7 +160,7 @@ class DocumentSafetyTests(unittest.TestCase):
         from docx.oxml import OxmlElement
 
         accepter = load_script("accept_tracked_changes")
-        for marker in ("w:commentReference", "w:pPrChange"):
+        for marker in ("w:commentReference", "w:pPrChange", "w:tblPrExChange"):
             with self.subTest(marker=marker), tempfile.TemporaryDirectory() as temporary:
                 folder = Path(temporary)
                 source = folder / "source.docx"
@@ -162,6 +175,33 @@ class DocumentSafetyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "cannot be safely accepted"):
                     accepter.accept(source, output)
                 self.assertFalse(output.exists())
+
+    def test_acceptance_refuses_deleted_embedded_content(self):
+        from docx import Document
+        from docx.oxml import OxmlElement
+
+        accepter = load_script("accept_tracked_changes")
+        pixel = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / "source.docx"
+            output = folder / "accepted.docx"
+            document = Document()
+            paragraph = document.add_paragraph("Deleted exhibit: ")
+            run = paragraph.add_run()
+            run.add_picture(io.BytesIO(pixel))
+            paragraph._p.remove(run._r)
+            deletion = OxmlElement("w:del")
+            deletion.append(run._r)
+            paragraph._p.append(deletion)
+            document.save(source)
+            with zipfile.ZipFile(source) as package:
+                self.assertTrue(any(name.startswith("word/media/") for name in package.namelist()))
+            with self.assertRaisesRegex(ValueError, "external/package content"):
+                accepter.accept(source, output)
+            self.assertFalse(output.exists())
 
     def test_letter_output_collision_and_symlink_leave_target_unchanged(self):
         creator = load_script("create_letter")
@@ -183,6 +223,20 @@ class DocumentSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "output already exists"):
                 creator.create(letter_args(template, body, link))
             self.assertEqual(victim.read_bytes(), b"victim")
+
+            target_dir = folder / "target" / "nested"
+            target_dir.mkdir(parents=True)
+            alias = folder / "alias"
+            alias.symlink_to(folder / "target", target_is_directory=True)
+            nested_output = alias / "nested" / "letter.docx"
+            with self.assertRaisesRegex(ValueError, "must not contain a symlink"):
+                creator.create(letter_args(template, body, nested_output))
+            self.assertFalse((target_dir / "letter.docx").exists())
+
+            missing_output = alias / "new-directory" / "letter.docx"
+            with self.assertRaisesRegex(ValueError, "must not contain a symlink"):
+                creator.create(letter_args(template, body, missing_output))
+            self.assertFalse((folder / "target" / "new-directory").exists())
 
     def test_acceptance_output_collision_and_symlink_leave_target_unchanged(self):
         from docx import Document
@@ -208,6 +262,177 @@ class DocumentSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "output already exists"):
                 accepter.accept(source, link)
             self.assertEqual(victim.read_bytes(), b"victim")
+
+            target_dir = folder / "target" / "nested"
+            target_dir.mkdir(parents=True)
+            alias = folder / "alias"
+            alias.symlink_to(folder / "target", target_is_directory=True)
+            nested_output = alias / "nested" / "accepted.docx"
+            with self.assertRaisesRegex(ValueError, "must not contain a symlink"):
+                accepter.accept(source, nested_output)
+            self.assertFalse((target_dir / "accepted.docx").exists())
+
+            missing_output = alias / "new-directory" / "accepted.docx"
+            with self.assertRaisesRegex(ValueError, "must not contain a symlink"):
+                accepter.accept(source, missing_output)
+            self.assertFalse((folder / "target" / "new-directory").exists())
+
+    def test_script_cleanup_preserves_concurrent_replacement(self):
+        for helper_name in ("create_letter", "accept_tracked_changes"):
+            with self.subTest(helper=helper_name), tempfile.TemporaryDirectory() as temporary:
+                helper = load_script(helper_name)
+                output = Path(temporary) / "output.docx"
+
+                def replace_then_fail(_descriptor):
+                    output.write_bytes(b"concurrent replacement")
+                    raise OSError("fictional fsync failure")
+
+                with mock.patch.object(helper.os, "fsync", side_effect=replace_then_fail):
+                    with self.assertRaisesRegex(OSError, "fictional fsync failure"):
+                        helper._write_new(output, b"generated bytes")
+                self.assertEqual(output.read_bytes(), b"concurrent replacement")
+
+    def test_letter_scans_whole_package_drafting_markers_but_allows_citations(self):
+        from docx import Document
+
+        creator = load_script("create_letter")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            template = self._template(folder)
+            document = Document(template)
+            document.sections[0].footer.paragraphs[0].text = "[VERIFY]"
+            document.save(template)
+            body = folder / "body.txt"
+            body.write_text("See Example v Sample, [2024] 1 Fictional R 2.", encoding="utf-8")
+            output = folder / "letter.docx"
+            with self.assertRaisesRegex(ValueError, r"\[VERIFY\]"):
+                creator.create(letter_args(template, body, output))
+            self.assertFalse(output.exists())
+
+            template = self._template(folder)
+            body.write_text("Confirm the TK deadline.", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "drafting marker: TK"):
+                creator.create(letter_args(template, body, output))
+            self.assertFalse(output.exists())
+
+            body.write_text("See Example v Sample, [2024] 1 Fictional R 2.", encoding="utf-8")
+            creator.create(letter_args(template, body, output))
+            self.assertTrue(output.is_file())
+
+    def test_letter_uses_the_same_template_bytes_it_scanned(self):
+        from docx import Document
+
+        creator = load_script("create_letter")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            template = self._template(folder)
+            body = folder / "body.txt"
+            body.write_text("Fictional body.", encoding="utf-8")
+            output = folder / "letter.docx"
+            original_scan = creator.package_review_markers
+            calls = 0
+
+            def swap_after_scan(package):
+                nonlocal calls
+                result = original_scan(package)
+                calls += 1
+                if calls == 1:
+                    replacement = Document()
+                    replacement.add_paragraph("SWAPPED SOURCE")
+                    replacement.add_paragraph("{{BODY}}")
+                    replacement.save(template)
+                return result
+
+            with mock.patch.object(creator, "package_review_markers", side_effect=swap_after_scan):
+                creator.create(letter_args(template, body, output))
+            rendered = "\n".join(paragraph.text for paragraph in Document(output).paragraphs)
+            self.assertNotIn("SWAPPED SOURCE", rendered)
+            self.assertIn("Fictional body.", rendered)
+
+    def test_document_clis_sanitize_truncated_packages_without_output(self):
+        creator = load_script("create_letter")
+        accepter = load_script("accept_tracked_changes")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            broken = folder / "broken.docx"
+            broken.write_bytes(b"PK\x03\x04truncated")
+            body = folder / "body.txt"
+            body.write_text("Fictional body.", encoding="utf-8")
+            letter_output = folder / "letter.docx"
+            clean_output = folder / "clean.docx"
+
+            creator_argv = [
+                "create_letter.py", "--template", str(broken), "--body-file", str(body),
+                "--output", str(letter_output), "--organization", "Northstar Legal Lab",
+                "--date", "October 11, 2026", "--recipient", "Alex Example",
+                "--address", "100 Example Street", "--subject", "Fictional matter",
+                "--signoff", "Example Counsel",
+            ]
+            output = io.StringIO()
+            with mock.patch("sys.argv", creator_argv), redirect_stdout(output):
+                self.assertEqual(creator.main(), 2)
+            self.assertIn("error:", output.getvalue())
+            self.assertFalse(letter_output.exists())
+
+            output = io.StringIO()
+            with mock.patch("sys.argv", [
+                "accept_tracked_changes.py", str(broken), "--output", str(clean_output),
+            ]), redirect_stdout(output):
+                self.assertEqual(accepter.main(), 2)
+            self.assertIn("error:", output.getvalue())
+            self.assertFalse(clean_output.exists())
+
+            with zipfile.ZipFile(broken, "w") as package:
+                package.writestr("notes.txt", "not a Word package")
+            output = io.StringIO()
+            with mock.patch("sys.argv", creator_argv), redirect_stdout(output):
+                self.assertEqual(creator.main(), 2)
+            self.assertIn("not a valid Word DOCX package", output.getvalue())
+            self.assertFalse(letter_output.exists())
+            output = io.StringIO()
+            with mock.patch("sys.argv", [
+                "accept_tracked_changes.py", str(broken), "--output", str(clean_output),
+            ]), redirect_stdout(output):
+                self.assertEqual(accepter.main(), 2)
+            self.assertIn("not a valid Word DOCX package", output.getvalue())
+            self.assertFalse(clean_output.exists())
+
+            with zipfile.ZipFile(broken, "w") as package:
+                package.writestr("[Content_Types].xml", "<Types/>")
+                package.writestr("_rels/.rels", "<Relationships/>")
+                package.writestr("word/document.xml", "<document/>")
+            output = io.StringIO()
+            with mock.patch("sys.argv", creator_argv), redirect_stdout(output):
+                self.assertEqual(creator.main(), 2)
+            self.assertIn("not a valid Word DOCX package", output.getvalue())
+            self.assertFalse(letter_output.exists())
+            output = io.StringIO()
+            with mock.patch("sys.argv", [
+                "accept_tracked_changes.py", str(broken), "--output", str(clean_output),
+            ]), redirect_stdout(output):
+                self.assertEqual(accepter.main(), 2)
+            self.assertIn("not a valid Word DOCX package", output.getvalue())
+            self.assertFalse(clean_output.exists())
+
+    def test_document_snapshot_limits_fail_before_output(self):
+        creator = load_script("create_letter")
+        accepter = load_script("accept_tracked_changes")
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            oversized = folder / "oversized"
+            oversized.write_bytes(b"x" * 65)
+            with mock.patch.object(creator, "MAX_DOCX_BYTES", 64):
+                with self.assertRaisesRegex(ValueError, "64-byte safety limit"):
+                    creator._read_regular_bytes(oversized, "template", creator.MAX_DOCX_BYTES)
+            with mock.patch.object(accepter, "MAX_DOCX_BYTES", 64):
+                with self.assertRaisesRegex(ValueError, "64-byte safety limit"):
+                    accepter._read_regular_bytes(oversized)
+
+            template = self._template(folder)
+            with zipfile.ZipFile(template) as package:
+                with mock.patch.object(creator, "MAX_DOCX_UNCOMPRESSED_BYTES", 64):
+                    with self.assertRaisesRegex(ValueError, "uncompressed safety limit"):
+                        creator._validate_docx_package(package)
 
 
 if __name__ == "__main__":

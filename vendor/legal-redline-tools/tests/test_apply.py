@@ -1,6 +1,7 @@
 """Tests for tracked change application."""
 
 import copy
+import importlib
 
 import pytest
 from docx import Document
@@ -47,6 +48,65 @@ def test_apply_refuses_existing_and_symlink_outputs(tmp_dir):
     with pytest.raises(ValueError, match="output already exists"):
         apply_redlines(str(source), str(linked), redlines, author=AUTHOR)
     assert victim.read_bytes() == b"victim"
+
+    target_dir = tmp_dir / "target" / "nested"
+    target_dir.mkdir(parents=True)
+    alias = tmp_dir / "alias"
+    alias.symlink_to(tmp_dir / "target", target_is_directory=True)
+    nested = alias / "nested" / "redlined.docx"
+    with pytest.raises(ValueError, match="must not contain a symlink"):
+        apply_redlines(str(source), str(nested), redlines, author=AUTHOR)
+    assert not (target_dir / "redlined.docx").exists()
+
+
+def test_apply_cleanup_preserves_concurrent_replacement(tmp_dir, monkeypatch):
+    source = tmp_dir / "source.docx"
+    output = tmp_dir / "output.docx"
+    doc = Document()
+    doc.add_paragraph("Invoices are payable within 30 days.")
+    doc.save(str(source))
+
+    apply_module = importlib.import_module("legal_redline.apply")
+
+    def replace_then_fail(_descriptor):
+        output.write_bytes(b"concurrent replacement")
+        raise OSError("fictional fsync failure")
+
+    monkeypatch.setattr(apply_module.os, "fsync", replace_then_fail)
+    with pytest.raises(OSError, match="fictional fsync failure"):
+        apply_redlines(
+            str(source), str(output),
+            [{"type": "replace", "old": "30 days", "new": "60 days"}],
+            author=AUTHOR,
+        )
+    assert output.read_bytes() == b"concurrent replacement"
+
+
+def test_apply_uses_the_same_source_bytes_it_scanned(tmp_dir, monkeypatch):
+    source = tmp_dir / "source.docx"
+    output = tmp_dir / "output.docx"
+    doc = Document()
+    doc.add_paragraph("Invoices are payable within 30 days.")
+    doc.save(str(source))
+
+    apply_module = importlib.import_module("legal_redline.apply")
+    original_scan = apply_module.existing_review_markup
+
+    def swap_after_scan(source_bytes):
+        result = original_scan(source_bytes)
+        replacement = Document()
+        replacement.add_paragraph("SWAPPED SOURCE")
+        replacement.save(str(source))
+        return result
+
+    monkeypatch.setattr(apply_module, "existing_review_markup", swap_after_scan)
+    results = apply_redlines(
+        str(source), str(output),
+        [{"type": "replace", "old": "30 days", "new": "60 days"}],
+        author=AUTHOR,
+    )
+    assert results[0][0] == "OK"
+    assert "SWAPPED SOURCE" not in Document(str(output)).paragraphs[0].text
 
 
 def _para_xml_tags(para):
