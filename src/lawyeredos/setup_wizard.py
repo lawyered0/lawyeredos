@@ -92,8 +92,8 @@ def package_digest(root: Path) -> str:
     return digest.hexdigest()
 
 
-def managed_fingerprint(path: Path) -> str:
-    """Hash a managed file or directory without following symlinks."""
+def legacy_managed_fingerprint(path: Path) -> str:
+    """Released v1 typed hash, retained only to verify older rollback state."""
     digest = hashlib.sha256()
     if path.is_symlink():
         digest.update(b"symlink\0")
@@ -122,6 +122,44 @@ def managed_fingerprint(path: Path) -> str:
         content = item.read_bytes()
         digest.update(len(content).to_bytes(8, "big"))
         digest.update(content)
+    return digest.hexdigest()
+
+
+def managed_fingerprint(path: Path) -> str:
+    """Hash every included filesystem entry without following symlinks."""
+    digest = hashlib.sha256()
+    if path.is_symlink():
+        digest.update(b"symlink\0")
+        digest.update(os.readlink(path).encode())
+        return digest.hexdigest()
+    if path.is_file():
+        digest.update(b"file\0")
+        digest.update(path.read_bytes())
+        return digest.hexdigest()
+    if not path.is_dir():
+        raise ValueError(f"managed path is unavailable or has an unsupported type: {path}")
+    digest.update(b"directory-v2\0")
+    for item in sorted(path.rglob("*")):
+        relative_path = item.relative_to(path)
+        if any(part in EXCLUDE for part in relative_path.parts):
+            continue
+        if item.name.endswith((".pyc", ".pyo", ".egg-info")):
+            continue
+        relative = relative_path.as_posix().encode()
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        if item.is_symlink():
+            raise ValueError(f"managed directory contains a symlink: {item}")
+        if item.is_dir():
+            digest.update(b"directory\0")
+            continue
+        if item.is_file():
+            digest.update(b"file\0")
+            content = item.read_bytes()
+            digest.update(len(content).to_bytes(8, "big"))
+            digest.update(content)
+            continue
+        raise ValueError(f"managed directory contains an unsupported filesystem entry: {item}")
     return digest.hexdigest()
 
 
@@ -304,6 +342,23 @@ def _prepare_project_payload(plugin: Path, modules: set[str]) -> Path:
     return root
 
 
+def expected_claude_plugin_fingerprint(source: Path, modules: tuple[str, ...], digest: str) -> str:
+    with tempfile.TemporaryDirectory() as temporary:
+        plugin = Path(temporary) / "plugin"
+        shutil.copytree(source, plugin, ignore=_ignored)
+        selected = set(modules)
+        for module, skill in MODULE_SKILLS.items():
+            if module not in selected:
+                shutil.rmtree(plugin / "skills" / skill)
+        if "review" not in selected:
+            shutil.rmtree(plugin / "agents")
+        _prepare_project_payload(plugin, selected)
+        (plugin / ".lawyeredos-package.json").write_text(json.dumps({
+            "version": VERSION, "digest": digest, "modules": list(modules),
+        }, indent=2) + "\n", encoding="utf-8")
+        return managed_fingerprint(plugin)
+
+
 def dependency_report(modules: tuple[str, ...] = ()) -> list[dict[str, str | bool]]:
     checks: list[dict[str, str | bool]] = []
     selected = set(modules)
@@ -476,6 +531,9 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     digest = package_digest(source)
     selection_digest = hashlib.sha256(",".join(effective.modules).encode()).hexdigest()
     plugin_target = setup_root / "plugins" / f"lawyeredos-{VERSION}-{digest[:8]}-{selection_digest[:6]}"
+    plugin_fingerprint = expected_claude_plugin_fingerprint(source, effective.modules, digest)
+    if plugin_target.exists() and managed_fingerprint(plugin_target) != plugin_fingerprint:
+        raise ValueError(f"installed versioned plugin content changed: {plugin_target}")
     launcher = setup_root / "launch-lawyeredos.sh"
     terminal_launcher = setup_root / "launch-lawyeredos-terminal.sh"
     claude_root = workspace / ".claude"
@@ -553,6 +611,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "require_new_workspace": require_new_workspace,
         "package_version": VERSION,
         "package_digest": digest,
+        "plugin_fingerprint": plugin_fingerprint,
         "selection_digest": selection_digest,
         "source": str(source),
         "workspace": str(workspace),
@@ -821,6 +880,8 @@ def apply_plan(plan: dict) -> dict:
         if (path.exists() or path.is_symlink()) and str(path) not in current_managed:
             raise ValueError(f"Claude discovery target appeared after preview and is not managed: {path}")
     marker = plugin / ".lawyeredos-package.json"
+    if plugin.exists() and managed_fingerprint(plugin) != plan["plugin_fingerprint"]:
+        raise ValueError(f"installed versioned plugin content changed after preview: {plugin}")
     if plugin.exists() and (
         not marker.is_file()
         or json.loads(marker.read_text(encoding="utf-8")).get("digest") != plan["package_digest"]
@@ -867,6 +928,8 @@ def apply_plan(plan: dict) -> dict:
             "version": VERSION, "digest": plan["package_digest"],
             "modules": plan["answers"]["modules"],
         }, indent=2) + "\n", encoding="utf-8")
+        if managed_fingerprint(plugin) != plan["plugin_fingerprint"]:
+            raise ValueError(f"installed versioned plugin does not match the approved build: {plugin}")
         changed.append(str(plugin))
 
     project_paths = {Path(path) for path in plan["project_skills"].values()}
@@ -987,7 +1050,7 @@ def apply_plan(plan: dict) -> dict:
             plugin,
         }
         state = {
-            "schema_version": 1, "transaction_id": transaction_id,
+            "schema_version": 1, "fingerprint_version": 2, "transaction_id": transaction_id,
             "package_version": VERSION, "package_digest": plan["package_digest"],
             "selection_digest": plan["selection_digest"],
             "created": created, "backups": backups, "changed": changed,
@@ -1105,7 +1168,8 @@ def rollback(workspace: Path) -> dict:
         if expected is None or not path.exists():
             return False
         try:
-            return managed_fingerprint(path) == expected
+            fingerprint = managed_fingerprint if state.get("fingerprint_version") == 2 else legacy_managed_fingerprint
+            return fingerprint(path) == expected
         except (OSError, ValueError):
             return False
 

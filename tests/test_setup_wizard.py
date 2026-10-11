@@ -546,10 +546,9 @@ class SetupWizardTests(unittest.TestCase):
     def test_upgrade_keeps_old_plugin_and_updates_launcher(self):
         first = apply_plan(build_plan(self.answers()))
         old_plugin = Path(first["plugin"])
-        plan = build_plan(self.answers())
-        plan["package_digest"] = "f" * 64
-        new_plugin = Path(plan["setup_root"]) / "plugins" / f"lawyeredos-0.2.1-{'f' * 8}-upgrade"
-        plan["plugin"] = str(new_plugin)
+        with patch("lawyeredos.setup_wizard.package_digest", return_value="f" * 64):
+            plan = build_plan(self.answers())
+        new_plugin = Path(plan["plugin"])
         upgraded = apply_plan(plan)
         self.assertTrue(old_plugin.is_dir())
         self.assertTrue(new_plugin.is_dir())
@@ -558,6 +557,53 @@ class SetupWizardTests(unittest.TestCase):
         project_skill = self.workspace / ".claude" / "skills" / "lawyeredos-work-on-matter"
         self.assertTrue(project_skill.is_symlink())
         self.assertTrue(str(project_skill.resolve()).startswith(str(new_plugin)))
+
+    def test_repeat_install_rejects_tampered_versioned_plugin(self):
+        first = apply_plan(build_plan(self.answers()))
+        skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\nprivate tamper\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "versioned plugin content changed"):
+            build_plan(self.answers())
+        self.assertIn("private tamper", skill.read_text(encoding="utf-8"))
+
+    def test_apply_rechecks_versioned_plugin_after_preview(self):
+        first = apply_plan(build_plan(self.answers()))
+        plan = build_plan(self.answers())
+        skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\npost-preview tamper\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertIn("post-preview tamper", skill.read_text(encoding="utf-8"))
+
+    def test_repeat_preview_rejects_empty_directory_and_special_entry_in_plugin(self):
+        first = apply_plan(build_plan(self.answers()))
+        plugin = Path(first["plugin"])
+        empty = plugin / "PRIVATE-EMPTY"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "versioned plugin content changed"):
+            build_plan(self.answers())
+        empty.rmdir()
+        fifo = plugin / "PRIVATE-FIFO"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "unsupported filesystem entry"):
+            build_plan(self.answers())
+        fifo.unlink()
+
+    def test_apply_rejects_post_preview_empty_directory_and_special_entry_in_plugin(self):
+        first = apply_plan(build_plan(self.answers()))
+        plugin = Path(first["plugin"])
+        plan = build_plan(self.answers())
+        empty = plugin / "PRIVATE-EMPTY"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        empty.rmdir()
+        plan = build_plan(self.answers())
+        fifo = plugin / "PRIVATE-FIFO"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "unsupported filesystem entry"):
+            apply_plan(plan)
+        fifo.unlink()
 
     def test_cancelled_apply_has_no_side_effects(self):
         argv = [

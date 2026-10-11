@@ -159,6 +159,7 @@ def _state_connection(path: Path) -> sqlite3.Connection:
             state_known INTEGER NOT NULL,
             acquisition_basis TEXT NOT NULL DEFAULT 'matched_messages',
             is_auto_reply INTEGER NOT NULL DEFAULT 0,
+            provider_thread_order INTEGER,
             observed_at TEXT NOT NULL,
             PRIMARY KEY(file_number, source, account_fingerprint, message_id)
         );
@@ -185,6 +186,10 @@ def _state_connection(path: Path) -> sqlite3.Connection:
     if "is_auto_reply" not in state_columns:
         connection.execute(
             "ALTER TABLE message_mail_state ADD COLUMN is_auto_reply INTEGER NOT NULL DEFAULT 0"
+        )
+    if "provider_thread_order" not in state_columns:
+        connection.execute(
+            "ALTER TABLE message_mail_state ADD COLUMN provider_thread_order INTEGER"
         )
     protocol = connection.execute(
         "SELECT value FROM state_meta WHERE key='review_protocol'"
@@ -539,7 +544,7 @@ def _thread_states(connection: sqlite3.Connection, file_number: str, source: str
                    account_fingerprint: str, coverage_complete: bool) -> list[dict[str, Any]]:
     rows = connection.execute(
         "SELECT * FROM message_mail_state WHERE file_number=? AND source=? AND account_fingerprint=? "
-        "ORDER BY received_at DESC",
+        "ORDER BY received_at DESC, provider_thread_order DESC, observed_at DESC, message_id DESC",
         (file_number, source, account_fingerprint),
     ).fetchall()
     threads: dict[str, list[sqlite3.Row]] = {}
@@ -555,11 +560,23 @@ def _thread_states(connection: sqlite3.Connection, file_number: str, source: str
             or str(row["transmission_state"]) in {"draft", "scheduled", "not_sent", "unknown"}
         ]
         delivered = next((row for row in thread_rows if row not in excluded), None)
+        delivered_tie = bool(
+            delivered is not None
+            and any(
+                row is not delivered
+                and row not in excluded
+                and str(row["received_at"]) == str(delivered["received_at"])
+                and row["provider_thread_order"] == delivered["provider_thread_order"]
+                for row in thread_rows
+            )
+        )
         basis = str(raw["acquisition_basis"])
         if not coverage_complete:
             verdict = "unknown_coverage"
         elif basis == "matched_messages":
             verdict = "unknown_no_reply_claim_allowed"
+        elif delivered_tie:
+            verdict = "unknown_message_order"
         elif delivered is not None and str(delivered["transmission_state"]) == "sent":
             verdict = "we_sent_last_delivery_unproven"
         elif delivered is not None and str(delivered["transmission_state"]) == "received":
@@ -739,6 +756,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
         raise ValueError("mail bundle query does not match the current matter plan")
     tracked_requested = {item["thread_id"] for item in planned["tracked_threads"]}
     tracked_coverage = coverage.get("tracked_threads")
+    declared_thread_order: dict[str, list[str]] = {}
     if tracked_requested:
         if not isinstance(tracked_coverage, dict) or not isinstance(
             tracked_coverage.get("complete"), bool
@@ -761,6 +779,16 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             }
             if actual_request != expected_request:
                 raise ValueError("tracked-thread coverage marker request does not match the current plan")
+            details = tracked_coverage.get("details", [])
+            if isinstance(details, list):
+                for detail in details:
+                    if not isinstance(detail, dict):
+                        continue
+                    thread_id = str(detail.get("thread_id", ""))
+                    candidate_ids = [str(value) for value in detail.get("ordered_candidate_ids", [])]
+                    if thread_id in declared_thread_order:
+                        raise ValueError("tracked-thread provider order repeats a thread")
+                    declared_thread_order[thread_id] = candidate_ids
 
     config = load_config(config_path)
     file_number = planned["matter"]["file_number"]
@@ -774,6 +802,47 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
     scratch = confined_path(config.workspace_root, ".lawyeredos/scratch/mail-review")
     state = state_path(config)
     connection = _state_connection(state)
+    provider_thread_order: dict[tuple[str, str], int] = {}
+    for thread_id, candidate_ids in declared_thread_order.items():
+        if not candidate_ids:
+            continue
+        existing_rows = connection.execute(
+            "SELECT message_id, provider_thread_order FROM message_mail_state "
+            "WHERE file_number=? AND source=? AND account_fingerprint=? AND thread_id=?",
+            (file_number, source, account_fingerprint, thread_id),
+        ).fetchall()
+        existing_order = {
+            str(row["message_id"]): int(row["provider_thread_order"])
+            for row in existing_rows if row["provider_thread_order"] is not None
+        }
+        anchors = {
+            existing_order[message_id] - position
+            for position, message_id in enumerate(candidate_ids)
+            if message_id in existing_order
+        }
+        marker = next(
+            (
+                str(detail.get("marker_before", ""))
+                for detail in tracked_coverage.get("details", [])
+                if isinstance(detail, dict) and str(detail.get("thread_id", "")) == thread_id
+            ),
+            "",
+        )
+        if len(anchors) > 1:
+            raise ValueError("tracked-thread provider order conflicts with persisted order")
+        if anchors:
+            base_order = anchors.pop()
+        elif marker in existing_order and marker not in candidate_ids:
+            base_order = existing_order[marker] + 1
+        elif existing_order:
+            base_order = max(existing_order.values()) + 1
+        else:
+            base_order = 0
+        for position, message_id in enumerate(candidate_ids):
+            key = (thread_id, message_id)
+            if key in provider_thread_order:
+                raise ValueError("tracked-thread provider order repeats a message")
+            provider_thread_order[key] = base_order + position
     results: list[dict[str, Any]] = []
     current_exact_pairs: set[tuple[str, str]] = set()
     total_bytes = 0
@@ -795,7 +864,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                 raise ValueError("message received_at must be an ISO 8601 timestamp") from exc
             if received.tzinfo is None or received.utcoffset() is None:
                 raise ValueError("message received_at must include a UTC offset")
-            received_at = received.astimezone(UTC).replace(microsecond=0).isoformat()
+            received_at = received.astimezone(UTC).isoformat()
             existing = connection.execute(
                 "SELECT reviewed_at, thread_id, body_sha256 FROM message_reviews "
                 "WHERE file_number=? AND source=? AND account_fingerprint=? AND message_id=?",
@@ -819,23 +888,26 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             acquisition_basis = str(raw.get("acquisition_basis", "matched_messages"))
             if acquisition_basis not in {"matched_messages", "thread_probe", "thread_tail"}:
                 raise ValueError("message acquisition_basis is invalid")
+            thread_order = provider_thread_order.get((thread_id, message_id))
             connection.execute(
                 "INSERT INTO message_mail_state "
                 "(file_number, source, account_fingerprint, message_id, thread_id, received_at, "
-                "from_account, transmission_state, state_known, acquisition_basis, is_auto_reply, observed_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "from_account, transmission_state, state_known, acquisition_basis, is_auto_reply, "
+                "provider_thread_order, observed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(file_number, source, account_fingerprint, message_id) DO UPDATE SET "
                 "thread_id=excluded.thread_id, received_at=excluded.received_at, "
                 "from_account=excluded.from_account, transmission_state=excluded.transmission_state, "
                 "state_known=excluded.state_known, acquisition_basis=excluded.acquisition_basis, "
                 "is_auto_reply=excluded.is_auto_reply, "
+                "provider_thread_order=excluded.provider_thread_order, "
                 "observed_at=excluded.observed_at "
                 "WHERE excluded.observed_at >= message_mail_state.observed_at",
                 (
                     file_number, source, account_fingerprint, message_id, thread_id, received_at,
                     None if mail_state["from_account"] is None else int(mail_state["from_account"]),
                     mail_state["transmission_state"], int(mail_state["state_known"]),
-                    acquisition_basis, int(raw.get("auto_reply") is True), observed_at,
+                    acquisition_basis, int(raw.get("auto_reply") is True), thread_order, observed_at,
                 ),
             )
             if acquisition_basis in {"thread_probe", "thread_tail"}:

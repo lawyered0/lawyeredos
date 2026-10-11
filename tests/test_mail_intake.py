@@ -258,6 +258,62 @@ external_ai = false
         self.assertEqual(state["verdict"], "we_sent_last_delivery_unproven")
         self.assertEqual(sent_result["messages"], [{"message_id": "m2", "status": "already_reviewed"}])
 
+    def test_provider_thread_order_breaks_same_timestamp_ties_independent_of_fetch_order(self):
+        initial = plan(self.config, "Northstar")
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", self.bundle(initial, [self.message()]))
+        tracked = plan(self.config, "Northstar")
+
+        older_sent = self.message("0-old-sent")
+        older_sent.update({
+            "provider_labels_known": True,
+            "provider_labels": ["SENT"],
+            "from_account": True,
+            "header_date": "2020-01-01T00:00:00+00:00",
+        })
+        newer_received = self.message("f-new-received")
+        newer_received.update({
+            "provider_labels_known": True,
+            "provider_labels": [],
+            "from_account": False,
+        })
+        bundle = self.bundle(tracked, [older_sent, newer_received])
+        # Provider order is declared separately from retrieval order. Simulate a
+        # host fetching the newer body first while preserving oldest-to-newest
+        # thread order in coverage metadata.
+        bundle["messages"].reverse()
+        result = process_bundle(self.config, "Northstar", bundle)
+
+        self.assertEqual(result["thread_states"][0]["verdict"], "they_replied_last")
+        state = self.workspace / ".lawyeredos" / "data" / "mail-intake.sqlite3"
+        with sqlite3.connect(state) as connection:
+            rows = connection.execute(
+                "SELECT message_id, provider_thread_order FROM message_mail_state "
+                "WHERE message_id IN ('0-old-sent', 'f-new-received') ORDER BY provider_thread_order"
+            ).fetchall()
+        self.assertEqual(rows, [("0-old-sent", 0), ("f-new-received", 1)])
+
+        self.acknowledge_all()
+        process_bundle(self.config, "Northstar", bundle)
+        later_plan = plan(self.config, "Northstar")
+        newest_received = self.message("z-newest-received")
+        newest_received.update({
+            "provider_labels_known": True,
+            "provider_labels": [],
+            "from_account": False,
+        })
+        later = process_bundle(
+            self.config, "Northstar", self.bundle(later_plan, [newest_received])
+        )
+        self.assertEqual(later["thread_states"][0]["verdict"], "they_replied_last")
+        with sqlite3.connect(state) as connection:
+            order = connection.execute(
+                "SELECT provider_thread_order FROM message_mail_state WHERE message_id=?",
+                ("z-newest-received",),
+            ).fetchone()[0]
+        self.assertEqual(order, 2)
+
     def test_mail_state_parses_rfc_date_and_imap_labels_fail_closed(self):
         future = _transmission_state({
             "provider_labels_known": True, "provider_labels": ["SENT"],
@@ -383,7 +439,9 @@ external_ai = false
             tables = {row[0] for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )}
-        self.assertTrue({"acquisition_basis", "is_auto_reply"}.issubset(columns))
+        self.assertTrue(
+            {"acquisition_basis", "is_auto_reply", "provider_thread_order"}.issubset(columns)
+        )
         self.assertIn("tracked_thread_frontier", tables)
 
     def test_exact_candidates_must_exist_and_belong_to_declared_thread(self):

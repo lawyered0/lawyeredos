@@ -9,6 +9,7 @@ import shlex
 import shutil
 import sqlite3
 import sys
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -271,6 +272,21 @@ def _prepare_payload(plugin: Path, modules: set[str]) -> None:
         _projectize_skill(plugin / "skills" / MODULE_SKILLS[module], root / PROJECT_SKILLS[module], PROJECT_SKILLS[module])
 
 
+def expected_codex_plugin_fingerprint(source: Path, modules: tuple[str, ...], digest: str) -> str:
+    with tempfile.TemporaryDirectory() as temporary:
+        plugin = Path(temporary) / "plugin"
+        shutil.copytree(source, plugin, ignore=_ignored)
+        selected = set(modules)
+        for module, skill in MODULE_SKILLS.items():
+            if module not in selected:
+                shutil.rmtree(plugin / "skills" / skill)
+        _prepare_payload(plugin, selected)
+        (plugin / ".lawyeredos-package.json").write_text(json.dumps({
+            "version": VERSION, "digest": digest, "modules": list(modules), "host": "codex",
+        }, indent=2) + "\n", encoding="utf-8")
+        return managed_fingerprint(plugin)
+
+
 def render_runner(plan: dict) -> str:
     python = shlex.quote(plan["runtime_python"])
     return "\n".join([
@@ -349,6 +365,9 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     digest = package_digest(source)
     selection = hashlib.sha256(",".join(effective.modules).encode()).hexdigest()
     plugin = setup_root / "plugins" / f"lawyeredos-{VERSION}-{digest[:8]}-{selection[:6]}-codex"
+    plugin_fingerprint = expected_codex_plugin_fingerprint(source, effective.modules, digest)
+    if plugin.exists() and managed_fingerprint(plugin) != plugin_fingerprint:
+        raise ValueError(f"installed versioned Codex core content changed: {plugin}")
     agents_root = workspace / ".agents" / "skills"
     discovery = setup_root / DISCOVERY_FILE
     project_skills = {module: agents_root / PROJECT_SKILLS[module] for module in effective.modules}
@@ -395,6 +414,7 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "config": str(config), "plugin": str(plugin), "current": str(current),
         "runner": str(runner), "launcher": str(launcher), "discovery": str(discovery),
         "runtime_python": str(runtime), "package_digest": digest, "selection_digest": selection,
+        "plugin_fingerprint": plugin_fingerprint,
         "project_skills": {module: str(path) for module, path in project_skills.items()},
         "prior_managed": sorted(prior_managed),
         "prior_fingerprints": prior_fingerprints,
@@ -460,6 +480,8 @@ def apply_plan(plan: dict) -> dict:
     replaced_files: list[tuple[Path, bytes, int]] = []
     changed: list[str] = []
     try:
+        if plugin.exists() and managed_fingerprint(plugin) != plan["plugin_fingerprint"]:
+            raise ValueError(f"installed versioned Codex core content changed after preview: {plugin}")
         for path in (
             workspace, setup_root, setup_root / "scratch", setup_root / "data",
             setup_root / "plugins", workspace / ".agents", workspace / ".agents" / "skills",
@@ -479,6 +501,8 @@ def apply_plan(plan: dict) -> dict:
                 "version": VERSION, "digest": plan["package_digest"], "modules": plan["answers"]["modules"],
                 "host": "codex",
             }, indent=2) + "\n", encoding="utf-8")
+            if managed_fingerprint(plugin) != plan["plugin_fingerprint"]:
+                raise ValueError(f"installed Codex core does not match the approved build: {plugin}")
             changed.append(str(plugin))
         marker = plugin / ".lawyeredos-package.json"
         if not marker.is_file() or json.loads(marker.read_text(encoding="utf-8")).get("digest") != plan["package_digest"]:

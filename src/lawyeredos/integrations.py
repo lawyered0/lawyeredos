@@ -240,7 +240,7 @@ class GmailReadonlyAdapter:
         internal = str(message.get("internalDate", ""))
         received_at = ""
         if internal.isdigit():
-            received_at = datetime.fromtimestamp(int(internal) / 1000, UTC).replace(microsecond=0).isoformat()
+            received_at = datetime.fromtimestamp(int(internal) / 1000, UTC).isoformat()
         return {
             "id": message_id, "thread_id": str(message.get("threadId", "")),
             "received_at": received_at, "from": headers.get("from", ""),

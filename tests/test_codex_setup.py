@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -254,6 +255,8 @@ class CodexSetupTests(unittest.TestCase):
         self.assertFalse(self.workspace.exists())
 
     def test_cancelled_apply_preserves_concurrently_created_unrelated_file(self):
+        plan = build_plan(self.answers())
+
         def interrupt_during_plugin_copy(source, destination, *args, **kwargs):
             unrelated = self.workspace / ".agents" / "skills" / "unrelated-concurrent.txt"
             unrelated.write_text("preserve", encoding="utf-8")
@@ -261,7 +264,7 @@ class CodexSetupTests(unittest.TestCase):
 
         with patch("lawyeredos.codex_setup.shutil.copytree", side_effect=interrupt_during_plugin_copy):
             with self.assertRaisesRegex(RuntimeError, "automatic rollback was incomplete"):
-                apply_plan(build_plan(self.answers()))
+                apply_plan(plan)
         unrelated = self.workspace / ".agents" / "skills" / "unrelated-concurrent.txt"
         self.assertEqual(unrelated.read_text(encoding="utf-8"), "preserve")
 
@@ -276,6 +279,53 @@ class CodexSetupTests(unittest.TestCase):
         self.assertEqual((self.workspace / ".lawyeredos" / "current-codex").resolve(), new_plugin.resolve())
         for path in upgraded["skills"].values():
             self.assertTrue(Path(path).resolve().is_relative_to(new_plugin.resolve()))
+
+    def test_repeat_install_rejects_tampered_versioned_core(self):
+        first = apply_plan(build_plan(self.answers()))
+        skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\nprivate tamper\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "versioned Codex core content changed"):
+            build_plan(self.answers(existing="reuse"))
+        self.assertIn("private tamper", skill.read_text(encoding="utf-8"))
+
+    def test_apply_rechecks_versioned_core_after_preview(self):
+        first = apply_plan(build_plan(self.answers()))
+        plan = build_plan(self.answers(existing="reuse"))
+        skill = Path(first["plugin"]) / "skills" / "practice-work-on-matter" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\npost-preview tamper\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertIn("post-preview tamper", skill.read_text(encoding="utf-8"))
+
+    def test_repeat_preview_rejects_empty_directory_and_special_entry_in_core(self):
+        first = apply_plan(build_plan(self.answers()))
+        plugin = Path(first["plugin"])
+        empty = plugin / "PRIVATE-EMPTY"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "versioned Codex core content changed"):
+            build_plan(self.answers(existing="reuse"))
+        empty.rmdir()
+        fifo = plugin / "PRIVATE-FIFO"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "unsupported filesystem entry"):
+            build_plan(self.answers(existing="reuse"))
+        fifo.unlink()
+
+    def test_apply_rejects_post_preview_empty_directory_and_special_entry_in_core(self):
+        first = apply_plan(build_plan(self.answers()))
+        plugin = Path(first["plugin"])
+        plan = build_plan(self.answers(existing="reuse"))
+        empty = plugin / "PRIVATE-EMPTY"
+        empty.mkdir()
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        empty.rmdir()
+        plan = build_plan(self.answers(existing="reuse"))
+        fifo = plugin / "PRIVATE-FIFO"
+        os.mkfifo(fifo)
+        with self.assertRaisesRegex(ValueError, "unsupported filesystem entry"):
+            apply_plan(plan)
+        fifo.unlink()
 
     def test_schema_one_discovery_migrates_without_broadening_ownership(self):
         first = apply_plan(build_plan(self.answers()))

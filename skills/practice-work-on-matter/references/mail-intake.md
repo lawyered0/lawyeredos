@@ -69,6 +69,9 @@ the bounded quiet-thread tail; ordinary search hits use `matched_messages`. Echo
 thread/marker pairs in `coverage.tracked_threads.request` and provide one detail per thread with
 `marker_before`, provider-ordered `ordered_candidate_ids`, and `complete`. The core advances a
 frontier only when that exact, contiguous candidate set has complete retrieval and completed review.
+The candidate IDs must be in the provider's thread order from oldest to newest. The core persists
+that ordering as a tie-break when provider arrival timestamps are identical; never reorder the IDs
+by lexical message ID or by the order in which message bodies happened to be fetched.
 Set `coverage.complete` to `false` for any cap, failed page, missing body,
 authorization interruption, or uncertain result. Never invent attachment bytes
 or mark metadata-only access complete. A configured route is not proof that the
