@@ -46,7 +46,7 @@ the user must correct.
 
 ## Writes
 
-`create`, `update`, `timeline`, `close`, and `reopen` require a dry run and a
+`create`, `update`, `timeline`, `workflow`, `close`, and `reopen` require a dry run and a
 matching current-revision token. Present the exact proposed values and
 downstream effects before committing. A stale token fails closed.
 
@@ -74,6 +74,14 @@ the CLI reports `committed: null`, `commit_state: outcome_unknown`, and
 `retry_safe: false`. Do not infer an outcome or retry. Run all three mandatory
 read-only recovery checks in the result (`show`, `history`, and `verify`) and
 reconcile the reported revision and provisional `audit_id` first.
+
+`workflow` atomically combines explicitly requested next-action fields and an
+optional timeline entry in one tracker revision. It does not infer a change from
+matter or message content. Clearing a nonempty next action requires the exact
+empty value, `--clear-next-action`, and a disposition timeline entry. When the
+same request also saves a durable matter file, route the coordinated preview and
+commit through `lawyeredos.matter_write` as described in
+`lawyeredos:practice-work-on-matter`.
 
 `court_deadlines` is JSON data, not a verified legal calculation. The register
 stores facts and sources; jurisdiction-specific rules live in separate profiles.

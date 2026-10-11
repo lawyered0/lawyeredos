@@ -92,6 +92,37 @@ class TrackerTests(unittest.TestCase):
         self.assertIn("multiple hard links", result["problems"][0])
         self.assertEqual(self.database.read_bytes(), original)
 
+    def test_workflow_clear_disposes_next_action_and_date_atomically(self):
+        self.create_matter()
+        update = mutation_args(
+            self.database, "update",
+            set_values=["next_action=Serve fictional draft", "next_action_date=2030-01-10"],
+        )
+        approved = preview_mutation(self.database, "update", update)
+        commit_mutation(self.database, "update", update, approved["confirm_token"])
+        workflow = mutation_args(
+            self.database, "workflow", next_action="", next_action_date=None,
+            clear_next_action=True, event_date="2030-01-09",
+            text="User explicitly disposed of the fictional next action.",
+        )
+        approved = preview_mutation(self.database, "workflow", workflow)
+        self.assertEqual(approved["payload"]["current_workflow"], {
+            "next_action": "Serve fictional draft", "next_action_date": "2030-01-10",
+        })
+        self.assertEqual(approved["payload"]["resulting_workflow"], {
+            "next_action": "", "next_action_date": "",
+        })
+        result = commit_mutation(
+            self.database, "workflow", workflow, approved["confirm_token"],
+        )
+        self.assertTrue(result["committed"])
+        matter = read_show(self.database, "2030-001")
+        self.assertEqual((matter["next_action"], matter["next_action_date"]), ("", ""))
+        self.assertEqual(
+            matter["timeline"][-1]["text"],
+            "User explicitly disposed of the fictional next action.",
+        )
+
     def test_post_commit_readback_failure_is_not_reported_as_retry_safe(self):
         args = mutation_args(self.database, "create")
         preview = preview_mutation(self.database, "create", args)

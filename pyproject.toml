@@ -26,6 +26,7 @@ practice-tracker-xlsx = "lawyeredos.tracker_xlsx:main"
 practice-integrations = "lawyeredos.integrations:main"
 practice-documents = "lawyeredos.document_helpers:main"
 practice-memory = "lawyeredos.memory_search:main"
+practice-matter-write = "lawyeredos.matter_write:main"
 practice-voice-lint = "lawyeredos.voice_lint:main"
 
 [tool.setuptools]

@@ -7,7 +7,7 @@ import sys
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 from .common import emit, preview_token
 from .private_fs import assert_private_file, create_private_file
@@ -219,11 +219,46 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
             raise ValueError("timeline date and text are required")
         payload["event_date"] = args.event_date.strip()
         payload["text"] = args.text.strip()
+    elif action == "workflow":
+        changes: dict[str, str] = {}
+        if args.next_action is not None:
+            changes["next_action"] = args.next_action.strip()
+        if args.next_action_date is not None:
+            changes["next_action_date"] = args.next_action_date.strip()
+        event_date = args.event_date.strip()
+        text = args.text.strip()
+        if bool(event_date) != bool(text):
+            raise ValueError("workflow timeline date and text must be supplied together")
+        if not changes and not text:
+            raise ValueError("workflow requires a next-action change or timeline entry")
+        if changes.get("next_action") == "":
+            if not args.clear_next_action:
+                raise ValueError("clearing a next action requires --clear-next-action")
+            if not text:
+                raise ValueError("clearing a next action requires a disposition timeline entry")
+            if changes.get("next_action_date", ""):
+                raise ValueError("a cleared next action cannot retain a next-action date")
+            changes["next_action_date"] = ""
+        elif args.clear_next_action:
+            raise ValueError("--clear-next-action only applies to an empty next action")
+        payload["changes"] = changes
+        if text:
+            payload["timeline"] = {"event_date": event_date, "text": text}
     elif action in {"close", "reopen"}:
         payload["new_status"] = "closed" if action == "close" else "open"
     else:
         raise ValueError(f"unsupported action: {action}")
     return payload
+
+
+def bind_workflow_state(payload: dict[str, Any], row: Mapping[str, Any]) -> None:
+    if payload["action"] != "workflow":
+        return
+    current = {"next_action": row["next_action"], "next_action_date": row["next_action_date"]}
+    resulting = dict(current)
+    resulting.update(payload["changes"])
+    payload["current_workflow"] = current
+    payload["resulting_workflow"] = resulting
 
 
 def validate_payload(connection: sqlite3.Connection, payload: dict[str, Any]) -> None:
@@ -247,6 +282,8 @@ def validate_payload(connection: sqlite3.Connection, payload: dict[str, Any]) ->
     else:
         if row is None:
             raise ValueError("matter not found")
+        if action == "workflow" and row["status"] != "open":
+            raise ValueError("matter is closed; reopen it before changing workflow state")
         if action == "close" and row["status"] != "open":
             raise ValueError("matter is not open")
         if action == "reopen" and row["status"] != "closed":
@@ -258,6 +295,9 @@ def preview_mutation(path: Path, action: str, args: argparse.Namespace) -> dict[
         current_revision = revision(connection)
         payload = mutation_payload(action, args, current_revision)
         validate_payload(connection, payload)
+        row = get_matter(connection, payload["file_number"])
+        if row is not None:
+            bind_workflow_state(payload, row)
     return {"ok": True, "dry_run": True, "payload": payload, "confirm_token": preview_token(action, payload)}
 
 
@@ -274,6 +314,9 @@ def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: st
         current_revision = revision(connection)
         payload = mutation_payload(action, args, current_revision)
         validate_payload(connection, payload)
+        row = get_matter(connection, payload["file_number"])
+        if row is not None:
+            bind_workflow_state(payload, row)
         expected = preview_token(action, payload)
         if token != expected:
             raise ValueError("confirmation token is missing, stale, or does not match this mutation")
@@ -309,6 +352,25 @@ def commit_mutation(path: Path, action: str, args: argparse.Namespace, token: st
             connection.execute(
                 "UPDATE matters SET updated_at=? WHERE file_number=?", (timestamp, file_number)
             )
+        elif action == "workflow":
+            changes = payload["changes"]
+            if changes:
+                assignments = ", ".join(f"{FIELDS[key]}=?" for key in sorted(changes))
+                values = [changes[key] for key in sorted(changes)]
+                connection.execute(
+                    f"UPDATE matters SET {assignments}, updated_at=? WHERE file_number=?",
+                    (*values, timestamp, file_number),
+                )
+            else:
+                connection.execute(
+                    "UPDATE matters SET updated_at=? WHERE file_number=?", (timestamp, file_number)
+                )
+            if "timeline" in payload:
+                timeline = payload["timeline"]
+                connection.execute(
+                    "INSERT INTO timeline(file_number, event_date, text, created_at) VALUES (?, ?, ?, ?)",
+                    (file_number, timeline["event_date"], timeline["text"], timestamp),
+                )
         elif action in {"close", "reopen"}:
             connection.execute(
                 "UPDATE matters SET status=?, updated_at=? WHERE file_number=?",
@@ -450,6 +512,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_mutation_options(timeline)
     timeline.add_argument("--event-date", required=True)
     timeline.add_argument("--text", required=True)
+    workflow = sub.add_parser("workflow")
+    add_mutation_options(workflow)
+    workflow.add_argument("--next-action")
+    workflow.add_argument("--next-action-date")
+    workflow.add_argument("--event-date", default="")
+    workflow.add_argument("--text", default="")
+    workflow.add_argument("--clear-next-action", action="store_true")
     close = sub.add_parser("close")
     add_mutation_options(close)
     reopen = sub.add_parser("reopen")
