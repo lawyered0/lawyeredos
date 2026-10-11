@@ -400,7 +400,10 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "prior_fingerprints": prior_fingerprints,
         "preflight_paths": {
             str(path): path_snapshot(path)
-            for path in (config, setup_root / "data" / "matters.sqlite3", runner, launcher)
+            for path in (
+                config, setup_root / "data" / "matters.sqlite3", runner, launcher,
+                discovery,
+            )
         },
         "answers": {**asdict(effective), "workspace": str(workspace), "modules": list(effective.modules)},
         "dependencies": dependency_report(effective.modules), "config_preview": config_preview,

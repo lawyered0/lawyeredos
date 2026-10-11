@@ -569,7 +569,10 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         "prior_fingerprints": prior_fingerprints,
         "preflight_paths": {
             str(path): path_snapshot(path)
-            for path in (config_path, tracker, launcher, terminal_launcher, settings_local)
+            for path in (
+                config_path, tracker, launcher, terminal_launcher, settings_local,
+                discovery_state, setup_root / "setup-state.json",
+            )
         },
         "runtime_python": str(runtime_python),
         "answers": {**asdict(effective), "workspace": str(workspace), "modules": list(effective.modules)},
@@ -748,6 +751,9 @@ def _transactional_apply(function):
         setup_root = Path(plan["setup_root"])
         _validate_managed_paths((workspace, setup_root), ())
         state_path = setup_root / "setup-state.json"
+        expected_state = plan.get("preflight_paths", {}).get(str(state_path))
+        if expected_state is not None and path_snapshot(state_path) != expected_state:
+            raise ValueError(f"managed path changed after preview; build a new plan: {state_path}")
         if state_path.is_symlink():
             raise ValueError(f"managed setup state must not be a symlink: {state_path}")
         previous_state = (

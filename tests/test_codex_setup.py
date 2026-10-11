@@ -124,6 +124,24 @@ class CodexSetupTests(unittest.TestCase):
         self.assertEqual(outside.read_text(encoding="utf-8"), "preserve")
         self.assertEqual(outside.stat().st_mode & 0o777, 0o640)
 
+    def test_apply_refuses_valid_discovery_file_that_appears_after_preview(self):
+        plan = build_plan(self.answers())
+        discovery = Path(plan["discovery"])
+        discovery.parent.mkdir(parents=True)
+        content = json.dumps({
+            "schema_version": 2,
+            "host": "codex",
+            "package_digest": plan["package_digest"],
+            "managed_paths": [],
+            "managed_fingerprints": {},
+        })
+        discovery.write_text(content, encoding="utf-8")
+        discovery.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(discovery.read_text(encoding="utf-8"), content)
+        self.assertEqual(discovery.stat().st_mode & 0o777, 0o640)
+
     def test_apply_refuses_discovery_skill_symlink_created_after_preview(self):
         plan = build_plan(self.answers())
         outside = self.root / "outside-skill"

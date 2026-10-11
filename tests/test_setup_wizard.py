@@ -377,21 +377,49 @@ class SetupWizardTests(unittest.TestCase):
         self.assertEqual(launcher.read_text(encoding="utf-8"), "private launcher")
         self.assertEqual(launcher.stat().st_mode & 0o777, 0o640)
 
-    def test_malicious_discovery_cannot_claim_or_delete_external_path(self):
+    def test_apply_refuses_valid_discovery_file_that_appears_after_preview(self):
         plan = build_plan(self.answers(existing_config="error"))
+        discovery = Path(plan["discovery_state"])
+        discovery.parent.mkdir(parents=True)
+        content = json.dumps({
+            "schema_version": 2,
+            "package_digest": plan["package_digest"],
+            "managed_paths": [],
+            "managed_fingerprints": {},
+        })
+        discovery.write_text(content, encoding="utf-8")
+        discovery.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(discovery.read_text(encoding="utf-8"), content)
+        self.assertEqual(discovery.stat().st_mode & 0o777, 0o640)
+
+    def test_apply_refuses_setup_state_that_appears_before_transaction_read(self):
+        plan = build_plan(self.answers(existing_config="error"))
+        state = self.workspace / ".lawyeredos" / "setup-state.json"
+        state.parent.mkdir(parents=True)
+        content = json.dumps({"schema_version": 1, "private": True})
+        state.write_text(content, encoding="utf-8")
+        state.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "changed after preview"):
+            apply_plan(plan)
+        self.assertEqual(state.read_text(encoding="utf-8"), content)
+        self.assertEqual(state.stat().st_mode & 0o777, 0o640)
+
+    def test_malicious_discovery_cannot_claim_or_delete_external_path(self):
         external = self.root / "external-private.txt"
         external.write_text("preserve", encoding="utf-8")
         external.chmod(0o640)
-        discovery = Path(plan["discovery_state"])
+        discovery = self.workspace / ".lawyeredos" / "project-discovery.json"
         discovery.parent.mkdir(parents=True)
         discovery.write_text(json.dumps({
             "schema_version": 2,
-            "package_digest": plan["package_digest"],
+            "package_digest": "0" * 64,
             "managed_paths": [str(external)],
             "managed_fingerprints": {},
         }), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "outside the LawyeredOS Claude namespace"):
-            apply_plan(plan)
+            build_plan(self.answers(existing_config="error"))
         self.assertEqual(external.read_text(encoding="utf-8"), "preserve")
         self.assertEqual(external.stat().st_mode & 0o777, 0o640)
 
