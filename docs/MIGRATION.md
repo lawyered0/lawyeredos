@@ -30,3 +30,19 @@ disposable projection and must not be edited as the system of record.
 Migration maps field names, not organization-specific paths or identities. If
 the legacy schema differs from the documented aliases, prepare an explicit
 intermediate CSV/JSON mapping and review it before committing.
+
+## Private-path permission migration
+
+New confidential LawyeredOS state is private by construction: app-owned
+directories under `.lawyeredos` are created as `0700`, and config, tracker,
+state, mail-ledger, staging, saved-attachment, acknowledgement, and recovery
+files are created as `0600`. Setup does not change an existing path's mode.
+
+An older installation with broader modes stops with a migration-required error
+that names the path, observed mode, and required mode. Before changing it,
+review that the path is genuinely LawyeredOS-owned and is not a shared user
+directory. Back up the workspace, apply the named mode only to the exact path,
+and build a fresh setup plan. Never recursively change the workspace, matter
+tree, `.claude`, `.agents`, or a personal skills directory. Symlinks,
+hard-linked confidential files, and special filesystem entries require an
+explicitly reviewed replacement; setup will not repair them automatically.

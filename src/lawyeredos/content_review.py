@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,7 @@ from xml.etree import ElementTree
 
 from .common import canonical_json, sha256_bytes, sha256_file
 from .document_helpers import extract_pdf
+from .private_fs import assert_private_file
 
 
 REVIEW_ACK_SCHEMA = "lawyeredos-content-review-ack-v1"
@@ -203,11 +205,16 @@ def _xlsx_units(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 def _pdf_units(path: Path, scratch: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     scratch.mkdir(parents=True, exist_ok=True)
     output = scratch / f"{sha256_file(path)}.txt"
-    if output.exists():
+    if output.exists() or output.is_symlink():
+        assert_private_file(output)
         text = output.read_text(encoding="utf-8", errors="replace")
         extraction = {"needs_ocr": len(text.strip()) < 40}
     else:
         extraction = extract_pdf(path, output)
+        if output.is_symlink() or not output.is_file() or output.stat(follow_symlinks=False).st_nlink != 1:
+            raise ValueError("PDF extraction output is not a private regular file")
+        os.chmod(output, 0o600, follow_symlinks=False)
+        assert_private_file(output)
         text = output.read_text(encoding="utf-8", errors="replace")
     pages = text.split("\f")
     while pages and not pages[-1].strip():

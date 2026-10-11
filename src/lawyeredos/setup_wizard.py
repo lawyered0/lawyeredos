@@ -9,6 +9,7 @@ import platform
 import shlex
 import shutil
 import sqlite3
+import stat
 import sys
 import tempfile
 from dataclasses import asdict, dataclass
@@ -17,6 +18,16 @@ from pathlib import Path
 
 from lawyeredos.config import load_config
 from lawyeredos.tracker_cli import initialize
+from lawyeredos.private_fs import (
+    assert_private_directory,
+    assert_private_file,
+    assert_private_tree,
+    copy_private_file,
+    copy_private_tree,
+    create_private_file,
+    ensure_private_directory,
+    replace_private_file,
+)
 
 
 VERSION = "0.2.1"
@@ -205,6 +216,7 @@ def initialize_tracker_exclusive(path: Path) -> None:
         raise ValueError(f"tracker path appeared after preview; refusing to overwrite: {path}") from exc
     finally:
         shutil.rmtree(temporary_root)
+    assert_private_file(path)
 
 
 def _load_project_discovery(
@@ -511,6 +523,8 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
         raise ValueError(f"configuration already exists: {config_path}")
     if config_exists and answers.existing_config == "reuse":
         loaded = load_config(config_path)
+        if loaded.tracker_database.exists() or loaded.tracker_database.is_symlink():
+            assert_private_file(loaded.tracker_database)
         if loaded.workspace_root != workspace:
             raise ValueError(
                 "existing configuration belongs to a different workspace; "
@@ -597,6 +611,8 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     config_action = "reuse" if config_exists and answers.existing_config == "reuse" else ("replace_with_backup" if config_exists else "create")
     operations.append({"action": config_action, "path": str(config_path)})
     tracker = setup_root / "data" / "matters.sqlite3"
+    if tracker.exists() or tracker.is_symlink():
+        assert_private_file(tracker)
     if not tracker.exists() and config_action != "reuse":
         operations.append({"action": "initialize_empty_tracker", "path": str(tracker)})
     operations.append({"action": "create_or_update_launcher_with_backup", "path": str(launcher)})
@@ -722,10 +738,57 @@ def print_preview(plan: dict) -> None:
     print("\nNo changes have been made.")
 
 
-def _backup(path: Path, backup_root: Path, backups: list[dict[str, str]]) -> None:
+def _tree_mode_metadata(path: Path) -> dict[str, dict[str, int | str]]:
+    metadata: dict[str, dict[str, int | str]] = {}
+    for item in (path, *sorted(path.rglob("*"))):
+        if item.is_symlink():
+            raise ValueError(f"backup source tree contains a symlink: {item}")
+        details = item.stat(follow_symlinks=False)
+        if item.is_dir():
+            kind = "directory"
+        elif item.is_file():
+            kind = "file"
+        else:
+            raise ValueError(f"backup source tree contains a special filesystem entry: {item}")
+        mode = stat.S_IMODE(details.st_mode)
+        if mode > 0o777:
+            raise ValueError(f"backup source tree contains unsupported special mode bits: {item}")
+        metadata["." if item == path else item.relative_to(path).as_posix()] = {
+            "kind": kind,
+            "mode": mode,
+        }
+    return metadata
+
+
+def _restore_original_modes(path: Path, metadata: dict[str, dict[str, int | str]]) -> None:
+    files: list[tuple[Path, int]] = []
+    directories: list[tuple[Path, int]] = []
+    for relative, expected in metadata.items():
+        item = path if relative == "." else path / relative
+        if item.is_symlink():
+            raise ValueError(f"restored path became a symlink: {item}")
+        mode = int(expected["mode"])
+        if mode < 0 or mode > 0o777:
+            raise ValueError(f"restored path mode is invalid: {item}")
+        if expected["kind"] == "file" and item.is_file():
+            files.append((item, mode))
+        elif expected["kind"] == "directory" and item.is_dir():
+            directories.append((item, mode))
+        else:
+            raise ValueError(f"restored path type changed: {item}")
+    for item, mode in files:
+        os.chmod(item, mode, follow_symlinks=False)
+    for item, mode in sorted(directories, key=lambda value: len(value[0].parts), reverse=True):
+        os.chmod(item, mode, follow_symlinks=False)
+
+
+def _backup(path: Path, backup_root: Path, backups: list[dict]) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    backup_root.mkdir(parents=True, exist_ok=True)
+    if backup_root.exists() or backup_root.is_symlink():
+        assert_private_directory(backup_root)
+    else:
+        ensure_private_directory(backup_root)
     destination = backup_root / path.name
     counter = 1
     while destination.exists():
@@ -733,15 +796,72 @@ def _backup(path: Path, backup_root: Path, backups: list[dict[str, str]]) -> Non
         counter += 1
     if path.is_symlink():
         destination = destination.with_name(destination.name + ".symlink")
-        destination.write_text(os.readlink(path), encoding="utf-8")
+        create_private_file(destination, os.readlink(path).encode("utf-8"))
         kind = "symlink"
+        metadata = None
     elif path.is_dir():
-        shutil.copytree(path, destination)
+        metadata = _tree_mode_metadata(path)
+        copy_private_tree(path, destination)
         kind = "directory"
     else:
-        shutil.copy2(path, destination)
+        original_mode = stat.S_IMODE(path.stat().st_mode)
+        if original_mode > 0o777:
+            raise ValueError(f"backup source contains unsupported special mode bits: {path}")
+        metadata = {".": {"kind": "file", "mode": original_mode}}
+        copy_private_file(path, destination)
         kind = "file"
-    backups.append({"original": str(path), "backup": str(destination), "kind": kind})
+    record = {"original": str(path), "backup": str(destination), "kind": kind}
+    if metadata is not None:
+        record["original_modes"] = metadata
+    backups.append(record)
+
+
+def _validate_backup_artifact(item: dict, backups_root: Path) -> None:
+    backup = Path(item.get("backup", ""))
+    kind = item.get("kind")
+    if kind not in {"file", "directory", "symlink"}:
+        raise ValueError(f"rollback backup kind is invalid: {backup}")
+    cursor = backup.parent
+    while True:
+        assert_private_directory(cursor)
+        if cursor == backups_root:
+            break
+        if backups_root not in cursor.parents:
+            raise ValueError(f"rollback backup path is outside the private backup tree: {backup}")
+        cursor = cursor.parent
+    if kind == "directory":
+        assert_private_tree(backup)
+    else:
+        assert_private_file(backup)
+    metadata = item.get("original_modes")
+    if kind == "symlink":
+        if metadata is not None:
+            raise ValueError(f"symlink backup must not contain mode metadata: {backup}")
+        return
+    if not isinstance(metadata, dict) or not metadata:
+        raise ValueError(f"rollback backup mode metadata is missing: {backup}")
+    normalized: dict[str, str] = {}
+    for relative, entry in metadata.items():
+        relative_path = Path(relative) if isinstance(relative, str) else Path("/")
+        if (
+            not isinstance(relative, str)
+            or (relative != "." and (relative_path.is_absolute() or ".." in relative_path.parts
+                                     or relative_path.as_posix() != relative))
+            or not isinstance(entry, dict)
+            or entry.get("kind") not in {"file", "directory"}
+            or isinstance(entry.get("mode"), bool)
+            or not isinstance(entry.get("mode"), int)
+            or not 0 <= entry["mode"] <= 0o777
+        ):
+            raise ValueError(f"rollback backup mode metadata is invalid: {backup}")
+        normalized[relative] = entry["kind"]
+    if kind == "file":
+        if normalized != {".": "file"}:
+            raise ValueError(f"rollback file backup metadata is incomplete: {backup}")
+    else:
+        actual = {relative: str(entry["kind"]) for relative, entry in _tree_mode_metadata(backup).items()}
+        if normalized != actual:
+            raise ValueError(f"rollback directory backup metadata is incomplete: {backup}")
 
 
 def _undo_failed_apply(plan: dict) -> list[str]:
@@ -749,6 +869,17 @@ def _undo_failed_apply(plan: dict) -> list[str]:
     created = transaction.get("created", [])
     backups = transaction.get("backups", [])
     problems: list[str] = []
+    backup_root = transaction.get("backup_root")
+    if backups:
+        try:
+            if not backup_root:
+                raise ValueError("recovery backup root is missing")
+            root = Path(backup_root).parent
+            assert_private_directory(root)
+            for item in backups:
+                _validate_backup_artifact(item, root)
+        except (OSError, ValueError) as exc:
+            return [f"validate recovery backups: {exc}"]
     for item in reversed(backups):
         original = Path(item["original"])
         backup = Path(item["backup"])
@@ -765,7 +896,9 @@ def _undo_failed_apply(plan: dict) -> list[str]:
                 original.symlink_to(backup.read_text(encoding="utf-8"), target_is_directory=True)
             else:
                 shutil.copy2(backup, original)
-        except OSError as exc:
+            if item.get("original_modes"):
+                _restore_original_modes(original, item["original_modes"])
+        except (OSError, ValueError) as exc:
             problems.append(f"restore {original}: {exc}")
     state_path = Path(plan["setup_root"]) / "setup-state.json"
     previous_state = transaction.get("previous_state")
@@ -778,7 +911,6 @@ def _undo_failed_apply(plan: dict) -> list[str]:
             state_path.chmod(mode)
     except OSError as exc:
         problems.append(f"restore {state_path}: {exc}")
-    backup_root = transaction.get("backup_root")
     if backup_root and not problems:
         try:
             shutil.rmtree(backup_root, ignore_errors=False)
@@ -809,12 +941,17 @@ def _transactional_apply(function):
         workspace = Path(plan["workspace"])
         setup_root = Path(plan["setup_root"])
         _validate_managed_paths((workspace, setup_root), ())
+        assert_preflight_paths(plan.get("preflight_paths", {}))
         state_path = setup_root / "setup-state.json"
         expected_state = plan.get("preflight_paths", {}).get(str(state_path))
         if expected_state is not None and path_snapshot(state_path) != expected_state:
             raise ValueError(f"managed path changed after preview; build a new plan: {state_path}")
+        if setup_root.exists() or setup_root.is_symlink():
+            assert_private_directory(setup_root)
         if state_path.is_symlink():
             raise ValueError(f"managed setup state must not be a symlink: {state_path}")
+        if state_path.exists():
+            assert_private_file(state_path)
         previous_state = (
             (state_path.read_bytes(), state_path.stat().st_mode)
             if state_path.is_file() else None
@@ -863,6 +1000,15 @@ def apply_plan(plan: dict) -> dict:
         managed_directories,
         (config, launcher, terminal_launcher, discovery_state, settings_local),
     )
+    for directory in (
+        setup_root, setup_root / "scratch", setup_root / "data",
+        setup_root / "plugins", setup_root / "backups",
+    ):
+        if directory.exists() or directory.is_symlink():
+            assert_private_directory(directory)
+    for private_file in (config, tracker, discovery_state, setup_root / "setup-state.json"):
+        if private_file.exists() or private_file.is_symlink():
+            assert_private_file(private_file)
     assert_preflight_paths(plan.get("preflight_paths", {}))
     allowed_project_paths = {
         *(workspace / ".claude" / "skills" / name for name in PROJECT_SKILLS.values()),
@@ -899,7 +1045,7 @@ def apply_plan(plan: dict) -> dict:
     backup_root = setup_root / "backups" / transaction_id
     transaction = plan["_active_transaction"]
     created: list[str] = transaction["created"]
-    backups: list[dict[str, str]] = transaction["backups"]
+    backups: list[dict] = transaction["backups"]
     changed: list[str] = []
     transaction["backup_root"] = str(backup_root)
     if not workspace.exists():
@@ -910,8 +1056,13 @@ def apply_plan(plan: dict) -> dict:
         workspace / ".claude", workspace / ".claude" / "skills", workspace / ".claude" / "agents",
     ):
         if not directory.exists():
-            directory.mkdir(parents=True)
+            if directory == setup_root or setup_root in directory.parents:
+                ensure_private_directory(directory)
+            else:
+                directory.mkdir(parents=True)
             created.append(str(directory))
+        elif directory == setup_root or setup_root in directory.parents:
+            assert_private_directory(directory)
     if plugin.exists():
         pass
     else:
@@ -1009,7 +1160,7 @@ def apply_plan(plan: dict) -> dict:
             _backup(discovery_state, backup_root, backups)
         else:
             created.append(str(discovery_state))
-        discovery_state.write_text(discovery_text, encoding="utf-8")
+        replace_private_file(discovery_state, discovery_text.encode("utf-8"))
         changed.append(str(discovery_state))
     if plan["config_preview"] is not None:
         if config.exists():
@@ -1018,7 +1169,7 @@ def apply_plan(plan: dict) -> dict:
             created.append(str(config))
         new_config = plan["config_preview"]
         if not config.exists() or config.read_text(encoding="utf-8") != new_config:
-            config.write_text(new_config, encoding="utf-8")
+            replace_private_file(config, new_config.encode("utf-8"))
             changed.append(str(config))
         if not tracker.exists():
             initialize_tracker_exclusive(tracker)
@@ -1062,7 +1213,10 @@ def apply_plan(plan: dict) -> dict:
             "config": str(config), "plugin": str(plugin), "launcher": str(launcher),
             "terminal_launcher": str(terminal_launcher),
         }
-        state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        replace_private_file(
+            state_path,
+            (json.dumps(state, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        )
     loaded = load_config(config)
     with sqlite3.connect(loaded.tracker_database) as connection:
         connection.execute("PRAGMA quick_check").fetchone()
@@ -1089,11 +1243,13 @@ def rollback(workspace: Path) -> dict:
         ),
         (),
     )
+    assert_private_directory(setup_root)
     state_path = setup_root / "setup-state.json"
     if state_path.is_symlink():
         raise ValueError(f"managed setup state must not be a symlink: {state_path}")
     if not state_path.is_file():
         raise ValueError(f"no rollback state found: {state_path}")
+    assert_private_file(state_path)
     state = json.loads(state_path.read_text(encoding="utf-8"))
     if not isinstance(state, dict) or state.get("schema_version") != 1:
         raise ValueError(f"unsupported rollback state schema: {state_path}")
@@ -1141,6 +1297,7 @@ def rollback(workspace: Path) -> dict:
     for raw in fingerprints:
         require_allowed(raw, allowed_files, "fingerprint")
     backups_root = setup_root / "backups"
+    assert_private_directory(backups_root)
     for item in state.get("backups", []):
         if not isinstance(item, dict):
             raise ValueError(f"invalid backup record in rollback state: {state_path}")
@@ -1159,6 +1316,7 @@ def rollback(workspace: Path) -> dict:
             cursor = cursor.parent
         if backup.is_symlink():
             raise ValueError(f"rollback backup artifact must not be a symlink: {backup}")
+        _validate_backup_artifact(item, backups_root)
     restored: list[str] = []
     removed: list[str] = []
     preserved_modified: list[str] = []
@@ -1224,6 +1382,8 @@ def rollback(workspace: Path) -> dict:
                 original.symlink_to(backup.read_text(encoding="utf-8"), target_is_directory=True)
             else:
                 shutil.copy2(backup, original)
+            if item.get("original_modes"):
+                _restore_original_modes(original, item["original_modes"])
             restored.append(str(original))
     backup_originals = {item["original"] for item in state.get("backups", [])}
     for raw in reversed(state.get("created", [])):
@@ -1250,7 +1410,10 @@ def rollback(workspace: Path) -> dict:
                 except OSError:
                     pass
     state["rolled_back_at"] = datetime.now(UTC).isoformat()
-    state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    replace_private_file(
+        state_path,
+        (json.dumps(state, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+    )
     return {
         "ok": True,
         "restored": restored,

@@ -32,6 +32,13 @@ from .setup_wizard import (
     validate_answers,
 )
 from .tracker_cli import initialize
+from .private_fs import (
+    assert_private_directory,
+    assert_private_file,
+    create_private_file,
+    ensure_private_directory,
+    replace_private_file,
+)
 
 
 DISCOVERY_FILE = "codex-project-discovery.json"
@@ -358,6 +365,8 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
             raise ValueError(f"configuration already exists: {config}")
         if answers.existing_config == "reuse":
             loaded = load_config(config)
+            if loaded.tracker_database.exists() or loaded.tracker_database.is_symlink():
+                assert_private_file(loaded.tracker_database)
             if loaded.workspace_root != workspace:
                 raise ValueError("existing configuration belongs to a different workspace")
             effective = Answers(
@@ -374,6 +383,9 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
             )
     elif (setup_root / "data" / "matters.sqlite3").exists():
         raise ValueError("unmanaged tracker data exists without a LawyeredOS config; refusing to overwrite")
+    tracker = setup_root / "data" / "matters.sqlite3"
+    if tracker.exists() or tracker.is_symlink():
+        assert_private_file(tracker)
     digest = package_digest(source)
     selection = hashlib.sha256(",".join(effective.modules).encode()).hexdigest()
     plugin = setup_root / "plugins" / f"lawyeredos-{VERSION}-{digest[:8]}-{selection[:6]}-codex"
@@ -464,6 +476,7 @@ def apply_plan(plan: dict) -> dict:
         raise ValueError(f"trial workspace is no longer empty: {workspace}")
     source, setup_root, plugin = Path(plan["source"]), Path(plan["setup_root"]), Path(plan["plugin"])
     config, current = Path(plan["config"]), Path(plan["current"])
+    tracker = setup_root / "data" / "matters.sqlite3"
     runner, launcher, discovery = Path(plan["runner"]), Path(plan["launcher"]), Path(plan["discovery"])
     managed_directories = (
         workspace, setup_root, setup_root / "scratch", setup_root / "data",
@@ -472,6 +485,12 @@ def apply_plan(plan: dict) -> dict:
     )
     _validate_managed_paths(managed_directories, (config, runner, launcher, discovery))
     assert_preflight_paths(plan.get("preflight_paths", {}))
+    for directory in (setup_root, setup_root / "scratch", setup_root / "data", setup_root / "plugins"):
+        if directory.exists() or directory.is_symlink():
+            assert_private_directory(directory)
+    for private_file in (config, tracker, discovery):
+        if private_file.exists() or private_file.is_symlink():
+            assert_private_file(private_file)
     allowed_managed = {
         *(workspace / ".agents" / "skills" / name for name in PROJECT_SKILLS.values()),
         current, runner, launcher,
@@ -499,8 +518,13 @@ def apply_plan(plan: dict) -> dict:
             setup_root / "plugins", workspace / ".agents", workspace / ".agents" / "skills",
         ):
             if not path.exists():
-                path.mkdir(parents=True, exist_ok=False)
+                if path == workspace or path == workspace / ".agents" or path == workspace / ".agents" / "skills":
+                    path.mkdir(parents=True, exist_ok=False)
+                else:
+                    ensure_private_directory(path)
                 created.append(path)
+            elif path == setup_root or setup_root in path.parents:
+                assert_private_directory(path)
         if not plugin.exists():
             created.append(plugin)
             shutil.copytree(source, plugin, ignore=_ignored)
@@ -562,8 +586,7 @@ def apply_plan(plan: dict) -> dict:
             if config.exists():
                 raise ValueError("Codex candidate does not replace an existing config without a separate reviewed migration")
             created.append(config)
-            config.write_text(plan["config_preview"], encoding="utf-8")
-            tracker = setup_root / "data" / "matters.sqlite3"
+            create_private_file(config, plan["config_preview"].encode("utf-8"))
             initialize_tracker_exclusive(tracker)
             created.append(tracker)
             changed.extend([str(config), str(tracker)])
@@ -581,7 +604,7 @@ def apply_plan(plan: dict) -> dict:
                 replaced_files.append((discovery, discovery.read_bytes(), discovery.stat().st_mode))
             else:
                 created.append(discovery)
-            discovery.write_text(discovery_text, encoding="utf-8")
+            replace_private_file(discovery, discovery_text.encode("utf-8"))
             changed.append(str(discovery))
         with sqlite3.connect(load_config(config).tracker_database) as connection:
             if connection.execute("PRAGMA quick_check").fetchone()[0] != "ok":

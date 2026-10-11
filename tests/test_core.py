@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -76,6 +77,20 @@ class TrackerTests(unittest.TestCase):
         commit_mutation(self.database, "timeline", second, second_preview["confirm_token"])
         with self.assertRaises(ValueError):
             commit_mutation(self.database, "timeline", first, first_preview["confirm_token"])
+
+    def test_runtime_tracker_refuses_mode_drift_and_hardlinks(self):
+        original = self.database.read_bytes()
+        self.database.chmod(0o640)
+        with self.assertRaisesRegex(ValueError, "migrate this existing path explicitly"):
+            read_show(self.database, "2030-001")
+        self.assertEqual(self.database.read_bytes(), original)
+        self.database.chmod(0o600)
+        alias = self.root / "alias.sqlite3"
+        os.link(self.database, alias)
+        result = verify(self.database)
+        self.assertFalse(result["ok"])
+        self.assertIn("multiple hard links", result["problems"][0])
+        self.assertEqual(self.database.read_bytes(), original)
 
     def test_post_commit_readback_failure_is_not_reported_as_retry_safe(self):
         args = mutation_args(self.database, "create")
@@ -304,6 +319,7 @@ external_ai = false
         args.confirm_token = preview["confirm_token"]
         result = commit_output(args)
         self.assertTrue(result["committed"])
+        self.assertEqual(Path(result["path"]).stat().st_mode & 0o777, 0o600)
         with self.assertRaises(ValueError):
             preview_output(args)
         escaped = argparse.Namespace(

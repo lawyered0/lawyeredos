@@ -39,3 +39,9 @@ process able to rewrite the workspace concurrently could therefore race a
 successful check. Do not run setup or rollback while another process is
 modifying `.lawyeredos`, `.claude`, or `.agents`; stop and rerun the preview if
 the workspace changes.
+
+New confidential app-owned paths use `0700` directories and `0600` files.
+Existing modes are never silently broadened or tightened: an unsafe existing
+path produces a migration-required error and remains byte-for-byte and
+mode-for-mode unchanged. See `docs/MIGRATION.md`. This policy deliberately does
+not apply recursive permission changes to user workspaces or matter folders.

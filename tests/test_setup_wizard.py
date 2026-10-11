@@ -22,6 +22,8 @@ from lawyeredos.setup_wizard import (
     render_launcher,
     render_terminal_launcher,
     rollback,
+    _backup,
+    _undo_failed_apply,
 )
 
 
@@ -299,6 +301,101 @@ class SetupWizardTests(unittest.TestCase):
         self.assertEqual(settings["theme"], "dark")
         self.assertEqual(settings["env"]["EXAMPLE"], "kept")
         self.assertIn("LAWYEREDOS_CONFIG", settings["env"])
+
+    def test_rollback_restores_preexisting_settings_bytes_and_mode(self):
+        settings_path = self.workspace / ".claude" / "settings.local.json"
+        settings_path.parent.mkdir(parents=True)
+        original = json.dumps({"theme": "dark", "env": {"EXAMPLE": "kept"}}).encode()
+        settings_path.write_bytes(original)
+        settings_path.chmod(0o644)
+        apply_plan(build_plan(self.answers()))
+        rollback(self.workspace)
+        self.assertEqual(settings_path.read_bytes(), original)
+        self.assertEqual(settings_path.stat().st_mode & 0o777, 0o644)
+
+    def test_rollback_rejects_insecure_state_before_any_mutation(self):
+        result = apply_plan(build_plan(self.answers()))
+        state = Path(result["rollback_state"])
+        config = Path(result["config"])
+        config_before = config.read_bytes()
+        state.chmod(0o644)
+        with self.assertRaisesRegex(ValueError, "migrate this existing path explicitly"):
+            rollback(self.workspace)
+        self.assertEqual(config.read_bytes(), config_before)
+        self.assertTrue(Path(result["plugin"]).exists())
+        self.assertEqual(state.stat().st_mode & 0o777, 0o644)
+
+    def test_rollback_rejects_special_backup_before_any_mutation(self):
+        first = apply_plan(build_plan(self.answers()))
+        launcher = Path(first["launcher"])
+        launcher.write_text("private launcher content\n", encoding="utf-8")
+        result = apply_plan(build_plan(self.answers()))
+        state_path = Path(result["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        record = next(item for item in state["backups"] if item["original"] == str(launcher))
+        backup = Path(record["backup"])
+        backup.unlink()
+        os.mkfifo(backup, 0o600)
+        launcher_before = launcher.read_bytes()
+        with self.assertRaisesRegex(ValueError, "not a regular file"):
+            rollback(self.workspace)
+        self.assertEqual(launcher.read_bytes(), launcher_before)
+        self.assertTrue(Path(result["plugin"]).exists())
+
+    def test_rollback_rejects_corrupt_mode_metadata_before_any_mutation(self):
+        first = apply_plan(build_plan(self.answers()))
+        launcher = Path(first["launcher"])
+        launcher.write_text("private launcher content\n", encoding="utf-8")
+        result = apply_plan(build_plan(self.answers()))
+        state_path = Path(result["rollback_state"])
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        record = next(item for item in state["backups"] if item["original"] == str(launcher))
+        record["original_modes"]["."]["mode"] = 0o7777
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        launcher_before = launcher.read_bytes()
+        with self.assertRaisesRegex(ValueError, "mode metadata is invalid"):
+            rollback(self.workspace)
+        self.assertEqual(launcher.read_bytes(), launcher_before)
+        self.assertTrue(Path(result["plugin"]).exists())
+
+    def test_failed_apply_recovery_restores_file_and_skill_tree_modes(self):
+        setup_root = self.workspace / ".lawyeredos"
+        setup_root.mkdir(parents=True)
+        setup_root.chmod(0o700)
+        backup_root = setup_root / "backups" / "fictional-transaction"
+        backup_root.parent.mkdir(mode=0o700)
+        settings = self.workspace / ".claude" / "settings.local.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_bytes(b'{"theme":"dark"}\n')
+        settings.chmod(0o644)
+        skill = self.workspace / ".claude" / "skills" / "managed-fictional"
+        skill.mkdir(parents=True)
+        skill.chmod(0o750)
+        skill_file = skill / "SKILL.md"
+        skill_file.write_text("fictional managed skill\n", encoding="utf-8")
+        skill_file.chmod(0o640)
+        backups = []
+        _backup(settings, backup_root, backups)
+        _backup(skill, backup_root, backups)
+        settings.write_text("changed\n", encoding="utf-8")
+        settings.chmod(0o600)
+        skill_file.write_text("changed\n", encoding="utf-8")
+        skill.chmod(0o700)
+        skill_file.chmod(0o600)
+        plan = {
+            "setup_root": str(setup_root),
+            "plugin": str(setup_root / "plugins" / "unused"),
+            "_active_transaction": {
+                "created": [], "backups": backups, "backup_root": str(backup_root),
+                "previous_state": None,
+            },
+        }
+        self.assertEqual(_undo_failed_apply(plan), [])
+        self.assertEqual(settings.read_bytes(), b'{"theme":"dark"}\n')
+        self.assertEqual(settings.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(skill.stat().st_mode & 0o777, 0o750)
+        self.assertEqual(skill_file.read_text(encoding="utf-8"), "fictional managed skill\n")
+        self.assertEqual(skill_file.stat().st_mode & 0o777, 0o640)
 
     def test_apply_preserves_unrelated_private_skill_and_settings(self):
         private_skill = self.workspace / ".claude" / "skills" / "private-existing-skill"

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .common import emit, preview_token
+from .private_fs import assert_private_file, create_private_file
 
 
 SCHEMA_VERSION = 1
@@ -34,6 +35,7 @@ def now() -> str:
 
 @contextmanager
 def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+    assert_private_file(path)
     if write:
         connection = sqlite3.connect(path, timeout=5, isolation_level=None)
     else:
@@ -52,11 +54,13 @@ def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
 
 
 def initialize(path: Path) -> None:
-    if path.exists():
+    if path.exists() or path.is_symlink():
         raise ValueError("database already exists")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as connection:
-        connection.executescript(
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    create_private_file(path)
+    try:
+        with sqlite3.connect(path) as connection:
+            connection.executescript(
             """
             PRAGMA foreign_keys = ON;
             CREATE TABLE meta (
@@ -100,7 +104,11 @@ def initialize(path: Path) -> None:
             CREATE INDEX timeline_file_idx ON timeline(file_number, id);
             CREATE INDEX audit_file_idx ON audit(file_number, id);
             """
-        )
+            )
+        assert_private_file(path)
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
 
 
 def revision(connection: sqlite3.Connection) -> int:

@@ -4,6 +4,7 @@ import base64
 import imaplib
 import io
 import json
+import os
 import sqlite3
 import subprocess
 import tempfile
@@ -16,6 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from lawyeredos.config import load_config
 from lawyeredos.integrations import GmailReadonlyAdapter
 from lawyeredos.imap_mail import (
     GmailImapReadonlyAdapter, _gmail_system_labels, _mailbox_system_flags,
@@ -29,6 +31,8 @@ from lawyeredos.mail_intake import (
     plan,
     process_bundle,
     _transmission_state,
+    _managed_review_ack,
+    _managed_session_bundle,
 )
 from lawyeredos.tracker_cli import initialize
 
@@ -181,6 +185,11 @@ external_ai = false
         saved = Path(reviewed["attachments"][0]["saved_path"])
         self.assertEqual(saved.name, "client-note.txt")
         self.assertEqual(saved.read_bytes(), b"Fictional attachment text.\n")
+        self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(saved.parent.stat().st_mode & 0o777, 0o700)
+        staging = self.matter / ".lawyeredos-incoming"
+        self.assertEqual(staging.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(list(staging.iterdir()), [])
 
         second_plan = plan(self.config, "2032-001")
         self.assertIn("newer_than:30d", second_plan["query"])
@@ -200,6 +209,23 @@ external_ai = false
         self.assertEqual(len(self.acknowledge_all()), 1)
         newest = process_bundle(self.config, "Northstar", self.bundle(third_plan, [new_message]))
         self.assertEqual(newest["messages"][0]["status"], "reviewed")
+
+    def test_attachment_directories_are_exact_private_under_restrictive_umask(self):
+        planned = plan(self.config, "Northstar")
+        previous = os.umask(0o777)
+        try:
+            result = process_bundle(
+                self.config, "Northstar",
+                self.bundle(planned, [self.message(attachment=self.attachment())]),
+            )
+        finally:
+            os.umask(previous)
+        saved = Path(result["messages"][0]["attachments"][0]["saved_path"])
+        self.assertEqual(saved.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+        staging = self.matter / ".lawyeredos-incoming"
+        self.assertEqual(staging.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(list(staging.iterdir()), [])
 
     def test_tracked_old_thread_reply_and_mail_state_reconcile_across_restart(self):
         initial_plan = plan(self.config, "Northstar")
@@ -422,6 +448,8 @@ external_ai = false
     def test_pre_feature_mail_state_database_migrates_additively(self):
         state = self.workspace / ".lawyeredos" / "data" / "mail-intake.sqlite3"
         state.parent.mkdir(parents=True)
+        (self.workspace / ".lawyeredos").chmod(0o700)
+        state.parent.chmod(0o700)
         with sqlite3.connect(state) as connection:
             connection.execute(
                 "CREATE TABLE message_mail_state ("
@@ -432,6 +460,7 @@ external_ai = false
                 "observed_at TEXT NOT NULL, "
                 "PRIMARY KEY(file_number, source, account_fingerprint, message_id))"
             )
+        state.chmod(0o600)
         planned = plan(self.config, "Northstar")
         self.assertTrue(planned["ok"])
         with sqlite3.connect(state) as connection:
@@ -534,7 +563,10 @@ external_ai = false
         document.save(buffer)
         existing = self.matter / "email-attachments"
         existing.mkdir()
-        (existing / "client-note.docx").write_bytes(b"pre-existing user file")
+        existing.chmod(0o750)
+        user_file = existing / "client-note.docx"
+        user_file.write_bytes(b"pre-existing user file")
+        user_file.chmod(0o640)
 
         planned = plan(self.config, "Northstar")
         attachment = self.attachment(
@@ -547,7 +579,10 @@ external_ai = false
         reviewed = result["messages"][0]["attachments"][0]
         self.assertEqual(reviewed["status"], "review_required")
         self.assertNotEqual(Path(reviewed["saved_path"]).name, "client-note.docx")
-        self.assertEqual((existing / "client-note.docx").read_bytes(), b"pre-existing user file")
+        self.assertEqual(user_file.read_bytes(), b"pre-existing user file")
+        self.assertEqual(existing.stat().st_mode & 0o777, 0o750)
+        self.assertEqual(user_file.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(Path(reviewed["saved_path"]).stat().st_mode & 0o777, 0o600)
         self.assertEqual(len(self.acknowledge_all()), 2)
         completed = process_bundle(
             self.config, "Northstar", self.bundle(planned, [self.message(attachment=attachment)]),
@@ -660,6 +695,9 @@ external_ai = false
         with patch("lawyeredos.content_review.extract_pdf", side_effect=fake_extract):
             first = process_bundle(self.config, "Northstar", self.bundle(planned, [message]))
         review = first["messages"][0]["attachments"][0]["review"]
+        extracted = list((self.workspace / ".lawyeredos" / "scratch" / "mail-review").glob("*.txt"))
+        self.assertEqual(len(extracted), 1)
+        self.assertEqual(extracted[0].stat().st_mode & 0o777, 0o600)
         self.assertEqual(review["coverage"]["details"]["pages"], 3)
         self.assertGreaterEqual(review["chunks_total"], 3)
         locators = []
@@ -860,6 +898,8 @@ external_ai = false
         planned = plan(self.config, "Northstar")
         folder = self.workspace / ".lawyeredos" / "scratch" / "mail-intake-session"
         folder.mkdir(parents=True)
+        (self.workspace / ".lawyeredos").chmod(0o700)
+        (self.workspace / ".lawyeredos" / "scratch").chmod(0o700)
         folder.chmod(0o700)
         bundle_path = folder / "one-run.json"
         bundle_path.write_text(json.dumps(self.bundle(planned, [self.message()])), encoding="utf-8")
@@ -872,6 +912,25 @@ external_ai = false
             ])
         self.assertEqual(status, 0)
         self.assertFalse(bundle_path.exists())
+
+    def test_deletable_bundle_and_ack_reject_hardlink_aliases(self):
+        for relative, validator in (
+            ("mail-intake-session", _managed_session_bundle),
+            ("mail-review-acks", _managed_review_ack),
+        ):
+            folder = self.workspace / ".lawyeredos" / "scratch" / relative
+            folder.mkdir(parents=True, exist_ok=True)
+            (self.workspace / ".lawyeredos").chmod(0o700)
+            (self.workspace / ".lawyeredos" / "scratch").chmod(0o700)
+            folder.chmod(0o700)
+            outside = self.root / f"{relative}.json"
+            outside.write_text("{}", encoding="utf-8")
+            outside.chmod(0o600)
+            alias = folder / "alias.json"
+            os.link(outside, alias)
+            with self.assertRaisesRegex(ValueError, "multiple hard links"):
+                validator(alias, load_config(self.config))
+            self.assertTrue(outside.exists())
 
     def test_managed_review_ack_is_hash_bound_and_deleted_after_commit(self):
         planned = plan(self.config, "Northstar")

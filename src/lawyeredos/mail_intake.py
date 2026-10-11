@@ -29,6 +29,12 @@ from .content_review import (
 from .integrations import gmail_from_config
 from .imap_mail import gmail_imap_from_config
 from .matter_context import orient
+from .private_fs import (
+    assert_private_directory,
+    assert_private_file,
+    create_private_file,
+    ensure_private_directory,
+)
 
 
 SCHEMA = "lawyeredos-mail-bundle-v1"
@@ -64,10 +70,20 @@ def state_path(config: PracticeConfig) -> Path:
 
 
 def _state_connection(path: Path) -> sqlite3.Connection:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.parent.chmod(0o700)
+    setup_root = path.parent.parent
+    if setup_root.exists() or setup_root.is_symlink():
+        assert_private_directory(setup_root)
+    else:
+        ensure_private_directory(setup_root)
+    if not path.parent.exists():
+        ensure_private_directory(path.parent)
+    else:
+        assert_private_directory(path.parent)
+    if path.exists() or path.is_symlink():
+        assert_private_file(path)
+    else:
+        create_private_file(path)
     connection = sqlite3.connect(path, timeout=5)
-    path.chmod(0o600)
     connection.row_factory = sqlite3.Row
     connection.executescript(
         """
@@ -796,12 +812,22 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
     incoming = confined_path(config.workspace_root, str(matter_folder.relative_to(config.workspace_root) / "email-attachments"))
     if incoming.exists() and (incoming.is_symlink() or not incoming.is_dir()):
         raise ValueError("matter email-attachments destination is unsafe")
-    incoming.mkdir(parents=True, exist_ok=True)
+    if not incoming.exists():
+        ensure_private_directory(incoming)
     if incoming.is_symlink():
         raise ValueError("matter email-attachments destination is a symlink")
     scratch = confined_path(config.workspace_root, ".lawyeredos/scratch/mail-review")
     state = state_path(config)
     connection = _state_connection(state)
+    try:
+        for private_scratch in (scratch.parent, scratch):
+            if private_scratch.exists() or private_scratch.is_symlink():
+                assert_private_directory(private_scratch)
+            else:
+                ensure_private_directory(private_scratch)
+    except BaseException:
+        connection.close()
+        raise
     provider_thread_order: dict[tuple[str, str], int] = {}
     for thread_id, candidate_ids in declared_thread_order.items():
         if not candidate_ids:
@@ -994,13 +1020,19 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                                 matter_folder,
                                 str(Path(".lawyeredos-incoming") / f"{staging_key}.part"),
                             )
-                            staging.parent.mkdir(parents=True, exist_ok=True)
+                            if staging.parent.exists() or staging.parent.is_symlink():
+                                assert_private_directory(staging.parent)
+                            else:
+                                ensure_private_directory(staging.parent)
                             if staging.parent.is_symlink() or staging.exists() or staging.is_symlink():
                                 raise ValueError("attachment staging path is unsafe or already exists")
-                            staging.write_bytes(data)
+                            create_private_file(staging, data)
                             if sha256_file(staging) != digest:
                                 raise ValueError("staged attachment hash verification failed")
-                            saved.parent.mkdir(parents=True, exist_ok=True)
+                            if not saved.parent.exists():
+                                ensure_private_directory(saved.parent)
+                            if saved.parent.is_symlink() or not saved.parent.is_dir():
+                                raise ValueError("attachment destination directory is unsafe")
                             directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
                             destination_fd = os.open(saved.parent, directory_flags)
                             try:
@@ -1013,6 +1045,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                             finally:
                                 os.close(destination_fd)
                             staging.unlink()
+                            assert_private_file(saved)
                     extracted = extract_review_content(saved, suffix, scratch)
                     review = _ensure_content_review(
                         connection,
@@ -1346,6 +1379,8 @@ def _managed_session_bundle(path: Path, config: PracticeConfig) -> Path:
     candidate = confined_path(managed_root, str(relative))
     if not candidate.is_file() or candidate.is_symlink():
         raise ValueError("deletable session bundle must be a regular non-symlink file")
+    if candidate.stat(follow_symlinks=False).st_nlink != 1:
+        raise ValueError("deletable session bundle must not have multiple hard links")
     if stat.S_IMODE(candidate.stat().st_mode) & 0o077:
         raise ValueError("deletable session bundle permissions must be 0600 or stricter")
     return candidate
@@ -1369,6 +1404,8 @@ def _managed_review_ack(path: Path, config: PracticeConfig) -> Path:
     candidate = confined_path(managed_root, str(relative))
     if not candidate.is_file() or candidate.is_symlink():
         raise ValueError("review acknowledgement must be a regular non-symlink file")
+    if candidate.stat(follow_symlinks=False).st_nlink != 1:
+        raise ValueError("review acknowledgement must not have multiple hard links")
     if stat.S_IMODE(candidate.stat().st_mode) & 0o077:
         raise ValueError("review acknowledgement permissions must be 0600 or stricter")
     return candidate
