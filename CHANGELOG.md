@@ -3,6 +3,16 @@
 All notable source changes are recorded here. Published host packages retain
 their own reviewed version and checksum boundaries.
 
+## 0.2.1 beta.1 — unreleased
+
+- Quote and escape the discovered Gmail `\\All` mailbox before issuing the
+  read-only IMAP `EXAMINE` command, including localized names containing
+  spaces, quotes, or backslashes.
+- Parse quoted, atom, and literal IMAP `LIST` mailbox forms conservatively and
+  replace malformed or server-supplied protocol errors with bounded messages.
+- Add wire-level regressions against Python's real `imaplib` command formatter
+  so permissive fake clients cannot conceal invalid IMAP syntax.
+
 ## 0.2.0 beta.3 / Codex beta.2 — 2026-10-11
 
 - Documented one shared core with separate Claude and Codex project

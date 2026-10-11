@@ -375,7 +375,7 @@ class SetupWizardTests(unittest.TestCase):
         old_plugin = Path(first["plugin"])
         plan = build_plan(self.answers())
         plan["package_digest"] = "f" * 64
-        new_plugin = Path(plan["setup_root"]) / "plugins" / f"lawyeredos-0.2.0-{'f' * 8}-upgrade"
+        new_plugin = Path(plan["setup_root"]) / "plugins" / f"lawyeredos-0.2.1-{'f' * 8}-upgrade"
         plan["plugin"] = str(new_plugin)
         upgraded = apply_plan(plan)
         self.assertTrue(old_plugin.is_dir())

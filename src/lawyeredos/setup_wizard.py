@@ -18,7 +18,7 @@ from lawyeredos.config import load_config
 from lawyeredos.tracker_cli import initialize
 
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 MODULES = ("matter", "tracker", "letters", "redline", "calendar", "review")
 MODULE_SKILLS = {
     "matter": "practice-work-on-matter",

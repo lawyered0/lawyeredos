@@ -1,4 +1,4 @@
-# Exact Python versions tested for the 0.2.0 release candidate.
+# Exact Python versions tested for the 0.2.1 release candidate.
 # This is a version-pinned test lock, not a cross-platform hash lock.
 # Build tools are included because the documented install uses --no-build-isolation
 # and a fresh Python 3.12 virtual environment may contain pip only.
