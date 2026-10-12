@@ -60,6 +60,9 @@ def project(database: Path, output: Path) -> dict[str, Any]:
                     )
                 values.append(value)
             sheet.append(values)
+            for cell in sheet[sheet.max_row]:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
         header = sheet[1]
         for cell in header:
             cell.fill = PatternFill("solid", fgColor="1F4E78")

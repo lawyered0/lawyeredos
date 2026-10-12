@@ -11,6 +11,7 @@ from typing import Any
 
 from .common import emit, preview_token
 from .tracker_cli import initialize, now, verify
+from .tracker_values import csv_text, folder_key, normalize_folder
 
 
 CANONICAL_FIELDS = (
@@ -32,6 +33,47 @@ ALIASES = {
     "limitation_date": ("limitation_date", "limitation_deadline", "Limitation Deadline"),
     "court_deadlines": ("court_deadlines", "Court Deadlines"),
 }
+SNAPSHOT_TABLES = {
+    "meta": ("key", "value"),
+    "matters": CANONICAL_FIELDS + ("created_at", "updated_at"),
+    "timeline": ("id", "file_number", "event_date", "text", "created_at"),
+    "audit": ("id", "revision", "action", "file_number", "payload_json", "created_at"),
+    "sqlite_sequence": ("name", "seq"),
+}
+
+
+def _snapshot_rows(connection: sqlite3.Connection) -> dict[str, Any]:
+    connection.row_factory = sqlite3.Row
+    connection.execute("BEGIN")
+    return {"tracker_snapshot_version": 1, "schema_version": 1, **{
+        table: [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY 1")]
+        for table in SNAPSHOT_TABLES
+    }}
+
+
+def _read_snapshot(source: Path) -> dict[str, Any] | None:
+    if source.suffix.casefold() == ".json":
+        value = json.loads(source.read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or "tracker_snapshot_version" not in value:
+            return None
+    elif source.suffix.casefold() in {".sqlite", ".sqlite3", ".db"}:
+        uri = f"file:{source.resolve().as_posix()}?mode=ro"
+        with sqlite3.connect(uri, uri=True) as connection:
+            if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='meta'").fetchone():
+                return None
+            value = _snapshot_rows(connection)
+    else:
+        return None
+    if value.get("tracker_snapshot_version") != 1 or value.get("schema_version") != 1:
+        raise ValueError("unsupported tracker snapshot version")
+    for table, columns in SNAPSHOT_TABLES.items():
+        rows = value.get(table)
+        if not isinstance(rows, list) or any(not isinstance(row, dict) or set(row) != set(columns) for row in rows):
+            raise ValueError(f"invalid tracker snapshot table: {table}")
+    meta = {row["key"]: row["value"] for row in value["meta"]}
+    if meta.get("schema_version") != "1" or not str(meta.get("revision", "")).isdigit():
+        raise ValueError("invalid tracker snapshot metadata")
+    return value
 
 
 def _first(row: dict[str, Any], names: tuple[str, ...]) -> Any:
@@ -49,9 +91,7 @@ def normalize(row: dict[str, Any], index: int) -> dict[str, str]:
         raise ValueError(f"source row {index} lacks file number, client, or description")
     if not value["matter_folder"]:
         raise ValueError(f"source row {index} lacks a matter folder mapping")
-    folder = Path(value["matter_folder"])
-    if folder.is_absolute() or ".." in folder.parts:
-        raise ValueError(f"source row {index} has an unsafe matter folder")
+    value["matter_folder"] = normalize_folder(value["matter_folder"])
     raw_deadlines = value["court_deadlines"]
     if raw_deadlines:
         try:
@@ -94,19 +134,24 @@ def migration_plan(source: Path, target: Path) -> dict[str, Any]:
         raise ValueError("migration source must be a regular file")
     if target.exists():
         raise ValueError("migration target already exists")
-    rows = [normalize(row, index) for index, row in enumerate(read_source(source), 1)]
+    snapshot = _read_snapshot(source)
+    source_rows = snapshot["matters"] if snapshot is not None else read_source(source)
+    rows = [normalize(row, index) for index, row in enumerate(source_rows, 1)]
     file_numbers = [row["file_number"] for row in rows]
-    folders = [row["matter_folder"] for row in rows]
+    folders = [folder_key(row["matter_folder"]) for row in rows]
     if len(file_numbers) != len(set(file_numbers)):
         raise ValueError("source contains duplicate file numbers")
     if len(folders) != len(set(folders)):
         raise ValueError("source contains duplicate matter folders")
-    digest_input = {"source": str(source.resolve()), "target": str(target.resolve()), "rows": rows}
+    digest_input = {"source": str(source.resolve()), "target": str(target.resolve()), "rows": rows,
+                    "snapshot": snapshot}
     return {
         "ok": True, "dry_run": True, "source": str(source.resolve()),
         "target": str(target.resolve()), "matter_count": len(rows),
         "status_counts": {name: sum(row["status"] == name for row in rows) for name in ("open", "closed")},
-        "rows": rows, "confirm_token": preview_token("tracker-migrate", digest_input),
+        "rows": rows, "snapshot": snapshot,
+        "history_preserved": snapshot is not None,
+        "confirm_token": preview_token("tracker-migrate", digest_input),
     }
 
 
@@ -123,21 +168,35 @@ def commit_migration(source: Path, target: Path, token: str) -> dict[str, Any]:
         initialize(temp_path)
         timestamp = now()
         with sqlite3.connect(temp_path) as connection:
-            for row in plan["rows"]:
-                connection.execute(
-                    """INSERT INTO matters(file_number,client,description,matter_folder,status,
-                    opposing_party,other_parties,primary_email,next_action,next_action_date,
-                    limitation_date,court_deadlines,created_at,updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    tuple(row[field] for field in CANONICAL_FIELDS) + (timestamp, timestamp),
-                )
+            if plan["snapshot"] is not None:
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute("DELETE FROM meta")
+                for table, columns in SNAPSHOT_TABLES.items():
+                    if table == "sqlite_sequence":
+                        connection.execute("DELETE FROM sqlite_sequence")
+                    placeholders = ",".join("?" for _ in columns)
+                    for row in plan["snapshot"][table]:
+                        connection.execute(
+                            f"INSERT INTO {table} ({','.join(columns)}) VALUES ({placeholders})",
+                            tuple(row[column] for column in columns),
+                        )
+            else:
+                for row in plan["rows"]:
+                    connection.execute(
+                        """INSERT INTO matters(file_number,client,description,matter_folder,status,
+                        opposing_party,other_parties,primary_email,next_action,next_action_date,
+                        limitation_date,court_deadlines,created_at,updated_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        tuple(row[field] for field in CANONICAL_FIELDS) + (timestamp, timestamp),
+                    )
         health = verify(temp_path)
         if not health["ok"]:
             raise ValueError("migrated database failed verification: " + "; ".join(health["problems"]))
         if target.exists():
             raise ValueError("migration target appeared during build; refusing replacement")
         os.replace(temp_path, target)
-        return {"ok": True, "committed": True, "target": str(target), "matter_count": plan["matter_count"]}
+        return {"ok": True, "committed": True, "target": str(target), "matter_count": plan["matter_count"],
+                "history_preserved": plan["history_preserved"]}
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -149,16 +208,22 @@ def export_tracker(database: Path, output: Path, fmt: str) -> dict[str, Any]:
     uri = f"file:{database.resolve().as_posix()}?mode=ro"
     with sqlite3.connect(uri, uri=True) as connection:
         connection.row_factory = sqlite3.Row
-        rows = [dict(row) for row in connection.execute("SELECT * FROM matters ORDER BY file_number")]
+        if fmt == "json":
+            snapshot = _snapshot_rows(connection)
+            rows = snapshot["matters"]
+        else:
+            rows = [dict(row) for row in connection.execute("SELECT * FROM matters ORDER BY file_number")]
     output.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "json":
-        output.write_text(json.dumps({"schema_version": 1, "matters": rows}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with output.open("x", encoding="utf-8") as handle:
+            handle.write(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
     else:
         with output.open("x", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]) if rows else list(CANONICAL_FIELDS))
             writer.writeheader()
-            writer.writerows(rows)
-    return {"ok": True, "output": str(output), "format": fmt, "matter_count": len(rows)}
+            writer.writerows({key: csv_text(value) for key, value in row.items()} for row in rows)
+    return {"ok": True, "output": str(output), "format": fmt, "matter_count": len(rows),
+            "history_preserved": fmt == "json"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -184,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "preview":
             result = migration_plan(Path(args.source), Path(args.target))
             result.pop("rows")
+            result.pop("snapshot")
         elif args.command == "commit":
             result = commit_migration(Path(args.source), Path(args.target), args.confirm_token)
         else:

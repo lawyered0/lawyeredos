@@ -11,6 +11,7 @@ from typing import Any, Iterator, Mapping
 
 from .common import emit, preview_token
 from .private_fs import assert_private_file, create_private_file
+from .tracker_values import folder_key, normalize_folder
 
 
 SCHEMA_VERSION = 1
@@ -132,10 +133,13 @@ def verify(path: Path) -> dict[str, Any]:
             ).fetchone()
             if schema is None or int(schema[0]) != SCHEMA_VERSION:
                 problems.append("unsupported schema version")
-            duplicates = connection.execute(
-                "SELECT matter_folder, COUNT(*) n FROM matters GROUP BY matter_folder HAVING n > 1"
-            ).fetchall()
-            if duplicates:
+            folders = [row[0] for row in connection.execute("SELECT matter_folder FROM matters")]
+            try:
+                keys = [folder_key(folder) for folder in folders]
+            except ValueError:
+                problems.append("unsafe matter folder")
+                keys = []
+            if len(keys) != len(set(keys)):
                 problems.append("duplicate matter folders")
             bad_deadlines = []
             for row in connection.execute("SELECT file_number, court_deadlines FROM matters"):
@@ -190,7 +194,7 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
         payload["values"] = {
             "client": args.client.strip(),
             "description": args.description.strip(),
-            "matter_folder": args.matter_folder.strip(),
+            "matter_folder": normalize_folder(args.matter_folder),
             "status": "open",
             "opposing_party": args.opposing_party.strip(),
             "other_parties": args.other_parties.strip(),
@@ -208,6 +212,8 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
             changes[field] = value.strip()
         if not changes:
             raise ValueError("at least one --set is required")
+        if "matter_folder" in changes:
+            changes["matter_folder"] = normalize_folder(changes["matter_folder"])
         if "court_deadlines" in changes:
             parsed = json.loads(changes["court_deadlines"])
             if not isinstance(parsed, list):
@@ -271,14 +277,6 @@ def validate_payload(connection: sqlite3.Connection, payload: dict[str, Any]) ->
         values = payload["values"]
         if not file_number.strip() or not values["client"] or not values["description"]:
             raise ValueError("file number, client, and description are required")
-        folder = Path(values["matter_folder"])
-        if not values["matter_folder"] or folder.is_absolute() or ".." in folder.parts:
-            raise ValueError("matter_folder must be a confined relative path")
-        duplicate = connection.execute(
-            "SELECT file_number FROM matters WHERE matter_folder=?", (values["matter_folder"],)
-        ).fetchone()
-        if duplicate:
-            raise ValueError("matter folder already assigned")
     else:
         if row is None:
             raise ValueError("matter not found")
@@ -288,6 +286,13 @@ def validate_payload(connection: sqlite3.Connection, payload: dict[str, Any]) ->
             raise ValueError("matter is not open")
         if action == "reopen" and row["status"] != "closed":
             raise ValueError("matter is not closed")
+    folder = (payload["values"]["matter_folder"] if action == "create" else
+              payload.get("changes", {}).get("matter_folder"))
+    if folder is not None:
+        key = folder_key(folder)
+        for existing in connection.execute("SELECT file_number, matter_folder FROM matters"):
+            if existing["file_number"] != file_number and folder_key(existing["matter_folder"]) == key:
+                raise ValueError("matter folder already assigned")
 
 
 def preview_mutation(path: Path, action: str, args: argparse.Namespace) -> dict[str, Any]:
