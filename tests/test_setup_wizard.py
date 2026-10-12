@@ -65,6 +65,54 @@ class SetupWizardTests(unittest.TestCase):
         values.update(changes)
         return Answers(**values)
 
+    def test_workspace_refuses_home_and_home_alias_without_changes(self):
+        home = self.root / "fictional-home"
+        home.mkdir()
+        marker = home / "keep.txt"
+        marker.write_text("fictional personal customization", encoding="utf-8")
+        alias = self.root / "home-alias"
+        alias.symlink_to(home, target_is_directory=True)
+        with patch("lawyeredos.setup_wizard.Path.home", return_value=home):
+            for workspace in (home, alias):
+                with self.subTest(workspace=workspace):
+                    with self.assertRaisesRegex(ValueError, "home directory"):
+                        build_plan(self.answers(workspace=workspace))
+        self.assertEqual(marker.read_text(encoding="utf-8"), "fictional personal customization")
+        self.assertEqual(list(home.iterdir()), [marker])
+
+    def test_workspace_refuses_every_user_global_host_namespace(self):
+        home = self.root / "fictional-home"
+        home.mkdir()
+        with patch("lawyeredos.setup_wizard.Path.home", return_value=home):
+            for namespace in (".claude", ".codex", ".agents"):
+                for workspace in (home / namespace, home / namespace / "nested"):
+                    with self.subTest(workspace=workspace):
+                        with self.assertRaisesRegex(ValueError, "user-global"):
+                            build_plan(self.answers(workspace=workspace))
+        self.assertEqual(list(home.iterdir()), [])
+
+    def test_apply_rechecks_workspace_home_boundary_before_writing(self):
+        home = self.root / "fictional-home"
+        home.mkdir()
+        with patch("lawyeredos.setup_wizard.Path.home", return_value=home):
+            plan = build_plan(self.answers())
+        # A retained plan must not become a global installation in a new host context.
+        with patch("lawyeredos.setup_wizard.Path.home", return_value=self.workspace):
+            with self.assertRaisesRegex(ValueError, "home directory"):
+                apply_plan(plan)
+        self.assertFalse(self.workspace.exists())
+
+    def test_rollback_cli_refusal_exits_nonzero(self):
+        apply_plan(build_plan(self.answers()))
+        config = self.workspace / ".lawyeredos" / "config.toml"
+        config.write_text(config.read_text(encoding="utf-8") + "\n# fictional user modification\n", encoding="utf-8")
+        self.assertEqual(main(["--workspace", str(self.workspace), "--rollback"]), 2)
+
+    def test_interactive_eof_cancels_without_traceback(self):
+        with patch("builtins.input", side_effect=EOFError):
+            self.assertEqual(main([]), 1)
+        self.assertFalse(self.workspace.exists())
+
     def test_preview_has_no_side_effects_or_secret_values(self):
         plan = build_plan(self.answers())
         self.assertFalse(self.workspace.exists())

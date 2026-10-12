@@ -17,8 +17,10 @@ tests that remain before public distribution.
   runtime, validator, and read-only tracker commands, and a fresh Local session
   discovered the three selected `lawyeredos-*` project skills and the
   `lawyeredos-legal-review-lens` agent.
-- [x] Privacy audit and archive scan found no personal paths, credentials,
-  account IDs, real client data, or identifying DOCX metadata.
+- [x] The automated archive privacy audit passed its checks for common credential,
+  contact and user-path patterns, explicit forbidden terms, residue files, and
+  supported Office XML metadata. Human source review remains necessary for names,
+  addresses, account IDs and other identifying detail outside those checks.
 - [x] Provenance is recorded in `PROVENANCE.md`; the vendored MIT license and
   attribution are retained.
 - [x] The neutral DOCX was traced to the bundled fresh-document generator and

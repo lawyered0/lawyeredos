@@ -47,6 +47,13 @@ their own reviewed version and checksum boundaries.
 - Add wire-level regressions against Python's real `imaplib` command formatter
   so permissive fake clients cannot conceal invalid IMAP syntax.
 
+## 0.2.1 beta.1 — historical acceptance record
+
+- Record the project-local Codex acceptance and bounded portable IMAP evidence
+  referenced in `CODEX.md` and `docs/CODEX-ACCEPTANCE.md`.
+- Retain the original archive and runtime boundaries of that historical trial;
+  later source versions have separate validation requirements.
+
 ## 0.2.0 beta.3 / Codex beta.2 — 2026-10-11
 
 - Documented one shared core with separate Claude and Codex project

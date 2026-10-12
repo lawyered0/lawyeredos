@@ -42,6 +42,10 @@ The wizard asks for:
    host-neutral read-only IMAP adapter; and
 6. an optional experimental dedicated Google Calendar adapter.
 
+Choose a project directory outside the home folder itself and outside `~/.claude`,
+`~/.codex`, and `~/.agents`. Both host installers reject those global locations,
+including paths that resolve there through symlinks.
+
 Matter orientation and the tracker are required core modules. Selecting a
 jurisdiction profile does not install current law or replace primary-law
 verification. For the supported Claude route, the user authenticates directly
@@ -97,16 +101,13 @@ desktop app's Code tab. The generated launcher is an optional convenience:
 <workspace>/.lawyeredos/launch-lawyeredos.sh
 ```
 
-It changes to the chosen workspace, sets `LAWYEREDOS_CONFIG` to the private
-project-local config, binds `LAWYEREDOS_PYTHON` to the virtual-environment
-interpreter used for setup. It also installs collision-safe project skills and
-the selected review agent into Claude's documented `.claude/` project
-locations, and merges only the three LawyeredOS path variables into
-`.claude/settings.local.json`. The default launcher uses macOS to open the
-workspace folder directly in Claude Desktop and does not require a separate CLI
-login. The optional terminal launcher invokes `claude`. Neither changes
-user-global or account settings. Review the normal workspace-trust and
-permission prompts.
+The wizard installs the project skills and selected review agent and merges only
+the three LawyeredOS path variables into `.claude/settings.local.json`. The
+Desktop launcher checks the retained runtime and opens the workspace in Claude
+Desktop through macOS; the project settings supply the runtime environment.
+The optional terminal launcher changes to the workspace, exports the path
+variables, and invokes `claude`. Review the normal workspace-trust and permission
+prompts.
 Retain the extracted package and the recorded runtime. If setup used `.venv`,
 retain that directory too. Moving or deleting the recorded runtime makes the
 launcher stop with recovery instructions instead of silently using another
@@ -170,7 +171,8 @@ The Claude Gmail connector is a supported Claude feature, but LawyeredOS cannot
 verify its authorization locally and has not completed a real-mail acceptance
 run. The bundled Gmail REST and Google Calendar adapters remain experimental
 and fail closed when their named credential source is absent. The portable IMAP
-route has comprehensive fake-transport coverage but no live-IMAP or ordinary
-host acceptance. Email is
+route has comprehensive fake-transport coverage and the bounded single-account
+IMAP acceptance recorded in README.md. Broader accounts and recovery behavior
+remain outside that live acceptance evidence. Email is
 never silently disabled: `skip` is an explicit, safe choice. The
 practice-manager adapter is unavailable.

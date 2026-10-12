@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sqlite3
 import sys
@@ -11,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from lawyeredos.tracker_cli import initialize
+from lawyeredos.private_fs import create_private_file, ensure_private_directory
 
 
 def main() -> int:
@@ -21,6 +23,8 @@ def main() -> int:
     if destination.exists():
         print("error: destination already exists")
         return 2
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_directory(destination)
     workspace = destination / "workspace"
     scratch = destination / "scratch"
     matter_folder = workspace / "2030-001-northstar-bakery"
@@ -54,10 +58,17 @@ def main() -> int:
                 "Confirm revised delivery clause", timestamp, timestamp,
             ),
         )
-    template = PROJECT_ROOT / "assets" / "neutral-letterhead.docx"
+    assets = destination / "assets"
+    ensure_private_directory(assets)
+    template = assets / "neutral-letterhead.docx"
+    create_private_file(template, (PROJECT_ROOT / "assets" / "neutral-letterhead.docx").read_bytes())
+    manifest = assets / "template-manifest.json"
+    create_private_file(manifest, (json.dumps({
+        "schema_version": 1, "algorithm": "sha256", "template": template.name,
+        "sha256": hashlib.sha256(template.read_bytes()).hexdigest(),
+    }, indent=2) + "\n").encode("utf-8"))
     config = destination / "config.toml"
-    config.write_text(
-        "\n".join([
+    config_text = "\n".join([
             "schema_version = 1",
             "",
             "[workspace]",
@@ -70,7 +81,16 @@ def main() -> int:
             "",
             "[documents]",
             f'template = {json.dumps(str(template))}',
+            f'template_manifest = {json.dumps(str(manifest))}',
             'author = "Authorized reviewer"',
+            "",
+            "[branding]",
+            'mode = "neutral"',
+            'label = "Northstar Legal Lab"',
+            "",
+            "[modules]",
+            "matter = true", "tracker = true", "letters = true",
+            "redline = false", "calendar = false", "review = false",
             "",
             "[jurisdiction]",
             'profile = "none"',
@@ -87,9 +107,8 @@ def main() -> int:
             "[review]",
             "external_ai = false",
             "",
-        ]),
-        encoding="utf-8",
-    )
+        ]) + "\n"
+    create_private_file(config, config_text.encode("utf-8"))
     print(config)
     return 0
 

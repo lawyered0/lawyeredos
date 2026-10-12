@@ -6,78 +6,17 @@ import zipfile
 from pathlib import Path
 
 
-ROOT_FILES = {
-    ".gitignore",
-    "ATTRIBUTION.md",
-    "CHANGELOG.md",
-    "CODEX.md",
-    "CONTRIBUTING.md",
-    "COPYRIGHT",
-    "LICENSE",
-    "LICENSE-DECISION.md",
-    "PROVENANCE.md",
-    "README.md",
-    "RELEASE-CHECKLIST.md",
-    "ROADMAP.md",
-    "SECURITY.md",
-    "SETUP.md",
-    "SUPPORT.md",
-    "THIRD_PARTY_NOTICES.md",
-    "USE-NOTICE.md",
-    "config.example.toml",
-    "pyproject.toml",
-    "requirements-documents.txt",
-    "requirements-lock.txt",
-    "requirements-test.txt",
-}
-ROOT_DIRECTORIES = {
-    ".agents",
-    ".claude",
-    ".claude-plugin",
-    ".github",
-    "agents",
-    "assets",
-    "docs",
-    "fixtures",
-    "profiles",
-    "scripts",
-    "skills",
-    "src",
-    "tests",
-    "vendor",
-}
-EXCLUDED_PARTS = {
-    ".DS_Store",
-    ".git",
-    ".pytest_cache",
-    ".venv",
-    "__pycache__",
-    "dist",
-    "qa",
-}
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from lawyeredos.package_inputs import ROOT_FILES, ROOT_DIRECTORIES, EXCLUDED_PARTS, release_files
+
+
 FIXED_TIME = (2026, 1, 1, 0, 0, 0)
 
 
 def package_root() -> Path:
     return Path(__file__).resolve().parents[1]
-
-
-def release_files(root: Path) -> list[Path]:
-    missing = sorted(name for name in ROOT_FILES if not (root / name).is_file())
-    missing.extend(sorted(name for name in ROOT_DIRECTORIES if not (root / name).is_dir()))
-    if missing:
-        raise ValueError(f"release inputs missing: {', '.join(missing)}")
-    files = [root / name for name in sorted(ROOT_FILES)]
-    for name in sorted(ROOT_DIRECTORIES):
-        for path in sorted((root / name).rglob("*")):
-            relative = path.relative_to(root)
-            if any(part in EXCLUDED_PARTS for part in relative.parts):
-                continue
-            if path.is_symlink():
-                raise ValueError(f"release input must not be a symlink: {relative}")
-            if path.is_file() and not path.name.endswith((".pyc", ".pyo")):
-                files.append(path)
-    return files
 
 
 def build(output: Path) -> dict[str, int | str]:

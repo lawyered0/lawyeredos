@@ -60,6 +60,43 @@ class CodexSetupTests(unittest.TestCase):
         values.update(changes)
         return normalize_answers(**values)
 
+    def test_workspace_refuses_home_and_home_alias_without_changes(self):
+        home = self.root / "fictional-home"
+        home.mkdir()
+        marker = home / "keep.txt"
+        marker.write_text("fictional personal customization", encoding="utf-8")
+        alias = self.root / "home-alias"
+        alias.symlink_to(home, target_is_directory=True)
+        with patch("lawyeredos.codex_setup.Path.home", return_value=home):
+            for workspace in (home, alias):
+                with self.subTest(workspace=workspace):
+                    with self.assertRaisesRegex(ValueError, "home directory"):
+                        build_plan(self.answers(workspace=workspace))
+        self.assertEqual(marker.read_text(encoding="utf-8"), "fictional personal customization")
+        self.assertEqual(list(home.iterdir()), [marker])
+
+    def test_workspace_refuses_every_user_global_host_namespace(self):
+        home = self.root / "fictional-home"
+        home.mkdir()
+        with patch("lawyeredos.codex_setup.Path.home", return_value=home):
+            for namespace in (".claude", ".codex", ".agents"):
+                for workspace in (home / namespace, home / namespace / "nested"):
+                    with self.subTest(workspace=workspace):
+                        with self.assertRaisesRegex(ValueError, "user-global"):
+                            build_plan(self.answers(workspace=workspace))
+        self.assertEqual(list(home.iterdir()), [])
+
+    def test_apply_rechecks_workspace_home_boundary_before_writing(self):
+        home = self.root / "fictional-home"
+        home.mkdir()
+        with patch("lawyeredos.codex_setup.Path.home", return_value=home):
+            plan = build_plan(self.answers())
+        # A retained plan must not become a global installation in a new host context.
+        with patch("lawyeredos.codex_setup.Path.home", return_value=self.workspace):
+            with self.assertRaisesRegex(ValueError, "home directory"):
+                apply_plan(plan)
+        self.assertFalse(self.workspace.exists())
+
     def test_preview_is_side_effect_free_and_host_scoped(self):
         plan = build_plan(self.answers(), require_new_workspace=True)
         self.assertFalse(self.workspace.exists())
@@ -328,6 +365,61 @@ class CodexSetupTests(unittest.TestCase):
                 apply_plan(plan)
         unrelated = self.workspace / ".agents" / "skills" / "unrelated-concurrent.txt"
         self.assertEqual(unrelated.read_text(encoding="utf-8"), "preserve")
+
+    def test_runtime_only_upgrade_rewrites_verified_wrapper_and_rolls_back(self):
+        first = apply_plan(build_plan(self.answers()))
+        runner = self.workspace / ".lawyeredos" / "lawyeredos-run"
+        original = runner.read_bytes()
+        other_runtime = self.root / "fictional-python"
+        other_runtime.symlink_to(codex_setup.sys.executable)
+        with patch("lawyeredos.codex_setup.sys.executable", str(other_runtime)):
+            plan = build_plan(self.answers(existing="reuse"))
+            self.assertTrue(any(item["action"] == "write_runtime_wrapper" for item in plan["operations"]))
+            upgraded = apply_plan(plan)
+        self.assertNotEqual(runner.read_bytes(), original)
+        self.assertIn(str(other_runtime).encode(), runner.read_bytes())
+        self.assertTrue(Path(upgraded["upgrade_rollback_state"]).exists())
+        self.assertTrue(rollback_upgrade(self.workspace)["ok"])
+        self.assertEqual(runner.read_bytes(), original)
+        restored = build_plan(self.answers(existing="reuse"))
+        self.assertEqual(restored["prior_fingerprints"][str(runner.resolve())], codex_setup.managed_fingerprint(runner))
+
+    def test_runtime_upgrade_rollback_refuses_tampered_wrapper_snapshot(self):
+        apply_plan(build_plan(self.answers()))
+        runtime = self.root / "fictional-python"
+        runtime.symlink_to(codex_setup.sys.executable)
+        with patch("lawyeredos.codex_setup.sys.executable", str(runtime)):
+            upgraded = apply_plan(build_plan(self.answers(existing="reuse")))
+        runner = self.workspace / ".lawyeredos" / "lawyeredos-run"
+        applied = runner.read_bytes()
+        state = Path(upgraded["upgrade_rollback_state"])
+        record = json.loads(state.read_text(encoding="utf-8"))
+        record["prior_wrapper_files"][str(runner.resolve())]["content_hex"] = b"fictional tampering".hex()
+        state.write_text(json.dumps(record), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "does not match its fingerprint"):
+            rollback_upgrade(self.workspace)
+        self.assertEqual(runner.read_bytes(), applied)
+
+    def test_runtime_upgrade_rollback_recovers_wrapper_on_discovery_failure(self):
+        apply_plan(build_plan(self.answers()))
+        runtime = self.root / "fictional-python"
+        runtime.symlink_to(codex_setup.sys.executable)
+        with patch("lawyeredos.codex_setup.sys.executable", str(runtime)):
+            upgraded = apply_plan(build_plan(self.answers(existing="reuse")))
+        runner = self.workspace / ".lawyeredos" / "lawyeredos-run"
+        applied = runner.read_bytes()
+        discovery = Path(upgraded["discovery"])
+        original_replace = codex_setup.replace_private_file
+        def fail_discovery(path, content):
+            if path == discovery:
+                raise OSError("fictional discovery failure")
+            return original_replace(path, content)
+        with patch("lawyeredos.codex_setup.replace_private_file", side_effect=fail_discovery):
+            with self.assertRaisesRegex(OSError, "fictional discovery failure"):
+                rollback_upgrade(self.workspace)
+        self.assertEqual(runner.read_bytes(), applied)
+        self.assertEqual(runner.stat().st_mode & 0o777, 0o700)
+        self.assertTrue(Path(upgraded["upgrade_rollback_state"]).exists())
 
     def test_managed_links_upgrade_to_new_versioned_core(self):
         first = apply_plan(build_plan(self.answers()))

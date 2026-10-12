@@ -96,8 +96,10 @@ permissions, or they do not want Anthropic-hosted connector retrieval, offer
 bytes, or the narrower experimental `gmail-readonly` REST route. Never request
 an account secret or token value. The IMAP choice requires a separately
 user-created credential source; setup writes only environment-variable names
-and a blank optional Keychain service name. Google Calendar also requires the exact dedicated calendar
-identifier and must not use a primary calendar.
+and a blank optional Keychain service name. This setup skill keeps the live
+calendar adapter off. Selecting the calendar module installs its workflow only;
+experimental live adapter configuration requires a separate deliberate wizard
+invocation and an exact dedicated calendar identifier.
 
 ## Prepare the runtime
 
