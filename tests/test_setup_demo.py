@@ -17,6 +17,14 @@ def script(name):
 
 
 class SetupDemoTests(unittest.TestCase):
+    def test_fictional_demo_creates_missing_destination_parents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination=Path(temporary)/'new-parent'/'fictional-demo'
+            with patch('sys.argv',['setup_demo.py','--destination',str(destination)]),redirect_stdout(io.StringIO()):
+                self.assertEqual(script('setup_demo').main(),0)
+            self.assertTrue((destination/'config.toml').is_file())
+            self.assertEqual(destination.stat().st_mode & 0o777,0o700)
+
     def test_fictional_demo_passes_configuration_validation(self):
         with tempfile.TemporaryDirectory() as temporary:
             destination=Path(temporary)/'fictional-demo'

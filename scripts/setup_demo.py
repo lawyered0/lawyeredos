@@ -23,6 +23,7 @@ def main() -> int:
     if destination.exists():
         print("error: destination already exists")
         return 2
+    destination.parent.mkdir(parents=True, exist_ok=True)
     ensure_private_directory(destination)
     workspace = destination / "workspace"
     scratch = destination / "scratch"
