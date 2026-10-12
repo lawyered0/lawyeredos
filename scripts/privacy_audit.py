@@ -47,6 +47,13 @@ def scan_text(path: Path, text: str, forbidden: list[str]) -> list[str]:
     return findings
 
 
+def scan_filename(label: str, forbidden: list[str]) -> list[tuple[str, str]]:
+    return [
+        (safe_label(label, forbidden), f"filename-{category}")
+        for category in scan_text(Path(label), label, [])
+    ]
+
+
 def scan_file_bytes(label: str, data: bytes, forbidden: list[str]) -> list[tuple[str, str]]:
     path = Path(label)
     findings: list[tuple[str, str]] = []
@@ -71,6 +78,10 @@ def scan_office_bytes(label: str, data: bytes, forbidden: list[str]) -> list[tup
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as package:
             for name in package.namelist():
+                findings.extend(
+                    (safe_label(f"{label}:{name}", forbidden), category)
+                    for _location, category in scan_filename(name, forbidden)
+                )
                 if name.endswith(".xml") or name.endswith(".rels"):
                     text = package.read(name).decode("utf-8", errors="replace")
                     findings.extend(
@@ -88,6 +99,7 @@ def scan_archive(path: Path, forbidden: list[str]) -> list[tuple[str, str]]:
         for info in package.infolist():
             name = info.filename
             lowered = name.casefold()
+            findings.extend(scan_filename(name, forbidden))
             if name.startswith("/") or "../" in name or lowered.endswith(".ds_store") or "/.git/" in lowered:
                 findings.append((safe_label(name, forbidden), "unsafe-or-residual-archive-path"))
             for value in forbidden:
@@ -119,12 +131,13 @@ def main() -> int:
         print("privacy audit target is unavailable")
         return 2
     for path in sorted(root.rglob("*")):
+        relative = str(path.relative_to(root))
+        findings.extend(scan_filename(relative, args.forbid))
         if path.is_symlink():
             findings.append((safe_label(str(path.relative_to(root)), args.forbid), "symlink"))
             continue
         if not path.is_file():
             continue
-        relative = str(path.relative_to(root))
         for forbidden in args.forbid:
             if forbidden.casefold() in relative.casefold():
                 findings.append((safe_label(relative, args.forbid), "forbidden-filename"))

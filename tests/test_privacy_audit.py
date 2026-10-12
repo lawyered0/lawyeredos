@@ -39,6 +39,38 @@ class PrivacyAuditTests(unittest.TestCase):
         categories={category for _,category in findings}
         self.assertTrue({'email-address','phone-number','absolute-user-path','windows-user-path'} <= categories)
 
+    def test_common_contacts_in_archive_member_names_are_reported_and_redacted(self):
+        email='person'+'@'+'synthetic-company.com'
+        phone='416-'+'555-0123'
+        findings=self.scan({f'fixtures/{email}.txt':'fictional content',
+                            f'fixtures/{phone}/':''})
+        self.assertTrue({'filename-email-address','filename-phone-number'} <= {category for _,category in findings})
+        self.assertFalse(any(email in location or phone in location for location,_ in findings))
+
+    def test_common_contacts_in_directory_relative_names_are_reported_and_redacted(self):
+        email='person'+'@'+'synthetic-company.com'
+        phone='416-'+'555-0123'
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            (root/f'{email}.txt').write_text('fictional content',encoding='utf-8')
+            (root/phone).mkdir()
+            output=io.StringIO()
+            with patch('sys.argv',['privacy_audit.py',temporary]),redirect_stdout(output):
+                self.assertEqual(audit.main(),2)
+            self.assertIn('filename-email-address',output.getvalue())
+            self.assertIn('filename-phone-number',output.getvalue())
+            self.assertNotIn(email,output.getvalue())
+            self.assertNotIn(phone,output.getvalue())
+
+    def test_common_contacts_in_office_member_names_are_reported_and_redacted(self):
+        email='person'+'@'+'synthetic-company.com'
+        office=io.BytesIO()
+        with zipfile.ZipFile(office,'w') as package:
+            package.writestr(f'word/{email}.xml','<document>fictional content</document>')
+        findings=self.scan({'fixture.docx':office.getvalue()})
+        self.assertIn('filename-email-address',{category for _,category in findings})
+        self.assertFalse(any(email in location for location,_ in findings))
+
     def test_fictional_and_public_attribution_email_allowlist(self):
         self.assertEqual(self.scan({'fixture.txt':'person@example.invalid person@example.com 4802498+lawyered0@users.noreply.github.com'}),[])
 
