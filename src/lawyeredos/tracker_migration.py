@@ -72,9 +72,35 @@ def _read_snapshot(source: Path) -> dict[str, Any] | None:
         rows = value.get(table)
         if not isinstance(rows, list) or any(not isinstance(row, dict) or set(row) != set(columns) for row in rows):
             raise ValueError(f"invalid tracker snapshot table: {table}")
+    if any(not isinstance(row["key"], str) or not isinstance(row["value"], str)
+           for row in value["meta"]):
+        raise ValueError("invalid tracker snapshot metadata types")
     meta = {row["key"]: row["value"] for row in value["meta"]}
-    if meta.get("schema_version") != "1" or not str(meta.get("revision", "")).isdigit():
+    revision_text = meta.get("revision", "")
+    if (len(meta) != len(value["meta"]) or meta.get("schema_version") != "1"
+            or not revision_text.isascii() or not revision_text.isdecimal()):
         raise ValueError("invalid tracker snapshot metadata")
+    current_revision = int(revision_text)
+    audit_revisions = [row["revision"] for row in value["audit"]]
+    if (any(type(item) is not int or item <= 0 or item > current_revision for item in audit_revisions)
+            or len(audit_revisions) != len(set(audit_revisions))):
+        raise ValueError("invalid tracker snapshot audit revision history")
+    largest_ids = {}
+    for table in ("timeline", "audit"):
+        ids = [row["id"] for row in value[table]]
+        if any(type(item) is not int for item in ids):
+            raise ValueError(f"invalid tracker snapshot {table} ID types")
+        largest_ids[table] = max([0, *ids])
+    sequence_names = set()
+    for row in value["sqlite_sequence"]:
+        name, counter = row["name"], row["seq"]
+        if (not isinstance(name, str) or name not in largest_ids or name in sequence_names
+                or type(counter) is not int or not largest_ids[name] <= counter <= 2 ** 63 - 1):
+            raise ValueError("invalid tracker snapshot sequence record")
+        sequence_names.add(name)
+    # Do not require contiguous history or equality with the highest retained
+    # audit revision: legacy imports can have no audit, and retained history can
+    # have gaps. Never rewrite the source's timestamps, revisions or sequences.
     return value
 
 

@@ -46,6 +46,7 @@ def project(database: Path, output: Path) -> dict[str, Any]:
     counts: dict[str, int] = {}
     sanitized: list[dict[str, Any]] = []
     truncated: list[dict[str, Any]] = []
+    omitted_deadline_fields: list[dict[str, Any]] = []
     for status, title in (("open", "Open Matters"), ("closed", "Closed Matters")):
         sheet = workbook.create_sheet(title)
         sheet.sheet_view.showGridLines = False
@@ -59,6 +60,12 @@ def project(database: Path, output: Path) -> dict[str, Any]:
                 value = row.get(key, "")
                 if key == "court_deadlines":
                     parsed = json.loads(value or "[]")
+                    for index, item in enumerate(parsed):
+                        if isinstance(item, dict):
+                            omitted = sorted(set(item) - {"date", "description"})
+                            if omitted:
+                                omitted_deadline_fields.append({"file_number": row["file_number"],
+                                    "field": key, "item_index": index, "omitted_fields": omitted})
                     value = "\n".join(
                         " | ".join(str(item.get(name, "")) for name in ("date", "description") if item.get(name))
                         if isinstance(item, dict) else str(item) for item in parsed
@@ -107,7 +114,8 @@ def project(database: Path, output: Path) -> dict[str, Any]:
     create_private_file(output, staged.getvalue())
     return {"ok": True, "output": str(output), "read_only_source": True, "counts": counts,
             "sanitized": sanitized, "truncated": truncated,
-            "lossless_projection": not sanitized and not truncated}
+            "omitted_deadline_fields": omitted_deadline_fields,
+            "lossless_projection": not sanitized and not truncated and not omitted_deadline_fields}
 
 
 def main(argv: list[str] | None = None) -> int:

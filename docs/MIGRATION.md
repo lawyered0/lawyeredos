@@ -31,6 +31,12 @@ audit history, and sequence counters. Migration of that snapshot or a canonical
 LawyeredOS SQLite database preserves those records. The preview and commit
 receipts state `history_preserved`; legacy CSV/JSON mappings cannot restore
 history absent from their source.
+Snapshot metadata must contain string keys and values, and audit revisions must
+be positive unique integers no greater than the metadata revision. Migration
+does not require contiguous audit history or reset original sequence counters.
+Present sequence records must name `audit` or `timeline` uniquely and contain
+nonnegative SQLite integer counters at least as large as that table's retained
+IDs. Missing sequence entries and larger historical counters are preserved.
 
 CSV export contains matter rows only and prefixes formula-like text with an
 apostrophe for spreadsheet safety. It is a presentation surface, not a complete
@@ -48,6 +54,11 @@ Unsupported XML control characters in legacy rows are replaced visibly with
 `�` in the projection, and cells over Excel's 32,767-character cap receive a
 visible truncation marker. The result identifies each affected file number and
 field in `sanitized` and `truncated`, and sets `lossless_projection` to false.
+The deadline column displays only `date` and `description`. Other deadline keys
+are disclosed by file number and zero-based item index in
+`omitted_deadline_fields`, and also set `lossless_projection` to false. This
+boolean describes these displayed fields; the workbook remains a presentation
+surface and does not contain the full tracker schema, audit or timeline history.
 The authoritative database and JSON snapshot retain the original text.
 Export is a separate operation; its failure does not undo a committed tracker
 mutation or authorize replaying that mutation.
