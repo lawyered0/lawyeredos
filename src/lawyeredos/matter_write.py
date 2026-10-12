@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -9,8 +10,9 @@ import stat
 import sys
 import tempfile
 import re
+import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .common import confined_path, emit, preview_token, sha256_file
 from .tracker_cli import (
@@ -321,7 +323,8 @@ def _stage(source: Path, parent_fd: int, transaction_id: str, expected_sha256: s
 
 
 def _install_file(operation: str, staged: str, target: str, parent_fd: int,
-                  transaction_id: str, expected_old_sha256: str) -> str | None:
+                  transaction_id: str, expected_old_sha256: str,
+                  *, on_publish: Callable[[], None] | None = None) -> str | None:
     displaced = None
     if operation == "replace":
         displaced = f".matter-write-{transaction_id}.displaced"
@@ -350,6 +353,8 @@ def _install_file(operation: str, staged: str, target: str, parent_fd: int,
             os.unlink(displaced, dir_fd=parent_fd)
             os.fsync(parent_fd)
         raise ValueError("target appeared during commit; concurrent content was not overwritten") from exc
+    if on_publish is not None:
+        on_publish()
     os.unlink(staged, dir_fd=parent_fd)
     if displaced is not None:
         os.unlink(displaced, dir_fd=parent_fd)
@@ -829,6 +834,37 @@ def recover(root: Path, transaction_id: str, token: str) -> dict[str, Any]:
     return {"ok": True, "committed": receipt["commit_state"] == "committed", **receipt, "journal": str(journal)}
 
 
+def _reserve_attempt(root: Path, expected: str, journal: Path, receipt: dict[str, Any]) -> None:
+    """Preserve each receipt while preventing replay of unresolved attempts."""
+    directory = _journal_directory_descriptor(root)
+    lock_fd = None
+    try:
+        lock_fd = os.open(".attempts.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+                          0o600, dir_fd=directory)
+        details = os.fstat(lock_fd)
+        if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+            raise ValueError("transaction lock must be a single-link regular file")
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        for path in sorted(journal.parent.glob(expected[:16] + "*.json")):
+            _, previous = _load_journal(root, path.stem)
+            if previous.get("approved_payload_sha256") != expected:
+                continue
+            terminal = previous.get("commit_state") == "not_committed" and (
+                previous.get("verification_state") == "rollback_verified"
+                or (previous.get("recovered") is True
+                    and previous.get("verification_state") == "readback_verified")
+            )
+            if not terminal:
+                raise ValueError("this approved transaction already has a journal; inspect it instead of replaying")
+        if journal.exists() or journal.is_symlink():
+            raise ValueError("transaction attempt id already exists")
+        _write_json(journal, receipt)
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+        os.close(directory)
+
+
 def commit(args: argparse.Namespace) -> dict[str, Any]:
     value = write_payload(args)
     expected = preview_token("matter-write", value)
@@ -840,10 +876,8 @@ def commit(args: argparse.Namespace) -> dict[str, Any]:
         Path(value["root"]), value["matter_folder"], value["relative_path"],
     )
     journal_root = _private_journal_root(Path(value["root"]))
-    transaction_id = expected[:24]
+    transaction_id = expected[:16] + secrets.token_hex(4)
     journal = journal_root / f"{transaction_id}.json"
-    if journal.exists() or journal.is_symlink():
-        raise ValueError("this approved transaction already has a journal; inspect it instead of replaying")
     backup = journal_root / f"{transaction_id}.backup" if value["operation"] == "replace" else None
     parent_identity = os.fstat(parent_fd)
     receipt: dict[str, Any] = {
@@ -861,7 +895,11 @@ def commit(args: argparse.Namespace) -> dict[str, Any]:
         "staged_name": None,
         "retry_safe": False,
     }
-    _write_json(journal, receipt)
+    try:
+        _reserve_attempt(Path(value["root"]), expected, journal, receipt)
+    except BaseException:
+        os.close(parent_fd)
+        raise
     staged: str | None = None
     installed = False
     tracker_phase = "not_started"

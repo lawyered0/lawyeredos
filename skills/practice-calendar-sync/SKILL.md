@@ -21,7 +21,13 @@ PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredo
   --desired desired.json --existing existing.json
 ```
 
-It produces a read-only create/update/remove/unchanged diff. If
+It produces a read-only create/update/remove/unchanged diff plus duplicate,
+unmatched, and unowned or unparseable buckets. Duplicates require manual
+reconciliation; the planner cannot select an event from an ambiguous group.
+Removals require an explicit `--scope-prefix <exact owned sync-key prefix>`;
+repeat it for each approved bounded scope. An empty desired set produces no
+removals. Use `--partial` whenever derivation is incomplete; partial evidence
+never supports removal. Connector identifiers do not count as event changes. If
 `calendar_adapter = "google-calendar-api"` is explicitly configured, use the
 bundled adapter described in `${LAWYEREDOS_ROOT}/docs/ADAPTERS.md`. Credentials come only from the
 named environment variable. Automated tests use a fake transport and never a
