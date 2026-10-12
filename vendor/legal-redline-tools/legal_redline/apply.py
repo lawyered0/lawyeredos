@@ -383,6 +383,9 @@ def _replace_span(para, result, replacement_text, author, date_str):
 def _track_paragraph_mark(paragraph, author, date_str):
     """Track the inserted paragraph boundary as well as its text."""
     properties = paragraph.get_or_add_pPr()
+    for child in list(properties):
+        if child.tag in {qn("w:sectPr"), qn("w:pPrChange")}:
+            properties.remove(child)
     run_properties = properties.find(qn("w:rPr"))
     if run_properties is None:
         run_properties = OxmlElement("w:rPr")
@@ -391,7 +394,7 @@ def _track_paragraph_mark(paragraph, author, date_str):
         index = next((i for i, child in enumerate(properties) if child.tag in successors), len(properties))
         properties.insert(index, run_properties)
     for child in list(run_properties):
-        if child.tag in {qn("w:ins"), qn("w:del"), qn("w:moveFrom"), qn("w:moveTo")}:
+        if child.tag in {qn("w:ins"), qn("w:del"), qn("w:moveFrom"), qn("w:moveTo"), qn("w:rPrChange")}:
             run_properties.remove(child)
     marker = OxmlElement("w:ins")
     marker.set(qn("w:id"), next_rev_id())

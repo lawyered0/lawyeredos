@@ -99,7 +99,8 @@ external-account authority are intentional differences, not deferred success.
 | DOCX renderer and rasterizer | `render_docx.py` | Preserved through LibreOffice/Poppler; tested on macOS |
 | Voice/style linter | `voice_lint.py` | Anonymous configurable rules; tested |
 | XLSX tracker projection | `tracker_xlsx.py` | Disposable projection preserved; tested |
-| DOCX tracked-change acceptor | `accept_tracked_changes.py` | Insert/delete/move acceptance with package-wide cleanup validation; comments and unsupported property revisions fail closed |
+| DOCX tracked-change acceptor | `accept_tracked_changes.py` | Inline insert/delete/move acceptance with package-wide cleanup validation; paragraph-mark/row deletions, comments and unsupported property revisions fail closed |
+| DOCX metadata scrubber | `scrub_docx_metadata.py` | Clears core/custom metadata while preserving namespace bindings. Comments, people records and revision-author metadata require a separate sanitization decision and produce no scrubbed output; review content is never silently removed |
 | Calendar connector/writer | `calendar_plan.py` and `integrations.py` | Explicit opt-in adapter; network behavior tested with a fake transport only |
 | Practice-management extension | None | Deferred; adapter reports unavailable |
 | Cross-provider review runner | Claude Code plugin agent plus `review_orchestrator.py` | Intentionally replaced; deterministic synthetic orchestration tested |

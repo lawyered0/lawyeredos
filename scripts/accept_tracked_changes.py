@@ -121,6 +121,12 @@ def inspect_source(package: zipfile.ZipFile, etree) -> None:
         if not name.startswith("word/") or not name.endswith(".xml"):
             continue
         root = _parse_xml(package.read(name), etree)
+        structural_deletions = root.xpath(
+            ".//w:pPr/w:rPr/w:del | .//w:pPr/w:rPr/w:moveFrom | "
+            ".//w:trPr/w:del | .//w:trPr/w:moveFrom", namespaces={"w": WORD_NS},
+        )
+        if structural_deletions:
+            problems.add("structural paragraph or row deletion requires manual acceptance")
         problems.update(f"comment marker {item}" for item in _markers(root, COMMENT_ELEMENTS))
         problems.update(
             f"unsupported revision marker {item}"

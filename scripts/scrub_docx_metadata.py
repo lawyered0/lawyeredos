@@ -23,6 +23,14 @@ CORE_REMOVE = {
     "{http://purl.org/dc/terms/}created",
     "{http://purl.org/dc/terms/}modified",
     "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}lastPrinted",
+    "{http://purl.org/dc/elements/1.1/}title",
+    "{http://purl.org/dc/elements/1.1/}subject",
+    "{http://purl.org/dc/elements/1.1/}description",
+    "{http://purl.org/dc/elements/1.1/}identifier",
+    "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}keywords",
+    "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}category",
+    "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}revision",
+    "{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}contentStatus",
 }
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 W14_NS = "http://schemas.microsoft.com/office/word/2010/wordml"
@@ -98,6 +106,17 @@ def scrub(source: Path, output: Path) -> None:
     staged = io.BytesIO()
     with zipfile.ZipFile(source) as input_package, zipfile.ZipFile(staged, "w", zipfile.ZIP_DEFLATED) as result:
         _validate_docx_package(input_package)
+        etree = require_lxml()
+        for name in input_package.namelist():
+            if name.startswith("word/") and name.endswith(".xml"):
+                if name.startswith("word/comments") or name == "word/people.xml":
+                    raise ValueError("DOCX contains review metadata; a separate sanitization decision is required")
+                try:
+                    root = etree.fromstring(input_package.read(name), etree.XMLParser(resolve_entities=False, no_network=True))
+                except etree.XMLSyntaxError as exc:
+                    raise ValueError("input contains invalid DOCX XML") from exc
+                if any(f"{{{W_NS}}}author" in element.attrib for element in root.iter()):
+                    raise ValueError("DOCX contains review metadata; a separate sanitization decision is required")
         for info in input_package.infolist():
             if info.filename.startswith("customXml/") or info.filename == "docProps/custom.xml":
                 continue

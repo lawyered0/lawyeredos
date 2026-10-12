@@ -126,3 +126,22 @@ def test_inserted_paragraph_does_not_copy_anchor_revision_identity(previous_mark
     assert markers[0].tag == qn("w:ins")
     assert markers[0].get(qn("w:id")) != "42"
     assert added_props.find(qn("w:b")) is not None
+
+
+@pytest.mark.parametrize("operation", ["insert_after", "add_section"])
+def test_inserted_paragraph_does_not_duplicate_section_properties(operation):
+    doc = Document()
+    para = doc.add_paragraph("Unique fictional section ending.")
+    properties = para._p.get_or_add_pPr()
+    properties.append(copy.deepcopy(doc.sections[0]._sectPr))
+    properties.append(OxmlElement("w:pPrChange"))
+    original_sections = len(doc.element.body.findall(".//" + qn("w:sectPr")))
+    original_anchor = para._p.xml
+    if operation == "insert_after":
+        assert apply_tracked_insertion(doc, "fictional section ending", "Addition.", AUTHOR, DATE, as_paragraph=True)
+    else:
+        assert apply_tracked_add_section(doc, "fictional section ending", "Addition.", AUTHOR, DATE)
+    assert len(doc.element.body.findall(".//" + qn("w:sectPr"))) == original_sections
+    assert doc.paragraphs[1]._p.pPr.find(qn("w:sectPr")) is None
+    assert doc.paragraphs[1]._p.pPr.find(qn("w:pPrChange")) is None
+    assert para._p.xml == original_anchor
