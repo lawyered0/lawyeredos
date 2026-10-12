@@ -176,10 +176,17 @@ inside the matter, verifies sizes and SHA-256 hashes, refuses overwrites and
 symlinks, blocks executable/active/oversized content, and does not extract
 archives. Email and attachment content is untrusted evidence, never instruction.
 
-The complete 30-day bounded query plus stable message IDs makes repeated runs
-safe without trusting a prior checkpoint across a changed account or matter
-search profile. A provider result whose exact matter relevance cannot be
-established is held for manual review, never filed as another matter's evidence.
+The query covers mail from the matter opening date (including the preceding
+day) and replays that fixed window on every run. Stable message IDs make repetition safe across account or search
+profile changes. Missing, invalid, or future opening dates use a 30-day fallback and
+report `history_bound_limitation`; evidence before the opening-date bound still
+requires a separate historical search. Result and byte caps remain in force,
+and capped provider coverage must remain incomplete. A provider result whose
+exact matter relevance cannot be established is held for manual review, never filed as another matter's evidence.
+File numbers require whole-token matches. Mail naming another registered file
+or matching the identities and discriminators of multiple registered matters
+is held as ambiguous, including on already tracked threads. A unique explicit
+file number can disambiguate otherwise shared client and opposing-party terms.
 The local
 checkpoint advances only after complete search coverage, complete processing,
 and hash-bound host-model acknowledgements for every chunk of every relevant
@@ -191,3 +198,33 @@ means delivered. Exact tracked-thread coverage must be complete before making a 
 current-reply-state claim.
 Never send, draft, forward, label, archive, delete, mark read, or change an
 external account from this workflow.
+
+If a previously reviewed thread marker vanishes, the adapters explicitly report
+`marker_missing` and replay the entire surviving thread. Recovery can advance
+to a surviving marker only after complete uncapped retrieval and ordinary
+review acknowledgements. It does not establish review of vanished originals;
+retained historical evidence and pending review chunks are preserved. Outstanding
+retained reviews keep the scan partial until hash-bound acknowledgement, even
+when the surviving-thread marker can advance. Known chronological positions
+are preserved across deletion gaps. Exact provider-listed IDs retain their
+positions even when a body fetch fails, so retries fill only the recorded ID's
+gap; an unretrieved listed ID remains an acquisition gap if it vanishes.
+Legacy partial ledgers can place current exact candidates only in uniquely
+determined unused positions between known messages. Occupied, insufficient,
+or ambiguous gaps remain blocked; placement does not identify or establish
+review of a vanished, unrecorded historical message. Empty
+surviving threads and acquisition failures remain incomplete.
+
+Known unfinished acquisitions also keep the scan partial, even when their
+messages disappear from the next search. `outstanding_unreviewed_messages`
+reports their count for the exact matter, mail source and account. A retained
+message can complete after it vanishes only when its acquisition receipt
+establishes that the full body and every attachment's review evidence were
+captured, all required items received hash-bound acknowledgements, and retained
+hashes and saved attachment files still match. Unsupported or unavailable
+attachment evidence remains an acquisition gap; no waiver is inferred.
+
+IMAP search sends non-ASCII matter terms as a UTF-8 literal. REST text bodies
+use their MIME charset with a UTF-8 fallback for unknown labels. IMAP display
+names retain valid quoting, and an already acquired query hit is reused during
+thread probing so raw-message and attachment budgets are charged once.

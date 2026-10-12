@@ -14,11 +14,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from email.utils import getaddresses
+from email.message import Message as MimeMessage
 from typing import Any, Callable
 
 from .common import emit, preview_token
 from .config import PracticeConfig, load_config
-from .imap_mail import gmail_imap_from_config
+from .imap_mail import _decode_text, gmail_imap_from_config
 
 
 Transport = Callable[[str, str, dict[str, str], bytes | None], tuple[int, bytes]]
@@ -166,8 +167,17 @@ class GmailReadonlyAdapter:
             encoded = str(body.get("data", ""))
             attachment_id = str(body.get("attachmentId", ""))
             declared_size = int(body.get("size", 0) or 0)
-            is_body = not filename and mime_type in {"text/plain", "text/html"}
-            is_attachment = bool(filename) or bool(attachment_id and not is_body)
+            mime_headers = MimeMessage()
+            mime_headers["Content-Type"] = part_headers.get("content-type", mime_type)
+            charset = mime_headers.get_content_charset()
+            is_body = (
+                not filename and not disposition.startswith("attachment")
+                and mime_type in {"text/plain", "text/html"}
+            )
+            is_attachment = (
+                bool(filename) or disposition.startswith("attachment")
+                or (not is_body and not part.get("parts") and bool(encoded or attachment_id or declared_size))
+            )
             if is_attachment and (
                 declared_size > MAX_MAIL_ATTACHMENT_BYTES
                 or declared_size > attachment_budget - attachment_bytes
@@ -223,9 +233,9 @@ class GmailReadonlyAdapter:
                         })
                     index[0] += 1
                 elif encoded and mime_type == "text/plain":
-                    bodies.append(self._decode(encoded).decode("utf-8", errors="replace"))
+                    bodies.append(_decode_text(self._decode(encoded), charset))
                 elif encoded and mime_type == "text/html":
-                    html_bodies.append(self._decode(encoded).decode("utf-8", errors="replace"))
+                    html_bodies.append(_decode_text(self._decode(encoded), charset))
             for child in part.get("parts", []):
                 if isinstance(child, dict):
                     walk(child, index)
@@ -344,9 +354,14 @@ class GmailReadonlyAdapter:
             else:
                 candidates = ids
                 if marker:
-                    detail["complete"] = False
-                    tracked_report["complete"] = False
-                    tracked_report["failures"].append({"thread_id": thread_id, "reason": "marker not found; conservative replay"})
+                    detail["marker_missing"] = True
+                    detail["recovery"] = "missing-marker-surviving-thread-replay"
+                    if not candidates:
+                        detail["complete"] = False
+                        tracked_report["complete"] = False
+                        tracked_report["failures"].append({
+                            "thread_id": thread_id, "reason": "marker missing and no surviving messages"
+                        })
             basis = "thread_probe"
             if not candidates and ids:
                 candidates = ids[-REPLY_TAIL_DEPTH:]
@@ -362,6 +377,9 @@ class GmailReadonlyAdapter:
             tracked_selected += len(candidates)
             detail["ordered_candidate_ids"] = list(candidates)
             for message_id in candidates:
+                if message_id in seen:
+                    seen[message_id]["acquisition_basis"] = basis
+                    continue
                 try:
                     message = self._full_message(
                         message_id, max(0, MAX_MAIL_RUN_ATTACHMENT_BYTES - attachment_bytes), account

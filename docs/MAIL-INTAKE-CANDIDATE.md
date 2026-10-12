@@ -53,7 +53,7 @@ platform dependency gate.
 ## Implemented boundary
 
 The shared Python core resolves one tracker matter, builds a conservative
-30-day query using the exact file number or paired identity/discriminator
+opening-date bounded query using the exact file number or paired identity/discriminator
 terms, validates a host-specific normalized bundle, reviews bounded content,
 safely files supported attachments, and records account-scoped stable IDs and
 hashes in a rebuildable SQLite ledger. Mailbox access is read-only. The only
