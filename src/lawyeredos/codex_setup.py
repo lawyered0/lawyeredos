@@ -31,6 +31,7 @@ from .setup_wizard import (
     path_snapshot,
     render_config,
     validate_answers,
+    validate_workspace_isolation,
     write_template_manifest,
 )
 from .tracker_cli import initialize
@@ -341,10 +342,6 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     source = package_root()
     validate_answers(answers, source)
     workspace = answers.workspace.expanduser().resolve()
-    for forbidden in (Path.home() / ".codex", Path.home() / ".agents"):
-        forbidden = forbidden.resolve()
-        if workspace == forbidden or _inside(workspace, forbidden):
-            raise ValueError(f"workspace must not be inside the user-global {forbidden}")
     if workspace == source or _inside(workspace, source):
         raise ValueError("workspace must be outside the extracted LawyeredOS package")
     if require_new_workspace and workspace.exists() and any(workspace.iterdir()):
@@ -515,6 +512,7 @@ def apply_plan(plan: dict) -> dict:
     if missing:
         raise ValueError(f"required dependencies missing: {', '.join(missing)}")
     workspace = Path(plan["workspace"])
+    validate_workspace_isolation(workspace)
     if plan.get("require_new_workspace") and workspace.exists() and any(workspace.iterdir()):
         raise ValueError(f"trial workspace is no longer empty: {workspace}")
     source, setup_root, plugin = Path(plan["source"]), Path(plan["setup_root"]), Path(plan["plugin"])

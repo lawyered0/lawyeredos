@@ -42,6 +42,10 @@ The wizard asks for:
    host-neutral read-only IMAP adapter; and
 6. an optional experimental dedicated Google Calendar adapter.
 
+Choose a project directory outside the home folder itself and outside `~/.claude`,
+`~/.codex`, and `~/.agents`. Both host installers reject those global locations,
+including paths that resolve there through symlinks.
+
 Matter orientation and the tracker are required core modules. Selecting a
 jurisdiction profile does not install current law or replace primary-law
 verification. For the supported Claude route, the user authenticates directly

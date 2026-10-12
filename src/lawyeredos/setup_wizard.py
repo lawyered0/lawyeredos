@@ -436,6 +436,18 @@ def dependency_report(modules: tuple[str, ...] = ()) -> list[dict[str, str | boo
     return checks
 
 
+def validate_workspace_isolation(workspace: Path) -> None:
+    """Keep either host's project setup outside all user-global locations."""
+    workspace = workspace.expanduser().resolve()
+    home = Path.home().resolve()
+    if workspace == home:
+        raise ValueError("workspace must not be the user home directory; choose a project subdirectory")
+    for name in (".claude", ".codex", ".agents"):
+        forbidden = (home / name).resolve()
+        if workspace == forbidden or _inside(workspace, forbidden):
+            raise ValueError(f"workspace must not be inside the user-global {forbidden}")
+
+
 def validate_answers(answers: Answers, source: Path) -> None:
     if answers.branding_mode not in {"neutral", "individual", "firm"}:
         raise ValueError("branding mode must be neutral, individual, or firm")
@@ -464,6 +476,7 @@ def validate_answers(answers: Answers, source: Path) -> None:
         if "calendar" not in answers.modules:
             raise ValueError("enable the calendar module before selecting its integration")
     workspace = answers.workspace.expanduser().resolve()
+    validate_workspace_isolation(workspace)
     if workspace.exists() and not workspace.is_dir():
         raise ValueError(f"workspace exists but is not a directory: {workspace}")
     setup_root = workspace / ".lawyeredos"
@@ -528,9 +541,6 @@ def build_plan(answers: Answers, require_new_workspace: bool = False) -> dict:
     source = package_root()
     validate_answers(answers, source)
     workspace = answers.workspace.expanduser().resolve()
-    global_claude = (Path.home() / ".claude").resolve()
-    if workspace == global_claude or _inside(workspace, global_claude):
-        raise ValueError("workspace must not be the user-global ~/.claude directory")
     if workspace == source or _inside(workspace, source):
         raise ValueError("workspace must be outside the extracted LawyeredOS package")
     if require_new_workspace and workspace.exists() and any(workspace.iterdir()):
@@ -1002,6 +1012,7 @@ def apply_plan(plan: dict) -> dict:
         raise ValueError(f"required dependencies missing: {', '.join(required_missing)}")
     source = Path(plan["source"])
     workspace = Path(plan["workspace"])
+    validate_workspace_isolation(workspace)
     if plan.get("require_new_workspace") and workspace.exists() and any(workspace.iterdir()):
         raise ValueError(f"trial workspace is no longer empty: {workspace}")
     setup_root = Path(plan["setup_root"])
