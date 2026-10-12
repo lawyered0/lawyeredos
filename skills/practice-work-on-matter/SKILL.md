@@ -198,7 +198,11 @@ the requested local draft, but any tracker update still follows
 Matter-memory changes use `memory_search preview-write` and `commit-write` with
 `--database <tracker.sqlite3>` and `--file-number <registered file number>`,
 the registered matter folder, and the previously observed SHA-256. Existing memory cannot be replaced using a
-freshly computed digest after the preview. Run `voice_lint` on outgoing email or
+freshly computed digest after the preview. A memory commit holds the tracker
+revision stable through publication and readback. On `outcome_unknown`, failed
+readback, or cleanup errors, preserve the receipt and inspect the target and any
+returned recovery artifacts before another write; never treat an error as proof
+that no bytes changed. Run `voice_lint` on outgoing email or
 letter text; FAIL findings require correction or an explicit recorded reason in
 the owning workflow.
 

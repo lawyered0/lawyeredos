@@ -7,11 +7,13 @@ import re
 import sqlite3
 import secrets
 import stat
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from .common import confined_path, emit, preview_token, sha256_bytes, sha256_file
 from .private_fs import create_private_file
+from .tracker_cli import connect
 from .matter_write import (
     _install_file, _matter_identity, _open_target_parent, _target_digest, _verify_parent_binding,
 )
@@ -112,6 +114,18 @@ def memory_commit(root: Path, relative: str, content: bytes, expect_sha256: str,
     staged = ".memory-stage-" + secrets.token_hex(12)
     published = False
     receipt: dict[str, Any] | None = None
+    tracker_session = ExitStack()
+    install_id = secrets.token_hex(12)
+    def uncertain_receipt() -> dict[str, Any]:
+        return {"ok": False, "committed": None, "commit_state": "outcome_unknown",
+                "verification_state": "readback_failed", "retry_safe": False,
+                "target": payload["target"], "expected_sha256": sha256_bytes(content),
+                "published": published}
+    def record_publication() -> None:
+        nonlocal published, receipt
+        published = True
+        # Linking is a mutation; durability is not known until helper fsync returns.
+        receipt = uncertain_receipt()
     try:
         lock_fd = os.open(".lawyeredos-memory.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
                           0o600, dir_fd=parent_fd)
@@ -121,6 +135,10 @@ def memory_commit(root: Path, relative: str, content: bytes, expect_sha256: str,
         if stat.S_IMODE(lock_stat.st_mode) != 0o600:
             raise ValueError("existing memory lock is not private; review it explicitly before writing")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        tracker_connection = tracker_session.enter_context(connect(Path(payload["database"]), write=True))
+        # The existing tracker writers also use BEGIN IMMEDIATE. Keep their
+        # authoritative revision stable until publication and readback finish.
+        tracker_connection.execute("BEGIN IMMEDIATE")
         # Re-bind identity, revision and old bytes while writers share the lock.
         payload = _memory_payload(root, relative, content, expect_sha256, database, file_number)
         if token != preview_token("memory-write", payload):
@@ -130,9 +148,20 @@ def memory_commit(root: Path, relative: str, content: bytes, expect_sha256: str,
             handle.write(content); handle.flush(); os.fsync(handle.fileno())
         _verify_parent_binding(payload, parent_identity)
         # The install uses exclusive links, preserving an unexpectedly appeared target.
-        _install_file("replace" if expect_sha256 else "create", staged, target_name,
-                      parent_fd, secrets.token_hex(12), expect_sha256)
-        published = True
+        try:
+            _install_file("replace" if expect_sha256 else "create", staged, target_name,
+                          parent_fd, install_id, expect_sha256, on_publish=record_publication)
+        except (ValueError, OSError):
+            if not published and expect_sha256:
+                try:
+                    original_preserved = _target_digest(parent_fd, target_name) == expect_sha256
+                except (ValueError, OSError):
+                    original_preserved = False
+                if not original_preserved:
+                    # A replacement can remove the old target before a new link
+                    # fails. Preserve its displaced artifact; do not guess rollback.
+                    receipt = uncertain_receipt()
+            raise
         receipt = {"ok": False, "committed": True, "commit_state": "committed",
                    "verification_state": "readback_failed", "retry_safe": False,
                    "target": payload["target"], "expected_sha256": sha256_bytes(content)}
@@ -141,18 +170,27 @@ def memory_commit(root: Path, relative: str, content: bytes, expect_sha256: str,
             raise ValueError("memory readback digest does not match the approved content")
         receipt.update(ok=True, verification_state="readback_verified", sha256=digest)
     except (ValueError, OSError) as exc:
-        if not published:
+        if receipt is None:
             raise
-        # Publication succeeded. Failed readback cannot justify a second write.
+        # Publication or replacement side effects require inspection, not replay.
         receipt["error"] = str(exc)
+        displaced = Path(payload["target"]).parent / f".matter-write-{install_id}.displaced"
+        if displaced.exists() or displaced.is_symlink():
+            receipt["recovery_artifacts"] = [str(displaced)]
     finally:
         cleanup_errors = []
+        try:
+            tracker_session.close()
+        except (OSError, sqlite3.Error) as exc:
+            cleanup_errors.append(str(exc))
         try:
             os.unlink(staged, dir_fd=parent_fd)
         except FileNotFoundError:
             pass
         except OSError as exc:
             cleanup_errors.append(str(exc))
+            if receipt is not None:
+                receipt.setdefault("recovery_artifacts", []).append(str(Path(payload["target"]).parent / staged))
         for descriptor in (lock_fd, parent_fd):
             if descriptor is not None:
                 try:

@@ -12,7 +12,7 @@ import tempfile
 import re
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .common import confined_path, emit, preview_token, sha256_file
 from .tracker_cli import (
@@ -323,7 +323,8 @@ def _stage(source: Path, parent_fd: int, transaction_id: str, expected_sha256: s
 
 
 def _install_file(operation: str, staged: str, target: str, parent_fd: int,
-                  transaction_id: str, expected_old_sha256: str) -> str | None:
+                  transaction_id: str, expected_old_sha256: str,
+                  *, on_publish: Callable[[], None] | None = None) -> str | None:
     displaced = None
     if operation == "replace":
         displaced = f".matter-write-{transaction_id}.displaced"
@@ -352,6 +353,8 @@ def _install_file(operation: str, staged: str, target: str, parent_fd: int,
             os.unlink(displaced, dir_fd=parent_fd)
             os.fsync(parent_fd)
         raise ValueError("target appeared during commit; concurrent content was not overwritten") from exc
+    if on_publish is not None:
+        on_publish()
     os.unlink(staged, dir_fd=parent_fd)
     if displaced is not None:
         os.unlink(displaced, dir_fd=parent_fd)

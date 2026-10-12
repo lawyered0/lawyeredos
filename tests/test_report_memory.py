@@ -4,6 +4,7 @@ import json
 import io
 from contextlib import redirect_stdout
 from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
 import stat
 import tempfile
 import unittest
@@ -186,3 +187,119 @@ class ScopedMemoryReportTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertFalse(result["committed"])
         self.assertFalse(target.exists())
+
+    def test_install_sync_failure_keeps_uncertain_nonretry_receipt(self):
+        module, args, target = self.memory_cli()
+        original_fsync = module.os.fsync
+        def fsync(descriptor):
+            if stat.S_ISDIR(os.fstat(descriptor).st_mode) and target.exists():
+                raise OSError("fictional post-link sync failure")
+            return original_fsync(descriptor)
+        output = io.StringIO()
+        with patch.object(module.os, "fsync", side_effect=fsync), redirect_stdout(output):
+            rc = module.main(args)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(target.read_text(), "Fictional durable note")
+        self.assertEqual(rc, 2)
+        self.assertIsNone(receipt["committed"])
+        self.assertEqual(receipt["commit_state"], "outcome_unknown")
+        self.assertFalse(receipt["retry_safe"])
+
+    def test_install_stage_cleanup_failure_keeps_uncertain_nonretry_receipt(self):
+        module, args, target = self.memory_cli()
+        original_unlink = module.os.unlink
+        def unlink(path, *values, **kwargs):
+            if str(path).startswith(".memory-stage-") and target.exists():
+                raise OSError("fictional installed stage cleanup failure")
+            return original_unlink(path, *values, **kwargs)
+        output = io.StringIO()
+        with patch.object(module.os, "unlink", side_effect=unlink), redirect_stdout(output):
+            rc = module.main(args)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(target.read_text(), "Fictional durable note")
+        self.assertEqual(rc, 2)
+        self.assertIsNone(receipt["committed"])
+        self.assertTrue(receipt["published"])
+        self.assertFalse(receipt["retry_safe"])
+        self.assertIn("cleanup_errors", receipt)
+        self.assertTrue(any(Path(path).name.startswith(".memory-stage-")
+                            for path in receipt["recovery_artifacts"]))
+
+    def replacement_cli(self):
+        module, args, target = self.memory_cli()
+        target.write_text("Fictional old note")
+        digest = sha256_file(target)
+        args.extend(["--expect-sha256", digest])
+        args[args.index("--confirm-token") + 1] = memory_preview(
+            self.root, "A/_matter-brief.md", b"Fictional durable note", digest,
+            self.root / "tracker.sqlite3", "2035-001",
+        )["confirm_token"]
+        return module, args, target
+
+    def test_replace_new_link_failure_keeps_displaced_bytes_and_uncertain_receipt(self):
+        module, args, target = self.replacement_cli()
+        original_link = module.os.link
+        def link(source, destination, *values, **kwargs):
+            if str(source).startswith(".memory-stage-"):
+                raise OSError("fictional new target link failure")
+            return original_link(source, destination, *values, **kwargs)
+        output = io.StringIO()
+        with patch.object(module.os, "link", side_effect=link), redirect_stdout(output):
+            rc = module.main(args)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(rc, 2)
+        self.assertFalse(target.exists())
+        displaced = list(target.parent.glob(".matter-write-*.displaced"))
+        self.assertEqual(len(displaced), 1)
+        self.assertEqual(displaced[0].read_text(), "Fictional old note")
+        self.assertIsNone(receipt["committed"])
+        self.assertEqual(receipt["commit_state"], "outcome_unknown")
+        self.assertFalse(receipt["retry_safe"])
+        self.assertEqual(receipt["recovery_artifacts"], [str(displaced[0].resolve())])
+
+    def test_replace_displaced_cleanup_failure_keeps_uncertain_receipt(self):
+        module, args, target = self.replacement_cli()
+        original_unlink = module.os.unlink
+        def unlink(path, *values, **kwargs):
+            if str(path).endswith(".displaced"):
+                raise OSError("fictional displaced cleanup failure")
+            return original_unlink(path, *values, **kwargs)
+        output = io.StringIO()
+        with patch.object(module.os, "unlink", side_effect=unlink), redirect_stdout(output):
+            rc = module.main(args)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(rc, 2)
+        self.assertEqual(target.read_text(), "Fictional durable note")
+        self.assertIsNone(receipt["committed"])
+        self.assertFalse(receipt["retry_safe"])
+        self.assertEqual(len(list(target.parent.glob(".matter-write-*.displaced"))), 1)
+
+    def test_tracker_close_waits_until_approved_memory_publication(self):
+        module, args, target = self.memory_cli()
+        database = self.root / "tracker.sqlite3"
+        close_args = tracker_args(database, "close")
+        close_token = preview_mutation(database, "close", close_args)["confirm_token"]
+        original_verify = module._verify_parent_binding
+        closed_before_install = []
+        futures = []
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            def verify_then_start_close(*values):
+                original_verify(*values)
+                future = pool.submit(commit_mutation, database, "close", close_args, close_token)
+                futures.append(future)
+                # A real second tracker writer must be blocked during publication.
+                from concurrent.futures import TimeoutError
+                try:
+                    future.result(timeout=0.2)
+                    closed_before_install.append(True)
+                except TimeoutError:
+                    closed_before_install.append(False)
+            output = io.StringIO()
+            with patch.object(module, "_verify_parent_binding", side_effect=verify_then_start_close), redirect_stdout(output):
+                rc = module.main(args)
+            self.assertTrue(futures[0].result(timeout=6)["committed"])
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(closed_before_install, [False])
+        self.assertEqual(rc, 0)
+        self.assertTrue(receipt["committed"])
+        self.assertEqual(target.read_text(), "Fictional durable note")
