@@ -13,7 +13,7 @@ import sys
 import unicodedata
 import zipfile
 from datetime import UTC, datetime, timedelta
-from email.utils import parsedate_to_datetime
+from email.utils import getaddresses, parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +27,7 @@ from .content_review import (
     validate_acknowledgement,
 )
 from .integrations import gmail_from_config
-from .imap_mail import gmail_imap_from_config
+from .imap_mail import _decode_header, gmail_imap_from_config
 from .matter_context import orient
 from .tracker_cli import connect
 from .private_fs import (
@@ -183,6 +183,16 @@ def _state_connection(path: Path) -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS message_mail_state_thread_idx
             ON message_mail_state(file_number, source, account_fingerprint, thread_id, received_at);
+        CREATE TABLE IF NOT EXISTS provider_thread_positions (
+            file_number TEXT NOT NULL,
+            source TEXT NOT NULL,
+            account_fingerprint TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            provider_thread_order INTEGER NOT NULL,
+            PRIMARY KEY(file_number, source, account_fingerprint, thread_id, message_id),
+            UNIQUE(file_number, source, account_fingerprint, thread_id, provider_thread_order)
+        );
         CREATE TABLE IF NOT EXISTS tracked_thread_frontier (
             file_number TEXT NOT NULL,
             account_fingerprint TEXT NOT NULL,
@@ -223,6 +233,7 @@ def _state_connection(path: Path) -> sqlite3.Connection:
         connection.execute("DELETE FROM content_review_chunks")
         connection.execute("DELETE FROM content_review_items")
         connection.execute("DELETE FROM message_mail_state")
+        connection.execute("DELETE FROM provider_thread_positions")
         connection.execute("DELETE FROM tracked_thread_frontier")
         connection.execute(
             "INSERT INTO state_meta(key, value) VALUES ('review_protocol', ?) "
@@ -750,6 +761,15 @@ def _unique_destination(folder: Path, name: str, digest: str) -> Path:
 
 def _message_text(message: dict[str, Any]) -> str:
     fields = [message.get(name, "") for name in ("from", "to", "cc", "subject", "snippet", "body")]
+    # Normalized address headers retain MIME-safe quoting and encoded words.
+    # Match identities against decoded display names as well as literal headers.
+    fields.extend(
+        _decode_header(display)
+        for display, _address in getaddresses([
+            str(message.get(name, "")) for name in ("from", "to", "cc")
+        ])
+        if display
+    )
     return "\n".join(str(value) for value in fields).casefold()
 
 
@@ -951,8 +971,11 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             continue
         existing_rows = connection.execute(
             "SELECT message_id, provider_thread_order FROM message_mail_state "
+            "WHERE file_number=? AND source=? AND account_fingerprint=? AND thread_id=? "
+            "UNION SELECT message_id, provider_thread_order FROM provider_thread_positions "
             "WHERE file_number=? AND source=? AND account_fingerprint=? AND thread_id=?",
-            (file_number, source, account_fingerprint, thread_id),
+            (file_number, source, account_fingerprint, thread_id,
+             file_number, source, account_fingerprint, thread_id),
         ).fetchall()
         existing_order = {
             str(row["message_id"]): int(row["provider_thread_order"])
@@ -990,6 +1013,17 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
     total_bytes = 0
     all_relevant_complete = True
     try:
+        # Persist the provider's enumerated positions even when individual body
+        # reads fail. A later retry can fill that exact gap without guessing or
+        # reusing the position of a vanished message.
+        connection.executemany(
+            "INSERT INTO provider_thread_positions VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(file_number, source, account_fingerprint, thread_id, message_id) DO NOTHING",
+            [
+                (file_number, source, account_fingerprint, thread_id, message_id, position)
+                for (thread_id, message_id), position in provider_thread_order.items()
+            ],
+        )
         for raw in messages:
             if not isinstance(raw, dict):
                 raise ValueError("mail bundle message entries must be objects")
@@ -1319,11 +1353,15 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                     )
         _finalize_retained_acquisitions(connection, file_number, source, account_fingerprint, matter_folder)
         outstanding_unreviewed_messages = int(connection.execute(
-            "SELECT COUNT(*) FROM message_mail_state s WHERE s.file_number=? AND s.source=? "
-            "AND s.account_fingerprint=? AND NOT EXISTS (SELECT 1 FROM message_reviews r "
+            "SELECT COUNT(*) FROM ("
+            "SELECT file_number,source,account_fingerprint,message_id FROM message_mail_state "
+            "WHERE file_number=? AND source=? AND account_fingerprint=? "
+            "UNION SELECT file_number,source,account_fingerprint,message_id FROM provider_thread_positions "
+            "WHERE file_number=? AND source=? AND account_fingerprint=?) s "
+            "WHERE NOT EXISTS (SELECT 1 FROM message_reviews r "
             "WHERE r.file_number=s.file_number AND r.source=s.source "
             "AND r.account_fingerprint=s.account_fingerprint AND r.message_id=s.message_id)",
-            (file_number, source, account_fingerprint),
+            (file_number, source, account_fingerprint, file_number, source, account_fingerprint),
         ).fetchone()[0])
         outstanding_review_items = int(connection.execute(
             "SELECT COUNT(*) FROM content_review_items "

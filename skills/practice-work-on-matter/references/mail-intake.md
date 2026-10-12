@@ -206,7 +206,9 @@ review acknowledgements. It does not establish review of vanished originals;
 retained historical evidence and pending review chunks are preserved. Outstanding
 retained reviews keep the scan partial until hash-bound acknowledgement, even
 when the surviving-thread marker can advance. Known chronological positions
-are preserved across deletion gaps. Empty
+are preserved across deletion gaps. Exact provider-listed IDs retain their
+positions even when a body fetch fails, so retries fill only the recorded ID's
+gap; an unretrieved listed ID remains an acquisition gap if it vanishes. Empty
 surviving threads and acquisition failures remain incomplete.
 
 Known unfinished acquisitions also keep the scan partial, even when their

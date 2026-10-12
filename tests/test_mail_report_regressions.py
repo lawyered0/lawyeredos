@@ -19,6 +19,105 @@ import test_mail_intake as fixtures
 
 
 class ExactReportIntakeTests(unittest.TestCase):
+    def test_partial_thread_body_retry_uses_enumerated_provider_position(self):
+        fixture = fixtures.MailIntakeTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        initial = plan(fixture.config, '2032-001')
+        first = fixture.bundle(initial, [fixture.message('seed')])
+        process_bundle(fixture.config, '2032-001', first)
+        fixture.acknowledge_all('2032-001')
+        process_bundle(fixture.config, '2032-001', first)
+        tracked = plan(fixture.config, '2032-001')
+        partial = fixture.bundle(tracked, [fixture.message('a'), fixture.message('c')])
+        detail = partial['coverage']['tracked_threads']['details'][0]
+        detail.update(ordered_candidate_ids=['a', 'b', 'c'], complete=False)
+        partial['coverage']['tracked_threads']['complete'] = False
+        acquired = process_bundle(fixture.config, '2032-001', partial)
+        self.assertFalse(acquired['checkpoint_advanced'])
+        state = fixture.workspace / '.lawyeredos/data/mail-intake.sqlite3'
+        with sqlite3.connect(state) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT message_id,provider_thread_order FROM provider_thread_positions "
+                "ORDER BY provider_thread_order").fetchall(), [('a', 0), ('b', 1), ('c', 2)])
+            self.assertIsNone(connection.execute(
+                "SELECT message_id FROM message_mail_state WHERE message_id='b'").fetchone())
+        fixture.acknowledge_all('2032-001')
+        retry = fixture.bundle(tracked, [fixture.message(value) for value in ('a', 'b', 'c')])
+        resumed = process_bundle(fixture.config, '2032-001', retry)
+        self.assertEqual(resumed['messages'][1]['body_review']['status'], 'pending')
+        fixture.acknowledge_all('2032-001')
+        completed = process_bundle(fixture.config, '2032-001', retry)
+        self.assertTrue(completed['checkpoint_advanced'])
+        with sqlite3.connect(state) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT message_id,provider_thread_order FROM message_mail_state "
+                "WHERE provider_thread_order IS NOT NULL ORDER BY provider_thread_order"
+            ).fetchall(), [('a', 0), ('b', 1), ('c', 2)])
+
+    def test_provider_retry_does_not_reuse_a_vanished_id_position(self):
+        fixture = fixtures.MailIntakeTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        initial = plan(fixture.config, '2032-001')
+        first = fixture.bundle(initial, [fixture.message('seed')])
+        process_bundle(fixture.config, '2032-001', first)
+        fixture.acknowledge_all('2032-001')
+        process_bundle(fixture.config, '2032-001', first)
+        tracked = plan(fixture.config, '2032-001')
+        partial = fixture.bundle(tracked, [fixture.message('a'), fixture.message('c')])
+        detail = partial['coverage']['tracked_threads']['details'][0]
+        detail.update(ordered_candidate_ids=['a', 'vanished', 'c'], complete=False)
+        partial['coverage']['tracked_threads']['complete'] = False
+        process_bundle(fixture.config, '2032-001', partial)
+        # A different, unrecorded ID cannot be guessed into vanished's slot.
+        changed = fixture.bundle(tracked, [fixture.message(value) for value in ('a', 'new', 'c')])
+        with self.assertRaisesRegex(ValueError, 'cannot place a new message before known history'):
+            process_bundle(fixture.config, '2032-001', changed)
+        surviving = fixture.bundle(tracked, [fixture.message(value) for value in ('a', 'c', 'new')])
+        process_bundle(fixture.config, '2032-001', surviving)
+        state = fixture.workspace / '.lawyeredos/data/mail-intake.sqlite3'
+        with sqlite3.connect(state) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT message_id,provider_thread_order FROM provider_thread_positions "
+                "ORDER BY provider_thread_order"
+            ).fetchall(), [('a', 0), ('vanished', 1), ('c', 2), ('new', 3)])
+
+    def test_enumerated_missing_body_remains_an_account_scoped_acquisition_gap(self):
+        fixture = fixtures.MailIntakeTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        initial = plan(fixture.config, '2032-001')
+        first = fixture.bundle(initial, [fixture.message('seed')])
+        process_bundle(fixture.config, '2032-001', first)
+        fixture.acknowledge_all('2032-001')
+        process_bundle(fixture.config, '2032-001', first)
+        tracked = plan(fixture.config, '2032-001')
+        partial = fixture.bundle(tracked, [fixture.message('a'), fixture.message('c')])
+        detail = partial['coverage']['tracked_threads']['details'][0]
+        detail.update(ordered_candidate_ids=['a', 'missing', 'c'], complete=False)
+        partial['coverage']['tracked_threads']['complete'] = False
+        process_bundle(fixture.config, '2032-001', partial)
+        fixture.acknowledge_all('2032-001')
+        surviving = fixture.bundle(tracked, [fixture.message('a'), fixture.message('c')])
+        incomplete = process_bundle(fixture.config, '2032-001', surviving)
+        self.assertFalse(incomplete['checkpoint_advanced'])
+        self.assertEqual(incomplete['outstanding_unreviewed_messages'], 1)
+        current = plan(fixture.config, '2032-001')
+        other_account = fixture.bundle(current, [fixture.message('c'), fixture.message('a')])
+        other_account['account_fingerprint'] = 'a' * 64
+        acquired = process_bundle(fixture.config, '2032-001', other_account)
+        self.assertEqual(acquired['outstanding_unreviewed_messages'], 2)
+        fixture.acknowledge_all('2032-001')
+        completed = process_bundle(fixture.config, '2032-001', other_account)
+        self.assertTrue(completed['checkpoint_advanced'])
+        state = fixture.workspace / '.lawyeredos/data/mail-intake.sqlite3'
+        with sqlite3.connect(state) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT message_id,provider_thread_order FROM provider_thread_positions "
+                "WHERE account_fingerprint=? ORDER BY provider_thread_order", ('a' * 64,)
+            ).fetchall(), [('c', 0), ('a', 1)])
+
     def test_missing_middle_draft_with_new_tail_does_not_deadlock_partial_frontier(self):
         fixture = fixtures.MailIntakeTests()
         fixture.setUp()
@@ -188,6 +287,35 @@ class ExactReportIntakeTests(unittest.TestCase):
 
 
 class ReportTransportTests(unittest.TestCase):
+    def test_unicode_display_name_remains_matter_identity_evidence(self):
+        fixture = fixtures.MailIntakeTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        fixture.write_config('gmail-imap-readonly')
+        with sqlite3.connect(fixture.database) as connection:
+            connection.execute("UPDATE matters SET client=?,description=?,primary_email=?,opposing_party=''",
+                ('Société Fictionnelle', 'Bail commercial', 'primary@example.invalid'))
+        (fixture.matter / '_matter-brief.md').write_text(
+            '# Société Fictionnelle\n\n## Status\n\nFictional matter.\n', encoding='utf-8')
+        message = EmailMessage()
+        message['From'] = '"Société Fictionnelle" <alternate@example.invalid>'
+        message['To'] = 'lawyer@example.invalid'
+        message['Subject'] = 'Bail commercial'
+        message.set_content('Veuillez répondre à la question.')
+        client = fixtures.FakeImapClient({101: (1, 16, message.as_bytes())})
+        adapter = GmailImapReadonlyAdapter(
+            'fictional@example.invalid', 'fictional-secret', lambda _host: client)
+        planned = plan(fixture.config, '2032-001')
+        bundle = adapter.intake(planned['query'], 5, planned['tracked_threads'])
+        self.assertIn('=?utf-8?', bundle['messages'][0]['from'])
+        result = process_bundle(fixture.config, '2032-001', bundle)
+        self.assertIn('body_review', result['messages'][0])
+        self.assertEqual(result['messages'][0]['body_review']['status'], 'pending')
+        audience = reconcile(bundle['messages'][0], {
+            'from': 'alternate@example.invalid', 'to': 'lawyer@example.invalid', 'cc': '',
+        })
+        self.assertEqual(audience['state'], 'verified')
+
     def test_non_ascii_query_uses_utf8_literal_on_real_imap_command_formatter(self):
         class SearchWireClient(fixtures.WireRecordingImapClient):
             def uid(self, command, *args):
