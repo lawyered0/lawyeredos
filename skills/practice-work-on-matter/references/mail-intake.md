@@ -208,7 +208,11 @@ retained reviews keep the scan partial until hash-bound acknowledgement, even
 when the surviving-thread marker can advance. Known chronological positions
 are preserved across deletion gaps. Exact provider-listed IDs retain their
 positions even when a body fetch fails, so retries fill only the recorded ID's
-gap; an unretrieved listed ID remains an acquisition gap if it vanishes. Empty
+gap; an unretrieved listed ID remains an acquisition gap if it vanishes.
+Legacy partial ledgers can place current exact candidates only in uniquely
+determined unused positions between known messages. Occupied, insufficient,
+or ambiguous gaps remain blocked; placement does not identify or establish
+review of a vanished, unrecorded historical message. Empty
 surviving threads and acquisition failures remain incomplete.
 
 Known unfinished acquisitions also keep the scan partial, even when their

@@ -981,6 +981,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             str(row["message_id"]): int(row["provider_thread_order"])
             for row in existing_rows if row["provider_thread_order"] is not None
         }
+        recovered_order: dict[str, int] = {}
         preserve_known_order = bool(existing_order)
         if preserve_known_order:
             # A compressed replay cannot anchor across deletion gaps. Preserve
@@ -988,12 +989,36 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             known_positions = [existing_order[value] for value in candidate_ids if value in existing_order]
             if known_positions != sorted(set(known_positions)):
                 raise ValueError("surviving-thread order conflicts with persisted chronology")
-            new_seen = False
+            occupied = set(existing_order.values())
+            previous_known: int | None = None
+            gap_ids: list[str] = []
             for value in candidate_ids:
                 if value not in existing_order:
-                    new_seen = True
-                elif new_seen:
-                    raise ValueError("surviving-thread replay cannot place a new message before known history")
+                    gap_ids.append(value)
+                    continue
+                position = existing_order[value]
+                if gap_ids:
+                    # Old partial ledgers retained successful body positions
+                    # but not every enumerated ID. Current exact order can fill
+                    # only a uniquely determined free gap between known IDs;
+                    # vanished known IDs keep their occupied positions.
+                    occupied_between = {
+                        rank for rank in occupied
+                        if previous_known is not None and previous_known < rank < position
+                    }
+                    free_count = (
+                        position - previous_known - 1 - len(occupied_between)
+                        if previous_known is not None else -1
+                    )
+                    if free_count != len(gap_ids):
+                        raise ValueError("surviving-thread replay cannot place a new message before known history")
+                    free_positions = [
+                        rank for rank in range(previous_known + 1, position)
+                        if rank not in occupied
+                    ]
+                    recovered_order.update(zip(gap_ids, free_positions))
+                    gap_ids = []
+                previous_known = position
             base_order = max(existing_order.values(), default=-1) + 1
         else:
             base_order = 0
@@ -1004,9 +1029,9 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                 raise ValueError("tracked-thread provider order repeats a message")
             provider_thread_order[key] = (
                 existing_order[message_id] if preserve_known_order and message_id in existing_order
-                else next_new_order
+                else recovered_order.get(message_id, next_new_order)
             )
-            if not preserve_known_order or message_id not in existing_order:
+            if message_id not in existing_order and message_id not in recovered_order:
                 next_new_order += 1
     results: list[dict[str, Any]] = []
     current_exact_pairs: set[tuple[str, str]] = set()

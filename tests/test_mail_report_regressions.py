@@ -19,6 +19,78 @@ import test_mail_intake as fixtures
 
 
 class ExactReportIntakeTests(unittest.TestCase):
+    def frozen_legacy_partial(self, positions):
+        """Reconstruct old-head persisted state without requiring Git in CI.
+
+        The standalone saved-state upgrade reproduction verifies that old 9cc
+        retains successful body rows at these positions but no position table.
+        """
+        fixture = fixtures.MailIntakeTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        initial = plan(fixture.config, '2032-001')
+        seed = fixture.bundle(initial, [fixture.message('seed')])
+        process_bundle(fixture.config, '2032-001', seed)
+        fixture.acknowledge_all('2032-001')
+        process_bundle(fixture.config, '2032-001', seed)
+        tracked = plan(fixture.config, '2032-001')
+        names = {position: message_id for message_id, position in positions.items()}
+        listed = [names.get(position, f'old-unretrieved-{position}')
+            for position in range(max(names) + 1)]
+        partial = fixture.bundle(tracked, [fixture.message(value) for value in positions])
+        partial['coverage']['tracked_threads']['details'][0].update(
+            ordered_candidate_ids=listed, complete=False)
+        partial['coverage']['tracked_threads']['complete'] = False
+        process_bundle(fixture.config, '2032-001', partial)
+        fixture.acknowledge_all('2032-001')
+        state = fixture.workspace / '.lawyeredos/data/mail-intake.sqlite3'
+        with sqlite3.connect(state) as connection:
+            connection.execute('DROP TABLE provider_thread_positions')
+            self.assertEqual(dict(connection.execute(
+                "SELECT message_id,provider_thread_order FROM message_mail_state "
+                "WHERE provider_thread_order IS NOT NULL").fetchall()), positions)
+        return fixture, tracked, state
+
+    def test_legacy_partial_upgrade_recovers_only_the_unique_unoccupied_gap(self):
+        fixture, tracked, state = self.frozen_legacy_partial({'a': 0, 'c': 2})
+        retry = fixture.bundle(tracked, [fixture.message(value) for value in ('a', 'b', 'c')])
+        resumed = process_bundle(fixture.config, '2032-001', retry)
+        self.assertEqual(resumed['messages'][1]['body_review']['status'], 'pending')
+        self.assertFalse(resumed['checkpoint_advanced'])
+        fixture.acknowledge_all('2032-001')
+        completed = process_bundle(fixture.config, '2032-001', retry)
+        self.assertTrue(completed['checkpoint_advanced'])
+        with sqlite3.connect(state) as connection:
+            self.assertEqual(connection.execute(
+                'SELECT message_id,provider_thread_order FROM provider_thread_positions '
+                'ORDER BY provider_thread_order').fetchall(), [('a', 0), ('b', 1), ('c', 2)])
+            self.assertIsNone(connection.execute(
+                "SELECT message_id FROM message_reviews WHERE message_id='old-unretrieved-1'").fetchone())
+
+    def test_legacy_partial_upgrade_refuses_a_known_vanished_id_gap(self):
+        fixture, tracked, state = self.frozen_legacy_partial({'a': 0, 'vanished': 1, 'c': 2})
+        retry = fixture.bundle(tracked, [fixture.message(value) for value in ('a', 'b', 'c')])
+        with self.assertRaisesRegex(ValueError, 'cannot place a new message before known history'):
+            process_bundle(fixture.config, '2032-001', retry)
+        with sqlite3.connect(state) as connection:
+            self.assertEqual(connection.execute(
+                "SELECT provider_thread_order FROM message_mail_state WHERE message_id='vanished'"
+            ).fetchone()[0], 1)
+            self.assertIsNone(connection.execute(
+                "SELECT message_id FROM content_review_items WHERE message_id='b'").fetchone())
+
+    def test_legacy_partial_upgrade_refuses_ambiguous_insufficient_or_contradictory_gaps(self):
+        for positions, candidates, reason in (
+            ({'a': 0, 'c': 3}, ('a', 'b', 'c'), 'cannot place a new message before known history'),
+            ({'a': 0, 'c': 1}, ('a', 'b', 'c'), 'cannot place a new message before known history'),
+            ({'a': 0, 'c': 2}, ('c', 'b', 'a'), 'conflicts with persisted chronology'),
+        ):
+            with self.subTest(positions=positions, candidates=candidates):
+                fixture, tracked, _state = self.frozen_legacy_partial(positions)
+                retry = fixture.bundle(tracked, [fixture.message(value) for value in candidates])
+                with self.assertRaisesRegex(ValueError, reason):
+                    process_bundle(fixture.config, '2032-001', retry)
+
     def test_partial_thread_body_retry_uses_enumerated_provider_position(self):
         fixture = fixtures.MailIntakeTests()
         fixture.setUp()
