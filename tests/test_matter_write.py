@@ -245,7 +245,9 @@ class GuardedMatterWriteTests(unittest.TestCase):
         with patch("lawyeredos.matter_write._write_json", side_effect=interrupt_third_write):
             with self.assertRaises(KeyboardInterrupt):
                 commit(args)
-        transaction_id = approved["confirm_token"][:24]
+        transaction_id = next((self.root / ".lawyeredos/transactions").glob(
+            approved["confirm_token"][:16] + "*.json"
+        )).stem
         inspected = inspect_recovery(self.root, transaction_id)
         self.assertEqual(inspected["plan"]["action"], "rollback_file")
         recovered = recover(self.root, transaction_id, inspected["confirm_token"])
@@ -329,7 +331,9 @@ class GuardedMatterWriteTests(unittest.TestCase):
         with patch("lawyeredos.matter_write.os.unlink", side_effect=refuse_stage_cleanup):
             with self.assertRaises(KeyboardInterrupt):
                 commit(args)
-        transaction_id = approved["confirm_token"][:24]
+        transaction_id = next((self.root / ".lawyeredos/transactions").glob(
+            approved["confirm_token"][:16] + "*.json"
+        )).stem
         inspected = inspect_recovery(self.root, transaction_id)
         self.assertEqual(inspected["plan"]["target_state"]["links"], 2)
         self.assertEqual(inspected["plan"]["action"], "rollback_file")
@@ -356,7 +360,9 @@ class GuardedMatterWriteTests(unittest.TestCase):
         with patch("lawyeredos.matter_write.os.link", side_effect=interrupt_install):
             with self.assertRaises(KeyboardInterrupt):
                 commit(args)
-        transaction_id = approved["confirm_token"][:24]
+        transaction_id = next((self.root / ".lawyeredos/transactions").glob(
+            approved["confirm_token"][:16] + "*.json"
+        )).stem
         inspected = inspect_recovery(self.root, transaction_id)
         self.assertEqual(inspected["plan"]["action"], "restore_missing_target")
         recover(self.root, transaction_id, inspected["confirm_token"])
@@ -451,7 +457,9 @@ class GuardedMatterWriteTests(unittest.TestCase):
             with patch("lawyeredos.matter_write.os.unlink", side_effect=retain_stage):
                 with self.assertRaises(KeyboardInterrupt):
                     commit(args)
-        transaction_id = approved["confirm_token"][:24]
+        transaction_id = next((self.root / ".lawyeredos/transactions").glob(
+            approved["confirm_token"][:16] + "*.json"
+        )).stem
         inspected = inspect_recovery(self.root, transaction_id)
         self.assertEqual(inspected["plan"]["action"], "finalize_not_committed")
         stage_name = inspected["plan"]["staged_name"]
@@ -477,7 +485,9 @@ class GuardedMatterWriteTests(unittest.TestCase):
         with patch("lawyeredos.matter_write.os.unlink", side_effect=crash_before_target_unlink):
             with self.assertRaises(KeyboardInterrupt):
                 commit(args)
-        transaction_id = approved["confirm_token"][:24]
+        transaction_id = next((self.root / ".lawyeredos/transactions").glob(
+            approved["confirm_token"][:16] + "*.json"
+        )).stem
         inspected = inspect_recovery(self.root, transaction_id)
         self.assertEqual(inspected["plan"]["action"], "finalize_not_committed")
         displaced_name = inspected["plan"]["displaced_name"]
