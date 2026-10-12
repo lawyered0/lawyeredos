@@ -113,7 +113,8 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-lock.txt
 ```
 
-The lock contains the exact Python package versions tested for version 0.2.0.
+The lock header records the pinned Python package versions from the 0.2.1
+release-candidate trial. Current candidates still require their own validation.
 It does not install Claude Code, LibreOffice, Poppler, or OCRmyPDF.
 
 ## 4. Terminal fallback: preview setup with the chosen runtime

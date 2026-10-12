@@ -35,3 +35,16 @@ email safely, choose the experimental local `gmail.readonly` REST route, or
 choose the portable read-only IMAP route after separately arranging a
 user-controlled credential source. Terminal commands in `docs/INSTALL.md` are
 inspection and fallback instructions, not the primary route.
+
+## Standalone fictional demo
+
+To exercise the local tracker and configuration validator without host setup or
+live integrations, choose a destination that does not exist and run:
+
+```bash
+python3 scripts/setup_demo.py --destination /tmp/lawyeredos-fictional-demo
+python3 scripts/validate_setup.py --config /tmp/lawyeredos-fictional-demo/config.toml
+```
+
+The demo copies the neutral template and binds its integrity manifest inside
+that destination. All matter names and documents are fictional.
