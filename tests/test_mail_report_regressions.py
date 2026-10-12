@@ -95,6 +95,37 @@ class ExactReportIntakeTests(unittest.TestCase):
         self.assertEqual(reviewed_hash, body_hash)
         self.assertEqual(json.loads(provenance)['query'], initial['query'])
 
+    def test_retained_attachment_privacy_is_required_before_finalization(self):
+        for unsafe in ('mode', 'hardlink'):
+            with self.subTest(unsafe=unsafe):
+                fixture = fixtures.MailIntakeTests()
+                fixture.setUp()
+                try:
+                    planned = plan(fixture.config, '2032-001')
+                    acquired = process_bundle(fixture.config, '2032-001', fixture.bundle(planned, [
+                        fixture.message('retained', attachment=fixture.attachment())]))
+                    self.assertEqual(acquired['status'], 'partial')
+                    saved = fixtures.Path(acquired['messages'][0]['attachments'][0]['saved_path'])
+                    extra_link = fixture.root / 'fictional-extra-hardlink.txt'
+                    if unsafe == 'mode':
+                        saved.chmod(0o644)
+                    else:
+                        extra_link.hardlink_to(saved)
+                    fixture.acknowledge_all('2032-001')
+                    current = plan(fixture.config, '2032-001')
+                    retained = process_bundle(fixture.config, '2032-001', fixture.bundle(current, []))
+                    self.assertEqual(retained['status'], 'partial')
+                    self.assertEqual(retained['outstanding_unreviewed_messages'], 1)
+                    if unsafe == 'mode':
+                        saved.chmod(0o600)
+                    else:
+                        extra_link.unlink()
+                    restored = process_bundle(fixture.config, '2032-001', fixture.bundle(current, []))
+                    self.assertTrue(restored['checkpoint_advanced'])
+                    self.assertEqual(restored['outstanding_unreviewed_messages'], 0)
+                finally:
+                    fixture.tearDown()
+
     def test_outstanding_acquisitions_are_source_and_account_scoped(self):
         fixture = fixtures.MailIntakeTests()
         fixture.setUp()

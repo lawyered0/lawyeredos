@@ -827,7 +827,8 @@ def _finalize_retained_acquisitions(
         try:
             for item in attachments:
                 saved = confined_path(matter_folder, item["saved_relative_path"])
-                if saved.is_symlink() or not saved.is_file() or sha256_file(saved) != item["content_sha256"]:
+                assert_private_file(saved)
+                if sha256_file(saved) != item["content_sha256"]:
                     raise ValueError("retained attachment is missing or changed")
                 saved_sizes[str(item["review_id"])] = saved.stat().st_size
         except (ValueError, OSError):
