@@ -69,14 +69,18 @@ def _custom_property_parts(package: zipfile.ZipFile) -> set[str]:
         return part
 
     declarations = parse("[Content_Types].xml")
-    overrides = {
-        local_part(item.get("PartName", "")): item.get("ContentType")
-        for item in declarations if item.tag == f"{{{CONTENT_NS}}}Override"
-    }
-    defaults = {
-        item.get("Extension", "").casefold(): item.get("ContentType")
-        for item in declarations if item.tag == f"{{{CONTENT_NS}}}Default"
-    }
+    overrides, defaults = {}, {}
+    for item in declarations:
+        if item.tag == f"{{{CONTENT_NS}}}Override":
+            table, key = overrides, local_part(item.get("PartName", ""))
+        elif item.tag == f"{{{CONTENT_NS}}}Default":
+            table, key = defaults, item.get("Extension", "").casefold()
+        else:
+            continue
+        content_type = item.get("ContentType")
+        if key in table and table[key] != content_type:
+            raise ValueError("custom-property discovery found conflicting content-type declarations")
+        table[key] = content_type
 
     def effective_type(part):
         return overrides.get(part, defaults.get(PurePosixPath(part).suffix.lstrip(".").casefold()))

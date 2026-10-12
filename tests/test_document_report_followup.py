@@ -136,6 +136,33 @@ class RecoveredDocumentRegressionTests(unittest.TestCase):
                         self.assertNotIn(property_part.encode(), package.read("_rels/.rels"))
                 self.assertEqual(source.read_bytes(), original)
 
+    def test_scrubber_refuses_conflicting_content_type_declarations(self):
+        scrubber = script("scrub_docx_metadata")
+        for declaration in ("Override", "Default"):
+            with self.subTest(declaration=declaration), tempfile.TemporaryDirectory() as temporary:
+                source, output = Path(temporary) / "fictional.docx", Path(temporary) / "scrubbed.docx"
+                self._custom_property_fixture(source, orphan=True)
+                with zipfile.ZipFile(source) as package:
+                    parts = {name: package.read(name) for name in package.namelist()}
+                root = etree.fromstring(parts["[Content_Types].xml"])
+                if declaration == "Override":
+                    etree.SubElement(root, "{" + scrubber.CONTENT_NS + "}Override", PartName="/docProps/review-props.xml",
+                                     ContentType="application/xml")
+                else:
+                    parts["docProps/review.reviewprops"] = parts.pop("docProps/review-props.xml")
+                    root.remove(next(item for item in root if item.get("PartName") == "/docProps/review-props.xml"))
+                    for content_type in ("application/vnd.openxmlformats-officedocument.custom-properties+xml", "application/xml"):
+                        etree.SubElement(root, "{" + scrubber.CONTENT_NS + "}Default", Extension="reviewprops", ContentType=content_type)
+                parts["[Content_Types].xml"] = etree.tostring(root)
+                with zipfile.ZipFile(source, "w") as package:
+                    for name, data in parts.items():
+                        package.writestr(name, data)
+                original = source.read_bytes()
+                with self.assertRaisesRegex(ValueError, "conflicting content-type"):
+                    scrubber.scrub(source, output)
+                self.assertEqual(source.read_bytes(), original)
+                self.assertFalse(output.exists())
+
     def test_field_values_cannot_inject_another_placeholder(self):
         creator = script("create_letter")
         document = Document()
