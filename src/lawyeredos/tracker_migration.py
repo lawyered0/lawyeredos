@@ -166,6 +166,7 @@ def commit_migration(source: Path, target: Path, token: str) -> dict[str, Any]:
     os.close(fd)
     temp_path = Path(temporary)
     temp_path.unlink()
+    published = False
     try:
         initialize(temp_path)
         timestamp = now()
@@ -197,12 +198,23 @@ def commit_migration(source: Path, target: Path, token: str) -> dict[str, Any]:
         if target.exists():
             raise ValueError("migration target appeared during build; refusing replacement")
         os.link(temp_path, target)
-        temp_path.unlink()
+        published = True
+        try:
+            temp_path.unlink()
+        except OSError as exc:
+            return {"ok": False, "committed": True, "retry_safe": False,
+                    "target": str(target), "temporary": str(temp_path),
+                    "verification_state": "temporary_cleanup_failed", "error": str(exc),
+                    "recovery": "Inspect both paths; do not repeat migration. Remove only its temporary link before normal use."}
         return {"ok": True, "committed": True, "target": str(target), "matter_count": plan["matter_count"],
                 "history_preserved": plan["history_preserved"]}
     finally:
         if temp_path.exists():
-            temp_path.unlink()
+            try:
+                temp_path.unlink()
+            except OSError:
+                if not published:
+                    raise
 
 
 def export_tracker(database: Path, output: Path, fmt: str) -> dict[str, Any]:
@@ -259,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             result = export_tracker(Path(args.database), Path(args.output), args.format)
         emit(result)
-        return 0
+        return 0 if result["ok"] else 3 if result.get("committed") else 2
     except (ValueError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
         emit({"ok": False, "committed": False, "error": str(exc)})
         return 2

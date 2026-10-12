@@ -119,6 +119,26 @@ class TrackerRemainingRegressions(unittest.TestCase):
             project(self.database, output)
         self.assertEqual(output.read_bytes(), b"fictional competing destination")
 
+    def test_migration_cleanup_failure_after_publish_reports_committed(self):
+        source = self.root / "snapshot.json"
+        export_tracker(self.database, source, "json")
+        target = self.root / "restore.sqlite3"
+        plan = migration_plan(source, target)
+        original = Path.unlink
+
+        def fail_after_publication(path, *args, **kwargs):
+            if target.exists() and path.name.startswith(".restore.sqlite3."):
+                raise OSError("fictional temporary cleanup failure")
+            return original(path, *args, **kwargs)
+
+        with patch.object(Path, "unlink", fail_after_publication):
+            result = commit_migration(source, target, plan["confirm_token"])
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["committed"])
+        self.assertFalse(result["retry_safe"])
+        self.assertEqual(result["verification_state"], "temporary_cleanup_failed")
+        self.assertTrue(target.is_file())
+
     def test_reserved_uri_characters_access_only_the_existing_fictional_database(self):
         folder = self.root / "a#b?c%20d"
         folder.mkdir()
