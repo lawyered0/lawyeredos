@@ -196,7 +196,8 @@ the requested local draft, but any tracker update still follows
 `lawyeredos:practice-matter-tracker`'s preview and approval boundary.
 
 Matter-memory changes use `memory_search preview-write` and `commit-write` with
-the previously observed SHA-256. Existing memory cannot be replaced using a
+`--database <tracker.sqlite3>` and `--file-number <registered file number>`,
+the registered matter folder, and the previously observed SHA-256. Existing memory cannot be replaced using a
 freshly computed digest after the preview. Run `voice_lint` on outgoing email or
 letter text; FAIL findings require correction or an explicit recorded reason in
 the owning workflow.

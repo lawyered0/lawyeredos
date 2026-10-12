@@ -12,7 +12,7 @@ from lawyeredos.integrations import GmailReadonlyAdapter, GoogleCalendarAdapter
 from lawyeredos.memory_search import build_index, memory_commit, memory_preview, search
 from lawyeredos.review_bundle import create_manifest
 from lawyeredos.review_orchestrator import LENSES, collect, prepare
-from lawyeredos.tracker_cli import initialize
+from lawyeredos.tracker_cli import initialize, preview_mutation, commit_mutation
 from lawyeredos.tracker_migration import commit_migration, export_tracker, migration_plan
 from lawyeredos.tracker_xlsx import project
 from lawyeredos.voice_lint import lint
@@ -104,11 +104,18 @@ class DailyDependencyTests(unittest.TestCase):
         self.assertEqual(search(index, "delivery")["results"][0]["path"], "_matter-brief.md")
         content = self.root / "new.md"; content.write_text("# Example\nUpdated fictional note.\n", encoding="utf-8")
         digest = sha256_file(brief)
-        preview = memory_preview(self.root, "matter/_matter-brief.md", content.read_bytes(), digest)
-        result = memory_commit(self.root, "matter/_matter-brief.md", content.read_bytes(), digest, preview["confirm_token"])
+        from test_matter_write import tracker_args
+        database = self.root / "memory-tracker.sqlite3"
+        initialize(database)
+        args = tracker_args(database, "create", matter_folder="matter")
+        approved = preview_mutation(database, "create", args)
+        commit_mutation(database, "create", args, approved["confirm_token"])
+        kwargs = {"database": database, "file_number": "2035-001"}
+        preview = memory_preview(self.root, "matter/_matter-brief.md", content.read_bytes(), digest, **kwargs)
+        result = memory_commit(self.root, "matter/_matter-brief.md", content.read_bytes(), digest, preview["confirm_token"], **kwargs)
         self.assertTrue(result["committed"])
         with self.assertRaisesRegex(ValueError, "compare-and-swap"):
-            memory_preview(self.root, "matter/_matter-brief.md", b"later", digest)
+            memory_preview(self.root, "matter/_matter-brief.md", b"later", digest, **kwargs)
 
     def test_voice_lint(self):
         result = lint("Please pay 5,000 in settlement. This is a short sentence.", "email")
