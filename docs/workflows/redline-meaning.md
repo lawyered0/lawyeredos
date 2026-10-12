@@ -52,6 +52,12 @@ formatting alone is not a genuine tracked revision. Confirm both deleted and
 inserted wording are legible and that numbering, tables, headers/footers,
 signatures, and page breaks still work in the marked and clean renderings.
 
+Replacement and deletion preserve each affected run's formatting; inserted
+paragraphs track both their text and paragraph marks. The engine conservatively
+refuses spans whose runs contain page, column, or rendered-page-break markers.
+Use a narrower span in another run or report that layout requires manual review;
+do not flatten or remove a break to make the operation succeed.
+
 Compare the source rendering with the marked output as well as marked with clean.
 Inspect visible revision markup, orphan headings/numbering and unchanged
 formatting where edits can affect meaning. Verify a change-set schedule's clause

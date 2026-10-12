@@ -208,7 +208,8 @@ def _pdf_units(path: Path, scratch: Path) -> tuple[list[dict[str, Any]], dict[st
     if output.exists() or output.is_symlink():
         assert_private_file(output)
         text = output.read_text(encoding="utf-8", errors="replace")
-        extraction = {"needs_ocr": len(text.strip()) < 40}
+        from .pdf_assessment import assess_pdf_text, pdf_page_count
+        extraction = assess_pdf_text(text, pdf_page_count(path))
     else:
         extraction = extract_pdf(path, output)
         if output.is_symlink() or not output.is_file() or output.stat(follow_symlinks=False).st_nlink != 1:
@@ -216,9 +217,8 @@ def _pdf_units(path: Path, scratch: Path) -> tuple[list[dict[str, Any]], dict[st
         os.chmod(output, 0o600, follow_symlinks=False)
         assert_private_file(output)
         text = output.read_text(encoding="utf-8", errors="replace")
-    pages = text.split("\f")
-    while pages and not pages[-1].strip():
-        pages.pop()
+    from .pdf_assessment import split_pdf_pages
+    pages = split_pdf_pages(text)
     units = [
         item for page_number, page in enumerate(pages, start=1)
         if (item := _unit({"kind": "pdf", "page": page_number}, page)) is not None
@@ -228,6 +228,10 @@ def _pdf_units(path: Path, scratch: Path) -> tuple[list[dict[str, Any]], dict[st
     return units, {
         "pages": len(pages),
         "empty_pages": empty_pages,
+        "expected_pages": extraction.get("expected_pages"),
+        "page_count_verified": extraction.get("page_count_verified", False),
+        "sparse_pages": extraction.get("sparse_pages", []),
+        "missing_pages": extraction.get("missing_pages", []),
         "needs_ocr": needs_ocr,
         "complete": not needs_ocr,
         "reason": "one or more PDF pages require OCR or visual completeness review" if needs_ocr else "",

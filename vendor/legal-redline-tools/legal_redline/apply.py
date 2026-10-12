@@ -316,6 +316,90 @@ def _make_trailing_run(text, rpr=None):
     return r
 
 
+def _slice_run(element, start, end, deleted=False):
+    """Copy a run's character range without flattening formatting, tabs or breaks."""
+    result = copy.deepcopy(element)
+    position = 0
+    for child in list(result):
+        if child.tag == qn("w:rPr"):
+            continue
+        text = None
+        if child.tag == qn("w:t"):
+            text = child.text or ""
+        elif child.tag in {qn("w:tab"), qn("w:ptab")}:
+            text = "\t"
+        elif child.tag == qn("w:noBreakHyphen"):
+            text = "-"
+        elif child.tag == qn("w:cr") or (
+            child.tag == qn("w:br") and child.get(qn("w:type"), "textWrapping") == "textWrapping"
+        ):
+            text = "\n"
+        if text is None:
+            # Keep zero-width layout content at its original text boundary.
+            if not (start <= position < end or position == end == len(Run(element, None).text)):
+                result.remove(child)
+            continue
+        stop = position + len(text)
+        lo, hi = max(start, position), min(end, stop)
+        if lo >= hi:
+            result.remove(child)
+        elif child.tag == qn("w:t"):
+            child.text = text[lo - position:hi - position]
+            child.set(qn("xml:space"), "preserve")
+            if deleted:
+                child.tag = qn("w:delText")
+        position = stop
+    return result
+
+
+def _replace_span(para, result, replacement_text, author, date_str):
+    start_idx, start_offset, end_idx, end_offset, _ = result
+    runs = para.runs
+    parent = para._element
+    insert_pos = list(parent).index(runs[start_idx]._element)
+    first_rpr = runs[start_idx]._element.find(qn("w:rPr"))
+    elements = []
+    if start_offset:
+        elements.append(_slice_run(runs[start_idx]._element, 0, start_offset))
+    deletion = _make_del("", author, date_str)
+    deletion.remove(deletion[0])
+    for idx in range(start_idx, end_idx + 1):
+        lo = start_offset if idx == start_idx else 0
+        hi = end_offset + 1 if idx == end_idx else len(runs[idx].text or "")
+        if hi > lo:
+            deletion.append(_slice_run(runs[idx]._element, lo, hi, deleted=True))
+    elements.append(deletion)
+    if replacement_text is not None:
+        elements.append(_make_ins(replacement_text, author, date_str, first_rpr))
+    end_length = len(runs[end_idx].text or "")
+    if end_offset + 1 < end_length:
+        elements.append(_slice_run(runs[end_idx]._element, end_offset + 1, end_length))
+    for run in runs[start_idx:end_idx + 1]:
+        parent.remove(run._element)
+    for offset, element in enumerate(elements):
+        parent.insert(insert_pos + offset, element)
+
+
+def _track_paragraph_mark(paragraph, author, date_str):
+    """Track the inserted paragraph boundary as well as its text."""
+    properties = paragraph.get_or_add_pPr()
+    run_properties = properties.find(qn("w:rPr"))
+    if run_properties is None:
+        run_properties = OxmlElement("w:rPr")
+        # rPr precedes sectPr and pPrChange in paragraph properties.
+        successors = {qn("w:sectPr"), qn("w:pPrChange")}
+        index = next((i for i, child in enumerate(properties) if child.tag in successors), len(properties))
+        properties.insert(index, run_properties)
+    for child in list(run_properties):
+        if child.tag in {qn("w:ins"), qn("w:del"), qn("w:moveFrom"), qn("w:moveTo")}:
+            run_properties.remove(child)
+    marker = OxmlElement("w:ins")
+    marker.set(qn("w:id"), next_rev_id())
+    marker.set(qn("w:author"), author)
+    marker.set(qn("w:date"), date_str)
+    run_properties.append(marker)
+
+
 # Inline containers whose text python-docx's ``para.runs`` cannot see: an
 # existing tracked change, a hyperlink, a content control, a simple field. A
 # span whose runs straddle one would be rebuilt with that element pushed past
@@ -340,9 +424,18 @@ _OPAQUE_RUN_CONTENT = frozenset(qn(t) for t in (
 )) | {"{http://schemas.openxmlformats.org/markup-compatibility/2006}AlternateContent"}
 
 
+def _has_layout_break(element):
+    return any(
+        child.tag == qn("w:lastRenderedPageBreak")
+        or (child.tag == qn("w:br") and child.get(qn("w:type"), "textWrapping") != "textWrapping")
+        for child in element
+    )
+
+
 class SpanCrossesHiddenContent(ValueError):
     """The matched span straddles a tracked change, hyperlink, field, content
-    control, note or comment reference, image, text box, object or symbol."""
+    control, note or comment reference, image, text box, object, symbol or
+    non-text layout break."""
 
 
 def _get_full_paragraph_text(para):
@@ -441,6 +534,8 @@ def _find_text_across_runs(para, search_text):
     children = list(para._element)
     lo = children.index(runs[start_run_idx]._element)
     hi = children.index(runs[end_run_idx]._element)
+    if any(_has_layout_break(child) for child in children[lo:hi + 1]):
+        raise SpanCrossesHiddenContent(matched_text)
     if any(c.tag in _OPAQUE_INLINE_TAGS or any(g.tag in _OPAQUE_RUN_CONTENT for g in c)
            for c in children[lo:hi + 1]):
         # 2026-10-07: a span bridging a counterparty w:del moved it to the end
@@ -469,34 +564,7 @@ def apply_tracked_replacement(doc, search_text, replacement_text, author, date_s
         if result is None:
             continue
 
-        start_run_idx, start_offset, end_run_idx, end_offset, matched_text = result
-        runs = para.runs
-        parent = para._element
-
-        first_rpr = runs[start_run_idx]._element.find(qn("w:rPr"))
-
-        end_run_text = runs[end_run_idx].text or ""
-        trailing_text = end_run_text[end_offset + 1:]
-
-        start_run_text = runs[start_run_idx].text or ""
-        leading_text = start_run_text[:start_offset]
-
-        all_children = list(parent)
-        insert_pos = all_children.index(runs[start_run_idx]._element)
-
-        for i in range(start_run_idx, end_run_idx + 1):
-            parent.remove(runs[i]._element)
-
-        new_elements = []
-        if leading_text:
-            new_elements.append(_make_trailing_run(leading_text, first_rpr))
-        new_elements.append(_make_del(matched_text, author, date_str, first_rpr))
-        new_elements.append(_make_ins(replacement_text, author, date_str, first_rpr))
-        if trailing_text:
-            new_elements.append(_make_trailing_run(trailing_text, first_rpr))
-
-        for i, elem in enumerate(new_elements):
-            parent.insert(insert_pos + i, elem)
+        _replace_span(para, result, replacement_text, author, date_str)
 
         return True
     return False
@@ -513,32 +581,7 @@ def apply_tracked_deletion(doc, delete_text, author, date_str):
         if result is None:
             continue
 
-        start_run_idx, start_offset, end_run_idx, end_offset, matched_text = result
-        runs = para.runs
-        parent = para._element
-
-        first_rpr = runs[start_run_idx]._element.find(qn("w:rPr"))
-
-        end_run_text = (runs[end_run_idx].text or "")
-        trailing_text = end_run_text[end_offset + 1:]
-
-        start_run_text = (runs[start_run_idx].text or "")
-        leading_text = start_run_text[:start_offset]
-
-        insert_pos = list(parent).index(runs[start_run_idx]._element)
-
-        for i in range(start_run_idx, end_run_idx + 1):
-            parent.remove(runs[i]._element)
-
-        new_elements = []
-        if leading_text:
-            new_elements.append(_make_trailing_run(leading_text, first_rpr))
-        new_elements.append(_make_del(matched_text, author, date_str, first_rpr))
-        if trailing_text:
-            new_elements.append(_make_trailing_run(trailing_text, first_rpr))
-
-        for i, elem in enumerate(new_elements):
-            parent.insert(insert_pos + i, elem)
+        _replace_span(para, result, None, author, date_str)
 
         return True
     return False
@@ -581,6 +624,7 @@ def apply_tracked_insertion(doc, after_text, new_text, author, date_str,
 
             ins_elem = _make_ins(new_text, author, date_str, end_rpr)
             new_para.append(ins_elem)
+            _track_paragraph_mark(new_para, author, date_str)
             body.insert(target_idx + 1, new_para)
             return True
 
@@ -667,6 +711,7 @@ def apply_tracked_add_section(doc, after_section, new_text, author, date_str,
     r.append(t)
     ins.append(r)
     new_para.append(ins)
+    _track_paragraph_mark(new_para, author, date_str)
 
     parent.insert(target_idx + 1, new_para)
     return True
@@ -831,7 +876,7 @@ def apply_redlines(input_path, output_path, redlines, author="Reviewer"):
         except SpanCrossesHiddenContent as e:
             desc = (f"Redline {i} ({rtype}): '{str(e)[:60]}' straddles an existing "
                     "tracked change, hyperlink, field, content control, note or comment "
-                    "reference, image, text box or symbol; not applied")
+                    "reference, image, text box, symbol or non-text layout break; not applied")
             results.append(("ERROR", desc))
             print(f"  [ERROR] {desc}")
 

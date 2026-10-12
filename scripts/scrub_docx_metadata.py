@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import tempfile
 import zipfile
 from pathlib import Path
-from xml.etree import ElementTree as ET
+from accept_tracked_changes import _validate_docx_package
+
+
+def require_lxml():
+    try:
+        from lxml import etree
+    except ImportError as exc:
+        raise ValueError("lxml is required; install requirements-documents.txt") from exc
+    return etree
 
 
 CORE_REMOVE = {
@@ -23,11 +32,15 @@ APP_NS = "http://schemas.openxmlformats.org/officeDocument/2006/extended-propert
 
 
 def local_name(value: str) -> str:
-    return value.rsplit("}", 1)[-1]
+    return value.rsplit("}", 1)[-1] if isinstance(value, str) else ""
 
 
 def scrub_xml(name: str, data: bytes) -> bytes:
-    root = ET.fromstring(data)
+    etree = require_lxml()
+    try:
+        root = etree.fromstring(data, etree.XMLParser(resolve_entities=False, no_network=True))
+    except etree.XMLSyntaxError as exc:
+        raise ValueError("input contains invalid DOCX XML") from exc
     changed = False
     if name == "docProps/core.xml":
         for child in list(root):
@@ -59,30 +72,21 @@ def scrub_xml(name: str, data: bytes) -> bytes:
                     changed = True
     if name.endswith(".rels"):
         for relationship in list(root):
-            if relationship.tag == f"{{{REL_NS}}}Relationship" and "customXml" in relationship.get("Target", ""):
+            if relationship.tag == f"{{{REL_NS}}}Relationship" and (
+                "customXml" in relationship.get("Target", "")
+                or relationship.get("Type", "").endswith("/custom-properties")
+            ):
                 root.remove(relationship)
                 changed = True
     if name == "[Content_Types].xml":
         for child in list(root):
-            if child.tag == f"{{{CONTENT_NS}}}Override" and child.get("PartName", "").startswith("/customXml/"):
+            if child.tag == f"{{{CONTENT_NS}}}Override" and (child.get("PartName", "").startswith("/customXml/")
+                or child.get("PartName") == "/docProps/custom.xml"):
                 root.remove(child)
                 changed = True
     if not changed:
         return data
-    if name.endswith(".rels"):
-        ET.register_namespace("", REL_NS)
-    elif name == "[Content_Types].xml":
-        ET.register_namespace("", CONTENT_NS)
-    elif name == "docProps/app.xml":
-        ET.register_namespace("", APP_NS)
-        ET.register_namespace("vt", "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes")
-    elif name == "docProps/core.xml":
-        ET.register_namespace("cp", "http://schemas.openxmlformats.org/package/2006/metadata/core-properties")
-        ET.register_namespace("dc", "http://purl.org/dc/elements/1.1/")
-        ET.register_namespace("dcterms", "http://purl.org/dc/terms/")
-        ET.register_namespace("dcmitype", "http://purl.org/dc/dcmitype/")
-        ET.register_namespace("xsi", "http://www.w3.org/2001/XMLSchema-instance")
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    return etree.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
 def scrub(source: Path, output: Path) -> None:
@@ -91,7 +95,9 @@ def scrub(source: Path, output: Path) -> None:
     if output.exists():
         raise ValueError("output already exists")
     output.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(source) as input_package, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as result:
+    staged = io.BytesIO()
+    with zipfile.ZipFile(source) as input_package, zipfile.ZipFile(staged, "w", zipfile.ZIP_DEFLATED) as result:
+        _validate_docx_package(input_package)
         for info in input_package.infolist():
             if info.filename.startswith("customXml/") or info.filename == "docProps/custom.xml":
                 continue
@@ -99,6 +105,10 @@ def scrub(source: Path, output: Path) -> None:
             if info.filename.endswith((".xml", ".rels")):
                 data = scrub_xml(info.filename, data)
             result.writestr(info, data)
+    # Do not publish a partial package when parsing or scrubbing fails.
+    with output.open("xb") as stream:
+        stream.write(staged.getvalue())
+
 
 
 def scrub_in_place(path: Path) -> None:
@@ -122,7 +132,7 @@ def main() -> int:
     try:
         scrub(Path(args.input).expanduser().resolve(), Path(args.output).expanduser().resolve())
         return 0
-    except (ValueError, OSError, ET.ParseError, zipfile.BadZipFile) as exc:
+    except (ValueError, OSError, zipfile.BadZipFile) as exc:
         print(f"error: {exc}")
         return 2
 

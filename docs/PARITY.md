@@ -93,7 +93,7 @@ external-account authority are intentional differences, not deferred success.
 | Matter folder resolver | Tracker mapping plus `matter_context.py` | Preserved for one configured root; tested |
 | Brief index and decision search | `memory_search.py` FTS index/search | Preserved generically for Markdown sources; tested |
 | Mail delta/cache, message extraction, attachment fetch | `mail_intake.py`, `content_review.py`, `integrations.py`, `imap_mail.py` | Stable-ID ledger and complete bounded-window query; fully retrieved bodies and attachment bytes through configured REST, portable read-only IMAP, or capable session tools; resumable paragraph/page/sheet chunks require hash-bound model acknowledgements, and long, ambiguous, visual/OCR-gapped, or partial retrieval never advances the complete checkpoint |
-| PDF extraction and OCR | `document_helpers.py` | Text extraction and optional OCR with hash-bound report; tested without live OCR execution |
+| PDF extraction and OCR | `document_helpers.py`, `pdf_assessment.py` | Page-level text receipts include expected/extracted counts, character counts, sparse/missing pages, and page-count verification. Sparse pages or an unknown/mismatched `pdfinfo` count require OCR or manual review, including cached review text; one dense page cannot clear the rest. Optional OCR uses a hash-bound report; tested without live OCR execution |
 | Safe output writer | `safe_output.py` | Preserved with token-bound no-overwrite behavior; tested |
 | Matter-memory writer | `memory_search.py` | Compare-and-swap write preserved; tested |
 | DOCX renderer and rasterizer | `render_docx.py` | Preserved through LibreOffice/Poppler; tested on macOS |
