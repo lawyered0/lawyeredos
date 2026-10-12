@@ -381,13 +381,15 @@ def _search_profile(matter: dict[str, Any]) -> dict[str, Any]:
 
 
 def _history_bound(matter: dict[str, Any]) -> tuple[str, str | None]:
-    recent_start = datetime.now(UTC).date() - timedelta(days=INITIAL_LOOKBACK_DAYS)
+    today = datetime.now(UTC).date()
     try:
         opened = datetime.fromisoformat(str(matter.get("created_at", "")).replace("Z", "+00:00")).date()
-        start = min(recent_start, opened - timedelta(days=1))
+        if opened > today:
+            raise ValueError("matter opening date is in the future")
+        start = opened - timedelta(days=1)
     except (ValueError, OverflowError):
         return f"newer_than:{INITIAL_LOOKBACK_DAYS}d", (
-            "Matter opening date is missing or invalid; search covers only the recent "
+            "Matter opening date is missing, invalid, or in the future; search covers only the recent "
             f"{INITIAL_LOOKBACK_DAYS} days. Historical coverage is unverified."
         )
     return f"after:{start:%Y/%m/%d}", None
@@ -902,9 +904,29 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             ),
             "",
         )
-        if len(anchors) > 1:
+        recovery = any(
+            isinstance(detail, dict) and str(detail.get("thread_id", "")) == thread_id
+            and detail.get("recovery") == "missing-marker-surviving-thread-replay"
+            and detail.get("marker_missing") is True and detail.get("complete") is True
+            for detail in tracked_coverage.get("details", [])
+        )
+        preserve_known_order = recovery or all(value in existing_order for value in candidate_ids)
+        if preserve_known_order:
+            # A compressed replay cannot anchor across deletion gaps. Preserve
+            # known chronological positions, including those of vanished IDs.
+            known_positions = [existing_order[value] for value in candidate_ids if value in existing_order]
+            if known_positions != sorted(set(known_positions)):
+                raise ValueError("surviving-thread order conflicts with persisted chronology")
+            new_seen = False
+            for value in candidate_ids:
+                if value not in existing_order:
+                    new_seen = True
+                elif new_seen:
+                    raise ValueError("surviving-thread replay cannot place a new message before known history")
+            base_order = max(existing_order.values(), default=-1) + 1
+        elif len(anchors) > 1:
             raise ValueError("tracked-thread provider order conflicts with persisted order")
-        if anchors:
+        elif anchors:
             base_order = anchors.pop()
         elif marker in existing_order and marker not in candidate_ids:
             base_order = existing_order[marker] + 1
@@ -916,7 +938,10 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             key = (thread_id, message_id)
             if key in provider_thread_order:
                 raise ValueError("tracked-thread provider order repeats a message")
-            provider_thread_order[key] = base_order + position
+            provider_thread_order[key] = (
+                existing_order[message_id] if preserve_known_order and message_id in existing_order
+                else base_order + position
+            )
     results: list[dict[str, Any]] = []
     current_exact_pairs: set[tuple[str, str]] = set()
     total_bytes = 0
@@ -977,7 +1002,8 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                 "from_account=excluded.from_account, transmission_state=excluded.transmission_state, "
                 "state_known=excluded.state_known, acquisition_basis=excluded.acquisition_basis, "
                 "is_auto_reply=excluded.is_auto_reply, "
-                "provider_thread_order=excluded.provider_thread_order, "
+                "provider_thread_order=COALESCE(excluded.provider_thread_order, "
+                "message_mail_state.provider_thread_order), "
                 "observed_at=excluded.observed_at "
                 "WHERE excluded.observed_at >= message_mail_state.observed_at",
                 (
@@ -1232,7 +1258,15 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                         "marker_message_id=excluded.marker_message_id, advanced_at=excluded.advanced_at",
                         (file_number, account_fingerprint, str(detail["thread_id"]), marker, now()),
                     )
-        checkpoint_advanced = bool(coverage["complete"] and tracked_complete and all_relevant_complete)
+        outstanding_review_items = int(connection.execute(
+            "SELECT COUNT(*) FROM content_review_items "
+            "WHERE file_number=? AND source=? AND account_fingerprint=? AND status != 'reviewed'",
+            (file_number, source, account_fingerprint),
+        ).fetchone()[0])
+        checkpoint_advanced = bool(
+            coverage["complete"] and tracked_complete and all_relevant_complete
+            and not outstanding_review_items
+        )
         if checkpoint_advanced:
             connection.execute(
                 "INSERT INTO scan_state(file_number, account_fingerprint, completed_at, source, query) "
@@ -1254,6 +1288,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
         "coverage": coverage, "coverage_observed_at": observed_at,
         "history_bound_limitation": planned["history_bound_limitation"],
         "checkpoint_advanced": checkpoint_advanced,
+        "outstanding_review_items": outstanding_review_items,
         "messages": results, "thread_states": thread_states,
         "tracked_thread_coverage": tracked_coverage if tracked_requested else {
             "complete": True, "requested": []

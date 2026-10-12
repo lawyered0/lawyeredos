@@ -586,10 +586,15 @@ class GmailImapReadonlyAdapter:
                     elif marker_seen:
                         candidates.append(uid)
                 if marker and not marker_seen:
-                    detail["complete"] = False
-                    tracked_report["complete"] = False
-                    tracked_report["failures"].append({"thread_id": thread_id, "reason": "marker not found; conservative replay"})
+                    detail["marker_missing"] = True
+                    detail["recovery"] = "missing-marker-surviving-thread-replay"
                     candidates = thread_uids
+                    if not candidates:
+                        detail["complete"] = False
+                        tracked_report["complete"] = False
+                        tracked_report["failures"].append({
+                            "thread_id": thread_id, "reason": "marker missing and no surviving messages"
+                        })
                 basis = "thread_probe"
                 if not candidates and thread_uids:
                     candidates = thread_uids[-REPLY_TAIL_DEPTH:]
