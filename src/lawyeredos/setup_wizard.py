@@ -1551,7 +1551,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("--rollback requires --workspace")
             result = rollback(Path(args.workspace))
             print(json.dumps(result, indent=2, sort_keys=True))
-            return 0
+            return 0 if result.get("ok") else 2
         fully_supplied = all((args.workspace, args.branding_mode, args.branding_label is not None,
                               args.jurisdiction, args.modules, args.mail, args.calendar,
                               args.existing_config))
@@ -1586,6 +1586,9 @@ def main(argv: list[str] | None = None) -> int:
             print("through a previewed tracker create, then run a read-only orientation.")
             print("Keep this extracted package and its .venv at the current path.")
         return 0
+    except (EOFError, KeyboardInterrupt):
+        print("Cancelled; no changes were made.")
+        return 1
     except (ValueError, OSError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

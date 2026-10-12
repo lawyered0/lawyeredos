@@ -328,6 +328,22 @@ def render_runner(plan: dict) -> str:
     ])
 
 
+def _replace_wrapper_file(path: Path, content: bytes) -> None:
+    """Atomically replace a fingerprint-verified executable without a mode gap."""
+    if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o777 != 0o700:
+        raise ValueError(f"managed runtime wrapper must be a private executable: {path}")
+    descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
+    staged = Path(raw)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fchmod(stream.fileno(), 0o700)
+        os.replace(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def render_launcher(plan: dict) -> str:
     return "\n".join([
         "#!/bin/sh", "set -eu",
@@ -636,12 +652,20 @@ def apply_plan(plan: dict) -> dict:
             source_skill = plugin / ".lawyeredos-codex-project" / "skills" / PROJECT_SKILLS[module]
             install_link(Path(raw), source_skill, "project skill")
         install_link(current, plugin, "current core link")
+        prior_wrapper_files = {}
         for path, content in ((runner, render_runner(plan)), (launcher, render_launcher(plan))):
             if path.exists() and path.read_text(encoding="utf-8") != content:
-                raise ValueError(f"refusing to overwrite modified managed launcher: {path}")
-            if not path.exists():
+                if str(path) not in prior_managed or managed_fingerprint(path) != plan["prior_fingerprints"].get(str(path)):
+                    raise ValueError(f"refusing to overwrite modified managed launcher: {path}")
+                original, mode = path.read_bytes(), path.stat().st_mode & 0o777
+                replaced_files.append((path, original, mode))
+                prior_wrapper_files[str(path)] = {"content_hex": original.hex(), "mode": mode}
+                _replace_wrapper_file(path, content.encode("utf-8"))
+                path.chmod(0o700)
+                changed.append(str(path))
+            elif not path.exists():
                 created.append(path)
-                path.write_text(content, encoding="utf-8")
+                create_private_file(path, content.encode("utf-8"))
                 path.chmod(0o700)
                 changed.append(str(path))
         if plan["config_preview"] is not None:
@@ -668,7 +692,7 @@ def apply_plan(plan: dict) -> dict:
                 created.append(discovery)
             replace_private_file(discovery, discovery_text.encode("utf-8"))
             changed.append(str(discovery))
-        if prior_discovery_text is not None and replaced_links:
+        if prior_discovery_text is not None and (replaced_links or prior_wrapper_files):
             if not approved_prior_plugins:
                 raise ValueError("Codex upgrade has no retained prior core to fingerprint")
             rollback_record = {
@@ -678,6 +702,7 @@ def apply_plan(plan: dict) -> dict:
                 "prior_discovery": json.loads(prior_discovery_text),
                 "prior_managed_fingerprints": plan["prior_fingerprints"],
                 "prior_link_targets": prior_link_targets,
+                "prior_wrapper_files": prior_wrapper_files,
                 "prior_plugin_fingerprints": approved_prior_plugins,
                 "applied_package_digest": plan["package_digest"],
                 "applied_plugin": str(plugin),
@@ -863,6 +888,27 @@ def rollback_upgrade(workspace: Path) -> dict:
         expected = hashlib.sha256(b"symlink\0" + target.encode()).hexdigest()
         if prior_fingerprints[str(path)] != expected:
             raise ValueError(f"prior Codex link fingerprint does not match its target: {path}")
+    validated_wrappers: dict[Path, tuple[bytes, int]] = {}
+    raw_wrappers = state.get("prior_wrapper_files", {})
+    if not isinstance(raw_wrappers, dict):
+        raise ValueError("invalid prior runtime wrapper snapshots")
+    for raw, snapshot in raw_wrappers.items():
+        path = Path(raw)
+        if path not in {setup_root / RUNNER_FILE, setup_root / "launch-lawyeredos-codex.sh"} or not isinstance(snapshot, dict):
+            raise ValueError("prior runtime wrapper snapshot escapes the managed namespace")
+        try:
+            content = bytes.fromhex(snapshot["content_hex"])
+            mode = snapshot["mode"]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError("invalid prior runtime wrapper snapshot") from exc
+        if not isinstance(mode, int) or mode != 0o700:
+            raise ValueError("invalid prior runtime wrapper mode")
+        if hashlib.sha256(b"file\0" + content).hexdigest() != prior_fingerprints.get(raw):
+            raise ValueError("prior runtime wrapper snapshot does not match its fingerprint")
+        validated_wrappers[path] = content, mode
+    for raw in current_managed - set(raw_targets) - set(raw_wrappers):
+        if prior_fingerprints[raw] != current_fingerprints[raw]:
+            raise ValueError("changed prior managed file has no rollback snapshot")
     prior_discovery = {
         **prior_discovery,
         "schema_version": 2,
@@ -871,6 +917,8 @@ def rollback_upgrade(workspace: Path) -> dict:
 
     restored: list[str] = []
     applied_targets = {path: os.readlink(path) for path in validated_targets}
+    applied_wrappers = {path: (path.read_bytes(), path.stat().st_mode & 0o777) for path in validated_wrappers}
+    restored_wrappers: list[Path] = []
 
     def replace_link(path: Path, target: str, suffix: str) -> None:
         staged = path.parent / f".{path.name}.lawyeredos-{suffix}-{os.getpid()}"
@@ -886,14 +934,28 @@ def rollback_upgrade(workspace: Path) -> dict:
         for path, target in validated_targets.items():
             replace_link(path, target, "rollback")
             restored.append(str(path))
+        for path, (content, mode) in validated_wrappers.items():
+            _replace_wrapper_file(path, content)
+            restored_wrappers.append(path)
+            path.chmod(mode)
+            restored.append(str(path))
         replace_private_file(
             discovery,
             (json.dumps(prior_discovery, indent=2, sort_keys=True) + "\n").encode("utf-8"),
         )
     except BaseException as exc:
         recovery_problems = []
+        for path in reversed(restored_wrappers):
+            try:
+                content, mode = applied_wrappers[path]
+                _replace_wrapper_file(path, content)
+                path.chmod(mode)
+            except (OSError, ValueError) as recovery_exc:
+                recovery_problems.append(f"restore {path}: {recovery_exc}")
         for raw in reversed(restored):
             path = Path(raw)
+            if path in validated_wrappers:
+                continue
             try:
                 replace_link(path, applied_targets[path], "rollback-recovery")
             except (OSError, ValueError) as recovery_exc:

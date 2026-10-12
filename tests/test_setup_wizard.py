@@ -102,6 +102,17 @@ class SetupWizardTests(unittest.TestCase):
                 apply_plan(plan)
         self.assertFalse(self.workspace.exists())
 
+    def test_rollback_cli_refusal_exits_nonzero(self):
+        apply_plan(build_plan(self.answers()))
+        config = self.workspace / ".lawyeredos" / "config.toml"
+        config.write_text(config.read_text(encoding="utf-8") + "\n# fictional user modification\n", encoding="utf-8")
+        self.assertEqual(main(["--workspace", str(self.workspace), "--rollback"]), 2)
+
+    def test_interactive_eof_cancels_without_traceback(self):
+        with patch("builtins.input", side_effect=EOFError):
+            self.assertEqual(main([]), 1)
+        self.assertFalse(self.workspace.exists())
+
     def test_preview_has_no_side_effects_or_secret_values(self):
         plan = build_plan(self.answers())
         self.assertFalse(self.workspace.exists())
