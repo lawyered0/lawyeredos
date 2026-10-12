@@ -9,9 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-from .common import emit, preview_token
+from .common import emit, preview_token, sqlite_ro_uri
 from .private_fs import assert_private_file, create_private_file
-from .tracker_values import folder_key, normalize_folder
+from .tracker_values import folder_key, normalize_folder, validate_text
 
 
 SCHEMA_VERSION = 1
@@ -40,7 +40,7 @@ def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
     if write:
         connection = sqlite3.connect(path, timeout=5, isolation_level=None)
     else:
-        uri = f"file:{path.as_posix()}?mode=ro"
+        uri = sqlite_ro_uri(path)
         connection = sqlite3.connect(uri, uri=True, timeout=5)
     connection.row_factory = sqlite3.Row
     connection.create_function(
@@ -136,11 +136,15 @@ def verify(path: Path) -> dict[str, Any]:
             folders = [row[0] for row in connection.execute("SELECT matter_folder FROM matters")]
             try:
                 keys = [folder_key(folder) for folder in folders]
+                if any(folder != normalize_folder(folder) for folder in folders):
+                    problems.append("noncanonical matter folder")
             except ValueError:
                 problems.append("unsafe matter folder")
                 keys = []
             if len(keys) != len(set(keys)):
                 problems.append("duplicate matter folders")
+            if any(not row[0].strip() or not row[1].strip() for row in connection.execute("SELECT client, description FROM matters")):
+                problems.append("blank required matter fields")
             bad_deadlines = []
             for row in connection.execute("SELECT file_number, court_deadlines FROM matters"):
                 try:
@@ -218,6 +222,7 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
             parsed = json.loads(changes["court_deadlines"])
             if not isinstance(parsed, list):
                 raise ValueError("court_deadlines must be a JSON list")
+            validate_text(parsed)
             changes["court_deadlines"] = json.dumps(parsed, ensure_ascii=False, sort_keys=True)
         payload["changes"] = changes
     elif action == "timeline":
@@ -254,6 +259,7 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
         payload["new_status"] = "closed" if action == "close" else "open"
     else:
         raise ValueError(f"unsupported action: {action}")
+    validate_text(payload)
     return payload
 
 
@@ -280,6 +286,16 @@ def validate_payload(connection: sqlite3.Connection, payload: dict[str, Any]) ->
     else:
         if row is None:
             raise ValueError("matter not found")
+        if action == "update":
+            changes = payload["changes"]
+            if any(field in changes and not changes[field] for field in ("client", "description")):
+                raise ValueError("client and description are required")
+            if any(field in changes and not changes[field] for field in ("next_action", "next_action_date")):
+                raise ValueError("use workflow to clear next-action state with a disposition")
+            if row["status"] == "closed" and set(changes) - {"primary_email", "other_parties"}:
+                raise ValueError("matter is closed; reopen it before changing operational fields")
+        if action == "timeline" and row["status"] == "closed":
+            raise ValueError("matter is closed; reopen it before adding timeline entries")
         if action == "workflow" and row["status"] != "open":
             raise ValueError("matter is closed; reopen it before changing workflow state")
         if action == "close" and row["status"] != "open":

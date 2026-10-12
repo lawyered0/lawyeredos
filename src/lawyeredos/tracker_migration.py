@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import os
 import sqlite3
@@ -9,7 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .common import emit, preview_token
+from .common import emit, preview_token, sqlite_ro_uri
+from .private_fs import create_private_file
 from .tracker_cli import initialize, now, verify
 from .tracker_values import csv_text, folder_key, normalize_folder
 
@@ -57,7 +59,7 @@ def _read_snapshot(source: Path) -> dict[str, Any] | None:
         if not isinstance(value, dict) or "tracker_snapshot_version" not in value:
             return None
     elif source.suffix.casefold() in {".sqlite", ".sqlite3", ".db"}:
-        uri = f"file:{source.resolve().as_posix()}?mode=ro"
+        uri = sqlite_ro_uri(source)
         with sqlite3.connect(uri, uri=True) as connection:
             if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='meta'").fetchone():
                 return None
@@ -119,7 +121,7 @@ def read_source(path: Path) -> list[dict[str, Any]]:
             raise ValueError("JSON source must be a list, or an object with a matters list")
         return value
     if suffix in {".sqlite", ".sqlite3", ".db"}:
-        uri = f"file:{path.resolve().as_posix()}?mode=ro"
+        uri = sqlite_ro_uri(path)
         with sqlite3.connect(uri, uri=True) as connection:
             connection.row_factory = sqlite3.Row
             columns = {item[1] for item in connection.execute("PRAGMA table_info(matters)")}
@@ -194,7 +196,8 @@ def commit_migration(source: Path, target: Path, token: str) -> dict[str, Any]:
             raise ValueError("migrated database failed verification: " + "; ".join(health["problems"]))
         if target.exists():
             raise ValueError("migration target appeared during build; refusing replacement")
-        os.replace(temp_path, target)
+        os.link(temp_path, target)
+        temp_path.unlink()
         return {"ok": True, "committed": True, "target": str(target), "matter_count": plan["matter_count"],
                 "history_preserved": plan["history_preserved"]}
     finally:
@@ -205,7 +208,7 @@ def commit_migration(source: Path, target: Path, token: str) -> dict[str, Any]:
 def export_tracker(database: Path, output: Path, fmt: str) -> dict[str, Any]:
     if output.exists():
         raise ValueError("export output already exists")
-    uri = f"file:{database.resolve().as_posix()}?mode=ro"
+    uri = sqlite_ro_uri(database)
     with sqlite3.connect(uri, uri=True) as connection:
         connection.row_factory = sqlite3.Row
         if fmt == "json":
@@ -215,13 +218,14 @@ def export_tracker(database: Path, output: Path, fmt: str) -> dict[str, Any]:
             rows = [dict(row) for row in connection.execute("SELECT * FROM matters ORDER BY file_number")]
     output.parent.mkdir(parents=True, exist_ok=True)
     if fmt == "json":
-        with output.open("x", encoding="utf-8") as handle:
-            handle.write(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
+        data = (json.dumps(snapshot, indent=2, sort_keys=True) + "\n").encode("utf-8")
     else:
-        with output.open("x", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(rows[0]) if rows else list(CANONICAL_FIELDS))
-            writer.writeheader()
-            writer.writerows({key: csv_text(value) for key, value in row.items()} for row in rows)
+        handle = io.StringIO(newline="")
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]) if rows else list(CANONICAL_FIELDS))
+        writer.writeheader()
+        writer.writerows({key: csv_text(value) for key, value in row.items()} for row in rows)
+        data = handle.getvalue().encode("utf-8")
+    create_private_file(output, data)
     return {"ok": True, "output": str(output), "format": fmt, "matter_count": len(rows),
             "history_preserved": fmt == "json"}
 

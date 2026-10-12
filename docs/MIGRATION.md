@@ -36,11 +36,19 @@ CSV export contains matter rows only and prefixes formula-like text with an
 apostrophe for spreadsheet safety. It is a presentation surface, not a complete
 backup or a lossless roundtrip format. JSON retains the original text. All
 exports refuse an existing destination.
+JSON, CSV, and XLSX exports create each new file with mode `0600`, independently
+of the process umask. Migration publishes its verified private temporary database
+with an exclusive link, so a destination created during the build is preserved.
 
 `practice-tracker-xlsx` produces separate Open Matters
 and Closed Matters sheets from a read-only database connection. The XLSX is a
 disposable projection and must not be edited as the system of record. All text
 cells are stored as text, including values beginning with an equals sign.
+Unsupported XML control characters in legacy rows are replaced visibly with
+`�` in the projection, and cells over Excel's 32,767-character cap receive a
+visible truncation marker. The result identifies each affected file number and
+field in `sanitized` and `truncated`, and sets `lossless_projection` to false.
+The authoritative database and JSON snapshot retain the original text.
 Export is a separate operation; its failure does not undo a committed tracker
 mutation or authorize replaying that mutation.
 
