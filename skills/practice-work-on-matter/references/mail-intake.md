@@ -208,3 +208,17 @@ retained reviews keep the scan partial until hash-bound acknowledgement, even
 when the surviving-thread marker can advance. Known chronological positions
 are preserved across deletion gaps. Empty
 surviving threads and acquisition failures remain incomplete.
+
+Known unfinished acquisitions also keep the scan partial, even when their
+messages disappear from the next search. `outstanding_unreviewed_messages`
+reports their count for the exact matter, mail source and account. A retained
+message can complete after it vanishes only when its acquisition receipt
+establishes that the full body and every attachment's review evidence were
+captured, all required items received hash-bound acknowledgements, and retained
+hashes and saved attachment files still match. Unsupported or unavailable
+attachment evidence remains an acquisition gap; no waiver is inferred.
+
+IMAP search sends non-ASCII matter terms as a UTF-8 literal. REST text bodies
+use their MIME charset with a UTF-8 fallback for unknown labels. IMAP display
+names retain valid quoting, and an already acquired query hit is reused during
+thread probing so raw-message and attachment budgets are charged once.

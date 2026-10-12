@@ -178,6 +178,7 @@ def _state_connection(path: Path) -> sqlite3.Connection:
             is_auto_reply INTEGER NOT NULL DEFAULT 0,
             provider_thread_order INTEGER,
             observed_at TEXT NOT NULL,
+            acquisition_receipt_json TEXT NOT NULL DEFAULT '{}',
             PRIMARY KEY(file_number, source, account_fingerprint, message_id)
         );
         CREATE INDEX IF NOT EXISTS message_mail_state_thread_idx
@@ -207,6 +208,10 @@ def _state_connection(path: Path) -> sqlite3.Connection:
     if "provider_thread_order" not in state_columns:
         connection.execute(
             "ALTER TABLE message_mail_state ADD COLUMN provider_thread_order INTEGER"
+        )
+    if "acquisition_receipt_json" not in state_columns:
+        connection.execute(
+            "ALTER TABLE message_mail_state ADD COLUMN acquisition_receipt_json TEXT NOT NULL DEFAULT '{}'"
         )
     protocol = connection.execute(
         "SELECT value FROM state_meta WHERE key='review_protocol'"
@@ -781,6 +786,67 @@ def _relevant(message: dict[str, Any], profile: dict[str, Any]) -> bool:
     )
 
 
+def _finalize_retained_acquisitions(
+    connection: sqlite3.Connection, file_number: str, source: str,
+    account_fingerprint: str, matter_folder: Path,
+) -> None:
+    """Complete captured evidence after acknowledgements, without inventing missing content."""
+    rows = connection.execute(
+        "SELECT s.* FROM message_mail_state s LEFT JOIN message_reviews r ON "
+        "r.file_number=s.file_number AND r.source=s.source AND "
+        "r.account_fingerprint=s.account_fingerprint AND r.message_id=s.message_id "
+        "WHERE s.file_number=? AND s.source=? AND s.account_fingerprint=? AND r.message_id IS NULL",
+        (file_number, source, account_fingerprint),
+    ).fetchall()
+    for row in rows:
+        try:
+            receipt = json.loads(row["acquisition_receipt_json"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(receipt, dict) or receipt.get("complete") is not True:
+            continue
+        expected = receipt.get("items")
+        if not isinstance(expected, dict) or not expected:
+            continue
+        retained = connection.execute(
+            "SELECT * FROM content_review_items WHERE file_number=? AND source=? "
+            "AND account_fingerprint=? AND message_id=?",
+            (file_number, source, account_fingerprint, row["message_id"]),
+        ).fetchall()
+        if {str(item["review_id"]): str(item["content_sha256"]) for item in retained} != expected:
+            continue
+        if any(item["status"] != "reviewed" or item["pipeline_version"] != CONTENT_REVIEW_VERSION for item in retained):
+            continue
+        body = [item for item in retained if item["content_kind"] == "message-body" and item["content_id"] == "body"]
+        if len(body) != 1 or body[0]["content_sha256"] != receipt.get("body_sha256"):
+            continue
+        attachments = [item for item in retained if item["content_kind"] == "attachment"]
+        if len(attachments) + 1 != len(retained):
+            continue
+        saved_sizes: dict[str, int] = {}
+        try:
+            for item in attachments:
+                saved = confined_path(matter_folder, item["saved_relative_path"])
+                if saved.is_symlink() or not saved.is_file() or sha256_file(saved) != item["content_sha256"]:
+                    raise ValueError("retained attachment is missing or changed")
+                saved_sizes[str(item["review_id"])] = saved.stat().st_size
+        except (ValueError, OSError):
+            continue
+        connection.execute(
+            "INSERT INTO message_reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (file_number, account_fingerprint, row["message_id"], row["thread_id"],
+             row["received_at"], source, body[0]["content_sha256"], now(),
+             canonical_json(receipt.get("provenance", {}))),
+        )
+        for item in attachments:
+            connection.execute(
+                "INSERT OR REPLACE INTO attachment_reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (file_number, source, account_fingerprint, row["message_id"], item["content_id"],
+                 item["original_name"], item["saved_relative_path"], saved_sizes[str(item["review_id"])],
+                 item["content_sha256"], "reviewed", now()),
+            )
+
+
 def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -> dict[str, Any]:
     planned = plan(config_path, identifier)
     if not planned.get("ok"):
@@ -891,26 +957,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
             str(row["message_id"]): int(row["provider_thread_order"])
             for row in existing_rows if row["provider_thread_order"] is not None
         }
-        anchors = {
-            existing_order[message_id] - position
-            for position, message_id in enumerate(candidate_ids)
-            if message_id in existing_order
-        }
-        marker = next(
-            (
-                str(detail.get("marker_before", ""))
-                for detail in tracked_coverage.get("details", [])
-                if isinstance(detail, dict) and str(detail.get("thread_id", "")) == thread_id
-            ),
-            "",
-        )
-        recovery = any(
-            isinstance(detail, dict) and str(detail.get("thread_id", "")) == thread_id
-            and detail.get("recovery") == "missing-marker-surviving-thread-replay"
-            and detail.get("marker_missing") is True and detail.get("complete") is True
-            for detail in tracked_coverage.get("details", [])
-        )
-        preserve_known_order = recovery or all(value in existing_order for value in candidate_ids)
+        preserve_known_order = bool(existing_order)
         if preserve_known_order:
             # A compressed replay cannot anchor across deletion gaps. Preserve
             # known chronological positions, including those of vanished IDs.
@@ -924,24 +971,19 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                 elif new_seen:
                     raise ValueError("surviving-thread replay cannot place a new message before known history")
             base_order = max(existing_order.values(), default=-1) + 1
-        elif len(anchors) > 1:
-            raise ValueError("tracked-thread provider order conflicts with persisted order")
-        elif anchors:
-            base_order = anchors.pop()
-        elif marker in existing_order and marker not in candidate_ids:
-            base_order = existing_order[marker] + 1
-        elif existing_order:
-            base_order = max(existing_order.values()) + 1
         else:
             base_order = 0
-        for position, message_id in enumerate(candidate_ids):
+        next_new_order = base_order
+        for message_id in candidate_ids:
             key = (thread_id, message_id)
             if key in provider_thread_order:
                 raise ValueError("tracked-thread provider order repeats a message")
             provider_thread_order[key] = (
                 existing_order[message_id] if preserve_known_order and message_id in existing_order
-                else base_order + position
+                else next_new_order
             )
+            if not preserve_known_order or message_id not in existing_order:
+                next_new_order += 1
     results: list[dict[str, Any]] = []
     current_exact_pairs: set[tuple[str, str]] = set()
     total_bytes = 0
@@ -1163,13 +1205,29 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                         f"attachment {attachment_result['original_name'] or '[unnamed]'}: {exc}"
                     )
                 item["attachments"].append(attachment_result)
+            body_hash = sha256_bytes(body_text.encode("utf-8"))
+            provenance = {
+                "source": source, "query": planned["query"], "received_at": received_at,
+                "from": str(raw.get("from", "")), "to": str(raw.get("to", "")),
+                "cc": str(raw.get("cc", "")), "subject": str(raw.get("subject", "")),
+            }
+            expected_items = {}
+            if item.get("body_review"):
+                expected_items[item["body_review"]["review_id"]] = body_hash
+            for attachment_result in item["attachments"]:
+                if attachment_result.get("review"):
+                    expected_items[attachment_result["review"]["review_id"]] = attachment_result["sha256"]
+            receipt = {
+                "complete": bool(raw.get("body_complete") is True and item.get("body_review")
+                    and len(expected_items) == len(attachments) + 1),
+                "body_sha256": body_hash, "items": expected_items, "provenance": provenance,
+            }
+            connection.execute(
+                "UPDATE message_mail_state SET acquisition_receipt_json=? WHERE file_number=? "
+                "AND source=? AND account_fingerprint=? AND message_id=? AND observed_at=?",
+                (canonical_json(receipt), file_number, source, account_fingerprint, message_id, observed_at),
+            )
             if item["status"] == "reviewed":
-                body_hash = sha256_bytes(body_text.encode("utf-8"))
-                provenance = {
-                    "source": source, "query": planned["query"], "received_at": received_at,
-                    "from": str(raw.get("from", "")), "to": str(raw.get("to", "")),
-                    "cc": str(raw.get("cc", "")), "subject": str(raw.get("subject", "")),
-                }
                 connection.execute(
                     "INSERT INTO message_reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
@@ -1258,6 +1316,14 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                         "marker_message_id=excluded.marker_message_id, advanced_at=excluded.advanced_at",
                         (file_number, account_fingerprint, str(detail["thread_id"]), marker, now()),
                     )
+        _finalize_retained_acquisitions(connection, file_number, source, account_fingerprint, matter_folder)
+        outstanding_unreviewed_messages = int(connection.execute(
+            "SELECT COUNT(*) FROM message_mail_state s WHERE s.file_number=? AND s.source=? "
+            "AND s.account_fingerprint=? AND NOT EXISTS (SELECT 1 FROM message_reviews r "
+            "WHERE r.file_number=s.file_number AND r.source=s.source "
+            "AND r.account_fingerprint=s.account_fingerprint AND r.message_id=s.message_id)",
+            (file_number, source, account_fingerprint),
+        ).fetchone()[0])
         outstanding_review_items = int(connection.execute(
             "SELECT COUNT(*) FROM content_review_items "
             "WHERE file_number=? AND source=? AND account_fingerprint=? AND status != 'reviewed'",
@@ -1265,7 +1331,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
         ).fetchone()[0])
         checkpoint_advanced = bool(
             coverage["complete"] and tracked_complete and all_relevant_complete
-            and not outstanding_review_items
+            and not outstanding_review_items and not outstanding_unreviewed_messages
         )
         if checkpoint_advanced:
             connection.execute(
@@ -1289,6 +1355,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
         "history_bound_limitation": planned["history_bound_limitation"],
         "checkpoint_advanced": checkpoint_advanced,
         "outstanding_review_items": outstanding_review_items,
+        "outstanding_unreviewed_messages": outstanding_unreviewed_messages,
         "messages": results, "thread_states": thread_states,
         "tracked_thread_coverage": tracked_coverage if tracked_requested else {
             "complete": True, "requested": []

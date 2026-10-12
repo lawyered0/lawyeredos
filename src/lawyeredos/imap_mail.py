@@ -13,7 +13,7 @@ from email import policy
 from email.header import decode_header
 from email.message import Message
 from email.parser import BytesParser
-from email.utils import getaddresses, parsedate_to_datetime
+from email.utils import formataddr, getaddresses, parsedate_to_datetime
 from typing import Any, Callable
 
 from .config import PracticeConfig
@@ -115,7 +115,7 @@ def _decode_header(value: str | None) -> str:
 def _addresses(message: Message, name: str) -> str:
     values = message.get_all(name, [])
     return ", ".join(
-        f"{_decode_header(display)} <{address}>" if display else address
+        formataddr((_decode_header(display), address)) if display else address
         for display, address in getaddresses(values)
         if address
     )
@@ -508,7 +508,13 @@ class GmailImapReadonlyAdapter:
         }
         tracked_selected = 0
         try:
-            status, search_data = client.uid("SEARCH", None, "X-GM-RAW", _imap_quote(query))
+            if query.isascii():
+                status, search_data = client.uid("SEARCH", None, "X-GM-RAW", _imap_quote(query))
+            else:
+                # IMAP literals carry the raw string, without quoted-string
+                # escaping; imaplib command arguments otherwise use ASCII.
+                client.literal = query.encode("utf-8")
+                status, search_data = client.uid("SEARCH", "CHARSET", "UTF-8", "X-GM-RAW")
             if status != "OK":
                 raise ValueError("Gmail IMAP X-GM-RAW search failed")
             uids = sorted(
@@ -610,6 +616,10 @@ class GmailImapReadonlyAdapter:
                 tracked_selected += len(candidates)
                 detail["ordered_candidate_ids"] = [uid_to_id[uid] for uid in candidates if uid in uid_to_id]
                 for uid in candidates:
+                    stable_id = uid_to_id.get(uid)
+                    if stable_id in seen:
+                        seen[stable_id]["acquisition_basis"] = basis
+                        continue
                     try:
                         message, used_raw, used_attachments = self._message(
                             client, uid, max(0, MAX_RUN_RAW_MESSAGE_BYTES - raw_bytes),
