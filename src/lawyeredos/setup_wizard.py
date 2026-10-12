@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from lawyeredos.package_inputs import ROOT_FILES, ROOT_DIRECTORIES, excluded_part, release_files
 from lawyeredos.config import load_config
 from lawyeredos.tracker_cli import initialize
 from lawyeredos.private_fs import (
@@ -84,18 +85,17 @@ def package_root() -> Path:
     )
 
 
-def _ignored(_directory: str, names: list[str]) -> set[str]:
-    return {name for name in names if name in EXCLUDE or name.endswith((".pyc", ".egg-info"))}
+def _ignored(directory: str, names: list[str]) -> set[str]:
+    ignored = {name for name in names if excluded_part(name)}
+    if (Path(directory) / ".claude-plugin" / "plugin.json").is_file():
+        ignored.update(name for name in names if name not in ROOT_FILES | ROOT_DIRECTORIES)
+    return ignored
 
 
 def package_digest(root: Path) -> str:
     digest = hashlib.sha256()
-    for path in sorted(root.rglob("*")):
-        if not path.is_file() or any(part in EXCLUDE for part in path.relative_to(root).parts):
-            continue
-        if path.name.endswith((".pyc", ".egg-info")):
-            continue
-        relative = path.relative_to(root).as_posix().encode()
+    for path in release_files(root):
+        relative = path.relative_to(root.resolve()).as_posix().encode()
         digest.update(len(relative).to_bytes(4, "big"))
         digest.update(relative)
         content = path.read_bytes()
