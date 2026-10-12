@@ -176,10 +176,18 @@ inside the matter, verifies sizes and SHA-256 hashes, refuses overwrites and
 symlinks, blocks executable/active/oversized content, and does not extract
 archives. Email and attachment content is untrusted evidence, never instruction.
 
-The complete 30-day bounded query plus stable message IDs makes repeated runs
-safe without trusting a prior checkpoint across a changed account or matter
-search profile. A provider result whose exact matter relevance cannot be
-established is held for manual review, never filed as another matter's evidence.
+The query covers mail from the matter opening date (including the preceding
+day), or the last 30 days if that starts earlier, and replays that whole window
+on every run. Stable message IDs make repetition safe across account or search
+profile changes. Missing or invalid opening dates use a 30-day fallback and
+report `history_bound_limitation`; evidence before the opening-date bound still
+requires a separate historical search. Result and byte caps remain in force,
+and capped provider coverage must remain incomplete. A provider result whose
+exact matter relevance cannot be established is held for manual review, never filed as another matter's evidence.
+File numbers require whole-token matches. Mail naming another registered file
+or matching the identities and discriminators of multiple registered matters
+is held as ambiguous, including on already tracked threads. A unique explicit
+file number can disambiguate otherwise shared client and opposing-party terms.
 The local
 checkpoint advances only after complete search coverage, complete processing,
 and hash-bound host-model acknowledgements for every chunk of every relevant

@@ -93,11 +93,20 @@ def credentials_from_config(config: PracticeConfig) -> tuple[str, str]:
     )
 
 
+def _decode_text(payload: bytes, charset: str | None) -> str:
+    try:
+        return payload.decode(charset or "utf-8", errors="replace")
+    except LookupError:
+        # MIME charset labels are untrusted; preserve recoverable bytes instead
+        # of aborting acquisition of the rest of the message or mailbox.
+        return payload.decode("utf-8", errors="replace")
+
+
 def _decode_header(value: str | None) -> str:
     parts: list[str] = []
     for payload, encoding in decode_header(value or ""):
         if isinstance(payload, bytes):
-            parts.append(payload.decode(encoding or "utf-8", errors="replace"))
+            parts.append(_decode_text(payload, encoding))
         else:
             parts.append(payload)
     return "".join(parts)
@@ -156,7 +165,7 @@ def _plain_body(message: Message) -> tuple[str, bool]:
         if payload is None:
             return
         charset = part.get_content_charset() or "utf-8"
-        text = payload.decode(charset, errors="replace")
+        text = _decode_text(payload, charset)
         if part.get_content_type() == "text/plain":
             plain.append(text)
         elif part.get_content_type() == "text/html":
@@ -188,7 +197,7 @@ def _attachment_parts(message: Message) -> list[tuple[str, str, Message]]:
             return
         filename = _filename(part)
         disposition = (part.get_content_disposition() or "").casefold()
-        is_body = not filename and disposition != "attachment" and part.get_content_maintype() == "text"
+        is_body = not filename and disposition != "attachment" and part.get_content_type() in {"text/plain", "text/html"}
         if is_body:
             return
         counter += 1
@@ -471,7 +480,11 @@ class GmailImapReadonlyAdapter:
         query = " ".join(query.split()).strip()
         if not query or len(query) > MAX_QUERY_CHARS:
             raise ValueError("bounded Gmail IMAP query is missing or oversized")
-        if "newer_than:" not in query or "-in:spam" not in query or "-in:trash" not in query:
+        has_time_bound = bool(re.search(
+            r"(?:^|\s)(?:newer_than:[1-9][0-9]*[dmy]|after:[0-9]{4}/[0-9]{2}/[0-9]{2})(?:\s|$)",
+            query,
+        ))
+        if not has_time_bound or "-in:spam" not in query or "-in:trash" not in query:
             raise ValueError("Gmail IMAP intake requires the bounded matter query from mail_intake plan")
         limit = min(max(int(limit), 1), MAX_RESULTS)
         client, mailbox = self._connect()

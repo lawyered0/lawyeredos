@@ -195,7 +195,7 @@ external_ai = false
         self.assertEqual(list(staging.iterdir()), [])
 
         second_plan = plan(self.config, "2032-001")
-        self.assertIn("newer_than:30d", second_plan["query"])
+        self.assertIn(second_plan["time_bound"], second_plan["query"])
         repeated = process_bundle(
             self.config, "2032-001",
             self.bundle(second_plan, [self.message(attachment=self.attachment())]),
@@ -856,7 +856,7 @@ external_ai = false
         codex_plan = plan(self.config, "Northstar")
         self.assertEqual(codex_plan["source"], "codex-session-tool")
         self.assertIsNone(codex_plan["checkpoint"])
-        self.assertIn("newer_than:30d", codex_plan["query"])
+        self.assertIn(codex_plan["time_bound"], codex_plan["query"])
 
         self.write_config("unavailable")
         unavailable_plan = plan(self.config, "Northstar")

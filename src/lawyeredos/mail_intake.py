@@ -12,7 +12,7 @@ import stat
 import sys
 import unicodedata
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from .content_review import (
 from .integrations import gmail_from_config
 from .imap_mail import gmail_imap_from_config
 from .matter_context import orient
+from .tracker_cli import connect
 from .private_fs import (
     assert_private_directory,
     assert_private_file,
@@ -379,11 +380,24 @@ def _search_profile(matter: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _query(profile: dict[str, Any]) -> tuple[str, str]:
+def _history_bound(matter: dict[str, Any]) -> tuple[str, str | None]:
+    recent_start = datetime.now(UTC).date() - timedelta(days=INITIAL_LOOKBACK_DAYS)
+    try:
+        opened = datetime.fromisoformat(str(matter.get("created_at", "")).replace("Z", "+00:00")).date()
+        start = min(recent_start, opened - timedelta(days=1))
+    except (ValueError, OverflowError):
+        return f"newer_than:{INITIAL_LOOKBACK_DAYS}d", (
+            "Matter opening date is missing or invalid; search covers only the recent "
+            f"{INITIAL_LOOKBACK_DAYS} days. Historical coverage is unverified."
+        )
+    return f"after:{start:%Y/%m/%d}", None
+
+
+def _query(profile: dict[str, Any], time_term: str | None = None) -> tuple[str, str]:
     # Account identity is not reliably available from every host session tool.
-    # Keep the full bounded window on every run so an account or matter-term
-    # change cannot inherit a narrower checkpoint from a different context.
-    time_term = f"newer_than:{INITIAL_LOOKBACK_DAYS}d"
+    # Replay the full opening-date window so account/profile changes do not
+    # inherit a narrower checkpoint or omit previously untracked older mail.
+    time_term = time_term or f"newer_than:{INITIAL_LOOKBACK_DAYS}d"
     quote = lambda term: f'"{term.replace(chr(34), "")}"'
     clauses = [quote(profile["file_number"])] if profile["file_number"] else []
     clauses.extend(
@@ -422,7 +436,8 @@ def plan(config_path: Path, identifier: str) -> dict[str, Any]:
         _checkpoint(state_path(config), matter["file_number"], planned_source, "fixture")
         if planned_source == "fixture" else None
     )
-    query, time_term = _query(profile)
+    time_term, history_limitation = _history_bound(matter)
+    query, time_term = _query(profile, time_term)
     tracked_threads: list[dict[str, str]] = []
     tracked_thread_total = 0
     state = state_path(config)
@@ -504,6 +519,7 @@ def plan(config_path: Path, identifier: str) -> dict[str, Any]:
         "route": routes[adapter],
         "query": query,
         "time_bound": time_term,
+        "history_bound_limitation": history_limitation,
         "terms": profile["terms"],
         "match_profile": profile,
         "checkpoint": checkpoint,
@@ -730,13 +746,36 @@ def _message_text(message: dict[str, Any]) -> str:
     return "\n".join(str(value) for value in fields).casefold()
 
 
-def _relevant(message: dict[str, Any], profile: dict[str, Any]) -> bool:
-    haystack = _message_text(message)
-    if profile["file_number"] and profile["file_number"].casefold() in haystack:
-        return True
+def _file_number_present(haystack: str, file_number: str) -> bool:
+    return bool(file_number and re.search(
+        r"(?<![\w-])" + re.escape(file_number.casefold()) + r"(?![\w-])", haystack
+    ))
+
+
+def _identity_match(haystack: str, profile: dict[str, Any]) -> bool:
     return (
         any(term.casefold() in haystack for term in profile["identities"])
         and any(term.casefold() in haystack for term in profile["discriminators"])
+    )
+
+
+def _conflicting_matter(message: dict[str, Any], profile: dict[str, Any]) -> bool:
+    haystack = _message_text(message)
+    competitors = profile.get("competing_profiles", [])
+    if any(_file_number_present(haystack, other["file_number"]) for other in competitors):
+        return True
+    if _file_number_present(haystack, profile["file_number"]):
+        return False
+    return _identity_match(haystack, profile) and any(
+        _identity_match(haystack, other) for other in competitors
+    )
+
+
+def _relevant(message: dict[str, Any], profile: dict[str, Any]) -> bool:
+    haystack = _message_text(message)
+    return not _conflicting_matter(message, profile) and (
+        _file_number_present(haystack, profile["file_number"])
+        or _identity_match(haystack, profile)
     )
 
 
@@ -808,6 +847,15 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
 
     config = load_config(config_path)
     file_number = planned["matter"]["file_number"]
+    # Compare locally without exposing other matters in the returned mail plan.
+    match_profile = dict(planned["match_profile"])
+    with connect(config.tracker_database) as tracker:
+        match_profile["competing_profiles"] = [
+            _search_profile(dict(row)) for row in tracker.execute(
+                "SELECT file_number, client, primary_email, description, opposing_party, other_parties "
+                "FROM matters WHERE file_number != ?", (file_number,)
+            )
+        ]
     matter_folder = Path(planned["matter"]["folder"])
     incoming = confined_path(config.workspace_root, str(matter_folder.relative_to(config.workspace_root) / "email-attachments"))
     if incoming.exists() and (incoming.is_symlink() or not incoming.is_dir()):
@@ -903,7 +951,10 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
                 and existing["body_sha256"] != sha256_bytes(str(raw.get("body", "")).encode("utf-8"))
             ):
                 raise ValueError("stable message ID body changed after completed review")
-            if thread_id not in tracked_requested and not _relevant(raw, planned["match_profile"]):
+            if (
+                _conflicting_matter(raw, match_profile)
+                or (thread_id not in tracked_requested and not _relevant(raw, match_profile))
+            ):
                 results.append({
                     "message_id": message_id, "status": "held_ambiguous",
                     "reason": "returned by the bounded query but exact matter relevance was not established",
@@ -1201,6 +1252,7 @@ def process_bundle(config_path: Path, identifier: str, bundle: dict[str, Any]) -
         "ok": True, "status": "complete" if checkpoint_advanced else "partial",
         "read_only_mail": True, "matter": planned["matter"], "query": planned["query"],
         "coverage": coverage, "coverage_observed_at": observed_at,
+        "history_bound_limitation": planned["history_bound_limitation"],
         "checkpoint_advanced": checkpoint_advanced,
         "messages": results, "thread_states": thread_states,
         "tracked_thread_coverage": tracked_coverage if tracked_requested else {

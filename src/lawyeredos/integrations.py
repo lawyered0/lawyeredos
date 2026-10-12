@@ -166,8 +166,14 @@ class GmailReadonlyAdapter:
             encoded = str(body.get("data", ""))
             attachment_id = str(body.get("attachmentId", ""))
             declared_size = int(body.get("size", 0) or 0)
-            is_body = not filename and mime_type in {"text/plain", "text/html"}
-            is_attachment = bool(filename) or bool(attachment_id and not is_body)
+            is_body = (
+                not filename and not disposition.startswith("attachment")
+                and mime_type in {"text/plain", "text/html"}
+            )
+            is_attachment = (
+                bool(filename) or disposition.startswith("attachment")
+                or (not is_body and not part.get("parts") and bool(encoded or attachment_id or declared_size))
+            )
             if is_attachment and (
                 declared_size > MAX_MAIL_ATTACHMENT_BYTES
                 or declared_size > attachment_budget - attachment_bytes
