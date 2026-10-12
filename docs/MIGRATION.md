@@ -11,6 +11,9 @@ parallel writable stores.
 3. Review the record count and status totals. The source must map a unique file
    number, client, description, and confined relative matter folder for every
    row.
+   Folder identity ignores redundant separators and dot components, letter
+   case, and canonically equivalent Unicode spellings for macOS portability.
+   A folder cannot be assigned to a second matter by creation or update.
 4. Run the matching `commit` command with the returned confirmation token.
 5. Verify the new database and compare a representative sample. Do not point
    normal workflows at it until the owner approves the cutover.
@@ -22,10 +25,43 @@ marked migration item for human cleanup.
 
 ## Backups and exports
 
-`practice-tracker-migrate export` writes a new CSV or JSON snapshot and refuses
-an existing destination. `practice-tracker-xlsx` produces separate Open Matters
+`practice-tracker-migrate export --format json` writes a complete versioned
+tracker snapshot: matters, original timestamps, revision metadata, timeline,
+audit history, and sequence counters. Migration of that snapshot or a canonical
+LawyeredOS SQLite database preserves those records. The preview and commit
+receipts state `history_preserved`; legacy CSV/JSON mappings cannot restore
+history absent from their source.
+Snapshot metadata must contain string keys and values, and audit revisions must
+be positive unique integers no greater than the metadata revision. Migration
+does not require contiguous audit history or reset original sequence counters.
+Present sequence records must name `audit` or `timeline` uniquely and contain
+nonnegative SQLite integer counters at least as large as that table's retained
+IDs. Missing sequence entries and larger historical counters are preserved.
+
+CSV export contains matter rows only and prefixes formula-like text with an
+apostrophe for spreadsheet safety. It is a presentation surface, not a complete
+backup or a lossless roundtrip format. JSON retains the original text. All
+exports refuse an existing destination.
+JSON, CSV, and XLSX exports create each new file with mode `0600`, independently
+of the process umask. Migration publishes its verified private temporary database
+with an exclusive link, so a destination created during the build is preserved.
+
+`practice-tracker-xlsx` produces separate Open Matters
 and Closed Matters sheets from a read-only database connection. The XLSX is a
-disposable projection and must not be edited as the system of record.
+disposable projection and must not be edited as the system of record. All text
+cells are stored as text, including values beginning with an equals sign.
+Unsupported XML control characters in legacy rows are replaced visibly with
+`�` in the projection, and cells over Excel's 32,767-character cap receive a
+visible truncation marker. The result identifies each affected file number and
+field in `sanitized` and `truncated`, and sets `lossless_projection` to false.
+The deadline column displays only `date` and `description`. Other deadline keys
+are disclosed by file number and zero-based item index in
+`omitted_deadline_fields`, and also set `lossless_projection` to false. This
+boolean describes these displayed fields; the workbook remains a presentation
+surface and does not contain the full tracker schema, audit or timeline history.
+The authoritative database and JSON snapshot retain the original text.
+Export is a separate operation; its failure does not undo a committed tracker
+mutation or authorize replaying that mutation.
 
 Migration maps field names, not organization-specific paths or identities. If
 the legacy schema differs from the documented aliases, prepare an explicit

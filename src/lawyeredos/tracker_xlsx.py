@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .common import emit
+from .common import emit, sqlite_ro_uri
+from .private_fs import create_private_file
+from .tracker_values import ILLEGAL_XML_CONTROLS
 
 
 HEADERS = [
@@ -21,7 +24,7 @@ HEADERS = [
 
 
 def _rows(database: Path, status: str) -> list[dict[str, Any]]:
-    uri = f"file:{database.resolve().as_posix()}?mode=ro"
+    uri = sqlite_ro_uri(database)
     with sqlite3.connect(uri, uri=True) as connection:
         connection.row_factory = sqlite3.Row
         return [dict(row) for row in connection.execute(
@@ -41,6 +44,9 @@ def project(database: Path, output: Path) -> dict[str, Any]:
     workbook = Workbook()
     workbook.remove(workbook.active)
     counts: dict[str, int] = {}
+    sanitized: list[dict[str, Any]] = []
+    truncated: list[dict[str, Any]] = []
+    omitted_deadline_fields: list[dict[str, Any]] = []
     for status, title in (("open", "Open Matters"), ("closed", "Closed Matters")):
         sheet = workbook.create_sheet(title)
         sheet.sheet_view.showGridLines = False
@@ -54,12 +60,30 @@ def project(database: Path, output: Path) -> dict[str, Any]:
                 value = row.get(key, "")
                 if key == "court_deadlines":
                     parsed = json.loads(value or "[]")
+                    for index, item in enumerate(parsed):
+                        if isinstance(item, dict):
+                            omitted = sorted(set(item) - {"date", "description"})
+                            if omitted:
+                                omitted_deadline_fields.append({"file_number": row["file_number"],
+                                    "field": key, "item_index": index, "omitted_fields": omitted})
                     value = "\n".join(
                         " | ".join(str(item.get(name, "")) for name in ("date", "description") if item.get(name))
                         if isinstance(item, dict) else str(item) for item in parsed
                     )
+                if isinstance(value, str):
+                    changed, removed = ILLEGAL_XML_CONTROLS.subn("\ufffd", value)
+                    if removed:
+                        sanitized.append({"file_number": row["file_number"], "field": key, "removed_characters": removed})
+                    value = changed
+                    if len(value) > 32767:
+                        truncated.append({"file_number": row["file_number"], "field": key, "original_characters": len(value)})
+                        marker = "\n[truncated; full text in tracker DB]"
+                        value = value[:32767 - len(marker)] + marker
                 values.append(value)
             sheet.append(values)
+            for cell in sheet[sheet.max_row]:
+                if isinstance(cell.value, str):
+                    cell.data_type = "s"
         header = sheet[1]
         for cell in header:
             cell.fill = PatternFill("solid", fgColor="1F4E78")
@@ -85,8 +109,13 @@ def project(database: Path, output: Path) -> dict[str, Any]:
     workbook.properties.lastModifiedBy = ""
     workbook.properties.title = "Matter Tracker Projection"
     output.parent.mkdir(parents=True, exist_ok=True)
-    workbook.save(output)
-    return {"ok": True, "output": str(output), "read_only_source": True, "counts": counts}
+    staged = io.BytesIO()
+    workbook.save(staged)
+    create_private_file(output, staged.getvalue())
+    return {"ok": True, "output": str(output), "read_only_source": True, "counts": counts,
+            "sanitized": sanitized, "truncated": truncated,
+            "omitted_deadline_fields": omitted_deadline_fields,
+            "lossless_projection": not sanitized and not truncated and not omitted_deadline_fields}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,8 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         emit(project(Path(args.database), Path(args.output)))
         return 0
-    except (ValueError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
-        emit({"ok": False, "error": str(exc)})
+    except Exception as exc:
+        emit({"ok": False, "error": str(exc), "read_only_source": True})
         return 2
 
 

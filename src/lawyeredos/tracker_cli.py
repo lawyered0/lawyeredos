@@ -9,8 +9,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
-from .common import emit, preview_token
+from .common import emit, preview_token, sqlite_ro_uri
 from .private_fs import assert_private_file, create_private_file
+from .tracker_values import folder_key, normalize_folder, validate_text
 
 
 SCHEMA_VERSION = 1
@@ -39,7 +40,7 @@ def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
     if write:
         connection = sqlite3.connect(path, timeout=5, isolation_level=None)
     else:
-        uri = f"file:{path.as_posix()}?mode=ro"
+        uri = sqlite_ro_uri(path)
         connection = sqlite3.connect(uri, uri=True, timeout=5)
     connection.row_factory = sqlite3.Row
     connection.create_function(
@@ -132,11 +133,18 @@ def verify(path: Path) -> dict[str, Any]:
             ).fetchone()
             if schema is None or int(schema[0]) != SCHEMA_VERSION:
                 problems.append("unsupported schema version")
-            duplicates = connection.execute(
-                "SELECT matter_folder, COUNT(*) n FROM matters GROUP BY matter_folder HAVING n > 1"
-            ).fetchall()
-            if duplicates:
+            folders = [row[0] for row in connection.execute("SELECT matter_folder FROM matters")]
+            try:
+                keys = [folder_key(folder) for folder in folders]
+                if any(folder != normalize_folder(folder) for folder in folders):
+                    problems.append("noncanonical matter folder")
+            except ValueError:
+                problems.append("unsafe matter folder")
+                keys = []
+            if len(keys) != len(set(keys)):
                 problems.append("duplicate matter folders")
+            if any(not row[0].strip() or not row[1].strip() for row in connection.execute("SELECT client, description FROM matters")):
+                problems.append("blank required matter fields")
             bad_deadlines = []
             for row in connection.execute("SELECT file_number, court_deadlines FROM matters"):
                 try:
@@ -190,7 +198,7 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
         payload["values"] = {
             "client": args.client.strip(),
             "description": args.description.strip(),
-            "matter_folder": args.matter_folder.strip(),
+            "matter_folder": normalize_folder(args.matter_folder),
             "status": "open",
             "opposing_party": args.opposing_party.strip(),
             "other_parties": args.other_parties.strip(),
@@ -208,10 +216,13 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
             changes[field] = value.strip()
         if not changes:
             raise ValueError("at least one --set is required")
+        if "matter_folder" in changes:
+            changes["matter_folder"] = normalize_folder(changes["matter_folder"])
         if "court_deadlines" in changes:
             parsed = json.loads(changes["court_deadlines"])
             if not isinstance(parsed, list):
                 raise ValueError("court_deadlines must be a JSON list")
+            validate_text(parsed)
             changes["court_deadlines"] = json.dumps(parsed, ensure_ascii=False, sort_keys=True)
         payload["changes"] = changes
     elif action == "timeline":
@@ -248,6 +259,7 @@ def mutation_payload(action: str, args: argparse.Namespace, current_revision: in
         payload["new_status"] = "closed" if action == "close" else "open"
     else:
         raise ValueError(f"unsupported action: {action}")
+    validate_text(payload)
     return payload
 
 
@@ -271,23 +283,32 @@ def validate_payload(connection: sqlite3.Connection, payload: dict[str, Any]) ->
         values = payload["values"]
         if not file_number.strip() or not values["client"] or not values["description"]:
             raise ValueError("file number, client, and description are required")
-        folder = Path(values["matter_folder"])
-        if not values["matter_folder"] or folder.is_absolute() or ".." in folder.parts:
-            raise ValueError("matter_folder must be a confined relative path")
-        duplicate = connection.execute(
-            "SELECT file_number FROM matters WHERE matter_folder=?", (values["matter_folder"],)
-        ).fetchone()
-        if duplicate:
-            raise ValueError("matter folder already assigned")
     else:
         if row is None:
             raise ValueError("matter not found")
+        if action == "update":
+            changes = payload["changes"]
+            if any(field in changes and not changes[field] for field in ("client", "description")):
+                raise ValueError("client and description are required")
+            if any(field in changes and not changes[field] for field in ("next_action", "next_action_date")):
+                raise ValueError("use workflow to clear next-action state with a disposition")
+            if row["status"] == "closed" and set(changes) - {"primary_email", "other_parties"}:
+                raise ValueError("matter is closed; reopen it before changing operational fields")
+        if action == "timeline" and row["status"] == "closed":
+            raise ValueError("matter is closed; reopen it before adding timeline entries")
         if action == "workflow" and row["status"] != "open":
             raise ValueError("matter is closed; reopen it before changing workflow state")
         if action == "close" and row["status"] != "open":
             raise ValueError("matter is not open")
         if action == "reopen" and row["status"] != "closed":
             raise ValueError("matter is not closed")
+    folder = (payload["values"]["matter_folder"] if action == "create" else
+              payload.get("changes", {}).get("matter_folder"))
+    if folder is not None:
+        key = folder_key(folder)
+        for existing in connection.execute("SELECT file_number, matter_folder FROM matters"):
+            if existing["file_number"] != file_number and folder_key(existing["matter_folder"]) == key:
+                raise ValueError("matter folder already assigned")
 
 
 def preview_mutation(path: Path, action: str, args: argparse.Namespace) -> dict[str, Any]:

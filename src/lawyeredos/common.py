@@ -30,6 +30,11 @@ def emit(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
 
+def sqlite_ro_uri(path: Path) -> str:
+    """Encode literal pathname characters before adding SQLite's read-only mode."""
+    return path.resolve().as_uri() + "?mode=ro"
+
+
 def confined_path(root: Path, relative: str) -> Path:
     if not relative or Path(relative).is_absolute():
         raise ValueError("path must be non-empty and relative")

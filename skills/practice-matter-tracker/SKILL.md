@@ -75,11 +75,11 @@ matching current-revision token. Present the exact proposed values and
 downstream effects before committing. A stale token fails closed.
 
 ```bash
-PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredos.tracker_cli update --database "<database>" \
-  --file-number "<file>" --set "next_action=<value>" --dry-run
+PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredos.tracker_cli workflow --database "<database>" \
+  --file-number "<file>" --next-action "<value>" --dry-run
 # After the user approves this exact change:
-PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredos.tracker_cli update --database "<database>" \
-  --file-number "<file>" --set "next_action=<value>" \
+PYTHONPATH="${LAWYEREDOS_ROOT}/src" "${LAWYEREDOS_PYTHON:-python3}" -m lawyeredos.tracker_cli workflow --database "<database>" \
+  --file-number "<file>" --next-action "<value>" \
   --confirm-token "<preview token>"
 ```
 
