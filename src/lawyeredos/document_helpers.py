@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 
 from .common import emit, sha256_file
+from .pdf_assessment import assess_pdf_text, pdf_page_count
 
 
 def available() -> dict[str, str | None]:
@@ -24,8 +25,9 @@ def extract_pdf(source: Path, output: Path) -> dict:
     if completed.returncode:
         raise ValueError(f"pdftotext failed with exit {completed.returncode}")
     text = output.read_text(encoding="utf-8", errors="replace")
+    assessment = assess_pdf_text(text, pdf_page_count(source))
     return {"ok": True, "source_sha256": sha256_file(source), "output": str(output),
-            "characters": len(text), "needs_ocr": len(text.strip()) < 40}
+            "characters": len(text), **assessment}
 
 
 def ocr_pdf(source: Path, output: Path, report: Path, languages: str = "eng") -> dict:

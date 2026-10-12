@@ -52,6 +52,13 @@ formatting alone is not a genuine tracked revision. Confirm both deleted and
 inserted wording are legible and that numbering, tables, headers/footers,
 signatures, and page breaks still work in the marked and clean renderings.
 
+Replacement and deletion preserve each affected run's formatting; inserted
+paragraphs track both their text and paragraph marks, without inheriting the
+anchor's section break or paragraph-property revisions. The engine conservatively
+refuses spans whose runs contain page, column, or rendered-page-break markers.
+Use a narrower span in another run or report that layout requires manual review;
+do not flatten or remove a break to make the operation succeed.
+
 Compare the source rendering with the marked output as well as marked with clean.
 Inspect visible revision markup, orphan headings/numbering and unchanged
 formatting where edits can affect meaning. Verify a change-set schedule's clause
@@ -68,6 +75,10 @@ Keep verification copies in private scratch unless their delivery or save was
 requested. Persist only requested, verified versions through the declared
 guarded writer. A clean-copy check must not flatten an unsupported revision
 class, unresolved comment, or failed extraction to obtain a success label.
+The clean-copy helper refuses paragraph-mark and table-row deletions because
+accepting them requires a structural merge or removal it does not implement.
+Resolve those revisions manually in a reviewed copy; it leaves the source intact
+and produces no clean output for those cases.
 If a requested format cannot be verified with the available route, preserve
 the supported work and report that format's exact limitation.
 

@@ -73,10 +73,11 @@ def _paragraphs_in(parent):
 
 def _replace_in_runs(paragraph, key: str, value: str) -> None:
     """Replace a possibly split placeholder without flattening other runs."""
+    search_from = 0
     while True:
         runs = list(paragraph.runs)
         combined = "".join(run.text for run in runs)
-        start = combined.find(key)
+        start = combined.find(key, search_from)
         if start < 0:
             return
         end = start + len(key)
@@ -98,9 +99,12 @@ def _replace_in_runs(paragraph, key: str, value: str) -> None:
             for index in touched[1:-1]:
                 runs[index].text = ""
             runs[last].text = suffix
+        search_from = start + len(value)
 
 
 def replace_simple(document, mapping: dict[str, str]) -> None:
+    if any(PLACEHOLDER.search(value) for value in mapping.values()):
+        raise ValueError("field values must not contain template placeholders")
     paragraphs = list(_paragraphs_in(document))
     for section in document.sections:
         paragraphs.extend(_paragraphs_in(section.header))

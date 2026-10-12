@@ -4,10 +4,16 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from lawyeredos.pdf_assessment import assess_pdf_text, pdf_page_count
 
 
 def run(args: argparse.Namespace) -> dict:
+    if args.minimum_characters < 1:
+        raise ValueError("minimum characters must be positive")
     source = Path(args.input).expanduser().resolve()
     output = Path(args.output).expanduser().resolve()
     if not source.is_file() or source.is_symlink() or source.suffix.casefold() != ".pdf":
@@ -30,14 +36,16 @@ def run(args: argparse.Namespace) -> dict:
         raise ValueError(f"pdftotext failed: {result.stderr.strip()}")
     text = output.read_text(encoding="utf-8", errors="replace")
     non_space = len("".join(text.split()))
-    status = "usable" if non_space >= args.minimum_characters else "review"
+    assessment = assess_pdf_text(text, pdf_page_count(source, getattr(args, "pdfinfo", "pdfinfo")), args.minimum_characters)
+    status = "review" if assessment["needs_ocr"] else "usable"
     return {
         "ok": True,
         "status": status,
         "input": str(source),
         "output": str(output),
         "non_space_characters": non_space,
-        "warning": None if status == "usable" else "Sparse extraction; OCR or manual review may be required.",
+        **assessment,
+        "warning": None if status == "usable" else "Sparse or unverified page extraction; OCR or manual review may be required.",
     }
 
 
@@ -46,6 +54,7 @@ def main() -> int:
     parser.add_argument("input")
     parser.add_argument("--output", required=True)
     parser.add_argument("--pdftotext", default="pdftotext")
+    parser.add_argument("--pdfinfo", default="pdfinfo")
     parser.add_argument("--minimum-characters", type=int, default=80)
     args = parser.parse_args()
     try:
