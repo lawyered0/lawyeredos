@@ -1,5 +1,9 @@
 """Fictional regressions for report memory-search-1 and memory-search-2."""
 import os
+import json
+import io
+from contextlib import redirect_stdout
+from unittest.mock import patch
 import stat
 import tempfile
 import unittest
@@ -95,3 +99,90 @@ class ScopedMemoryReportTests(unittest.TestCase):
             memory_commit(self.root, "A/_matter-brief.md", b"Fictional", "", approved["confirm_token"], **kwargs)
         self.assertFalse((self.root / "A/_matter-brief.md").exists())
 
+    def memory_cli(self):
+        from lawyeredos import memory_search
+        (self.root / "A").mkdir()
+        database = self.register()
+        content = self.root / "fictional-note.txt"; content.write_text("Fictional durable note")
+        approved = memory_preview(self.root, "A/_matter-brief.md", content.read_bytes(),
+                                  database=database, file_number="2035-001")
+        args = ["commit-write", "--root", str(self.root), "--relative", "A/_matter-brief.md",
+                "--content-file", str(content), "--database", str(database),
+                "--file-number", "2035-001", "--confirm-token", approved["confirm_token"]]
+        return memory_search, args, self.root / "A/_matter-brief.md"
+
+    def test_post_install_readback_failure_reports_committed_not_retryable(self):
+        module, args, target = self.memory_cli()
+        original_install = module._install_file
+        original_digest = module._target_digest
+        installed = False
+        def install(*values, **kwargs):
+            nonlocal installed
+            result = original_install(*values, **kwargs)
+            installed = True
+            return result
+        def digest(*values, **kwargs):
+            if installed:
+                raise OSError("fictional readback failure")
+            return original_digest(*values, **kwargs)
+        output = io.StringIO()
+        with patch.object(module, "_install_file", side_effect=install), patch.object(module, "_target_digest", side_effect=digest):
+            with redirect_stdout(output):
+                rc = module.main(args)
+        result = json.loads(output.getvalue())
+        self.assertEqual(target.read_text(), "Fictional durable note")
+        self.assertEqual(rc, 2)
+        self.assertTrue(result["committed"])
+        self.assertFalse(result["retry_safe"])
+        self.assertEqual(result["verification_state"], "readback_failed")
+
+    def test_post_install_cleanup_failure_preserves_committed_receipt(self):
+        module, args, target = self.memory_cli()
+        original_install = module._install_file
+        original_unlink = module.os.unlink
+        installed = False
+        def install(*values, **kwargs):
+            nonlocal installed
+            result = original_install(*values, **kwargs)
+            installed = True
+            return result
+        def unlink(path, *values, **kwargs):
+            if installed and str(path).startswith(".memory-stage-"):
+                raise OSError("fictional cleanup failure")
+            return original_unlink(path, *values, **kwargs)
+        output = io.StringIO()
+        with patch.object(module, "_install_file", side_effect=install), patch.object(module.os, "unlink", side_effect=unlink):
+            with redirect_stdout(output):
+                rc = module.main(args)
+        result = json.loads(output.getvalue())
+        self.assertEqual(target.read_text(), "Fictional durable note")
+        self.assertEqual(rc, 2)
+        self.assertTrue(result["committed"])
+        self.assertFalse(result["retry_safe"])
+        self.assertEqual(result["verification_state"], "readback_verified")
+        self.assertIn("fictional cleanup failure", result["cleanup_errors"][0])
+
+    def test_nonprivate_existing_memory_lock_refused_without_mode_change(self):
+        module, args, target = self.memory_cli()
+        lock = self.root / "A/.lawyeredos-memory.lock"
+        lock.write_text(""); lock.chmod(0o644)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            rc = module.main(args)
+        result = json.loads(output.getvalue())
+        self.assertEqual(rc, 2)
+        self.assertFalse(result["committed"])
+        self.assertIn("private", result["error"])
+        self.assertFalse(target.exists())
+        self.assertEqual(stat.S_IMODE(lock.stat().st_mode), 0o644)
+
+    def test_prepublication_failure_still_reports_not_committed(self):
+        module, args, target = self.memory_cli()
+        output = io.StringIO()
+        with patch.object(module, "_install_file", side_effect=OSError("fictional prepublication failure")):
+            with redirect_stdout(output):
+                rc = module.main(args)
+        result = json.loads(output.getvalue())
+        self.assertEqual(rc, 2)
+        self.assertFalse(result["committed"])
+        self.assertFalse(target.exists())

@@ -10,7 +10,7 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from .common import confined_path, emit, preview_token, sha256_file
+from .common import confined_path, emit, preview_token, sha256_bytes, sha256_file
 from .private_fs import create_private_file
 from .matter_write import (
     _install_file, _matter_identity, _open_target_parent, _target_digest, _verify_parent_binding,
@@ -110,12 +110,16 @@ def memory_commit(root: Path, relative: str, content: bytes, expect_sha256: str,
     parent_identity = os.fstat(parent_fd)
     lock_fd = None
     staged = ".memory-stage-" + secrets.token_hex(12)
+    published = False
+    receipt: dict[str, Any] | None = None
     try:
         lock_fd = os.open(".lawyeredos-memory.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
                           0o600, dir_fd=parent_fd)
         lock_stat = os.fstat(lock_fd)
         if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink != 1:
             raise ValueError("memory lock is not a single-link regular file")
+        if stat.S_IMODE(lock_stat.st_mode) != 0o600:
+            raise ValueError("existing memory lock is not private; review it explicitly before writing")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
         # Re-bind identity, revision and old bytes while writers share the lock.
         payload = _memory_payload(root, relative, content, expect_sha256, database, file_number)
@@ -128,16 +132,36 @@ def memory_commit(root: Path, relative: str, content: bytes, expect_sha256: str,
         # The install uses exclusive links, preserving an unexpectedly appeared target.
         _install_file("replace" if expect_sha256 else "create", staged, target_name,
                       parent_fd, secrets.token_hex(12), expect_sha256)
+        published = True
+        receipt = {"ok": False, "committed": True, "commit_state": "committed",
+                   "verification_state": "readback_failed", "retry_safe": False,
+                   "target": payload["target"], "expected_sha256": sha256_bytes(content)}
         digest = _target_digest(parent_fd, target_name)
-        return {"ok": True, "committed": True, "target": payload["target"], "sha256": digest}
+        if digest != receipt["expected_sha256"]:
+            raise ValueError("memory readback digest does not match the approved content")
+        receipt.update(ok=True, verification_state="readback_verified", sha256=digest)
+    except (ValueError, OSError) as exc:
+        if not published:
+            raise
+        # Publication succeeded. Failed readback cannot justify a second write.
+        receipt["error"] = str(exc)
     finally:
+        cleanup_errors = []
         try:
             os.unlink(staged, dir_fd=parent_fd)
         except FileNotFoundError:
             pass
-        if lock_fd is not None:
-            os.close(lock_fd)
-        os.close(parent_fd)
+        except OSError as exc:
+            cleanup_errors.append(str(exc))
+        for descriptor in (lock_fd, parent_fd):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError as exc:
+                    cleanup_errors.append(str(exc))
+        if receipt is not None and cleanup_errors:
+            receipt.update(ok=False, cleanup_errors=cleanup_errors)
+    return receipt
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -156,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             content = Path(args.content_file).read_bytes()
             if args.command == "preview-write": result = memory_preview(Path(args.root), args.relative, content, args.expect_sha256, Path(args.database), args.file_number)
             else: result = memory_commit(Path(args.root), args.relative, content, args.expect_sha256, args.confirm_token, Path(args.database), args.file_number)
-        emit(result); return 0
+        emit(result); return 0 if result["ok"] else 2
     except (ValueError, OSError, sqlite3.Error, UnicodeDecodeError) as exc:
         emit({"ok": False, "committed": False, "error": str(exc)}); return 2
 
