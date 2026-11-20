@@ -7,16 +7,15 @@ Codex local projects. Both hosts use the same Python, SQLite, document,
 redline, and guarded-workflow core. Host-specific setup and discovery files
 stay separate under `.claude/` and `.agents/`.
 
-Local candidate **0.2.4 beta.1** adds connection-local in-memory temporary
-sorting for read-only tracker queries and an exact-manifest, recursive public
-release gate, plus selected reviewed DOCX metadata-scrubbing fixes. Stale-write rejection and interrupted-save recovery were already
-present. See the [candidate record](docs/RELEASE-0.2.4.md) and
-[release gate](docs/PUBLIC-RELEASE-GATE.md). This candidate is not published.
-The current published release remains
-[0.2.3 beta.1](docs/RELEASE-0.2.3.md). The
-[workflow catalog](docs/WORKFLOW-CATALOG.md) describes existing capabilities.
-Local checks do not establish legal correctness, live Gmail support, new
-substantive model behavior, or parity with a private practice setup.
+Released [0.2.4 beta.1](https://github.com/lawyered0/lawyeredos/releases/tag/v0.2.4-beta.1)
+adds connection-local in-memory temporary sorting for read-only tracker queries,
+an exact-manifest recursive release gate, and selected reviewed DOCX metadata
+fixes. Existing stale-write rejection and interrupted-save recovery remain.
+See the [release record](docs/RELEASE-0.2.4.md),
+[release gate](docs/PUBLIC-RELEASE-GATE.md), and
+[workflow catalog](docs/WORKFLOW-CATALOG.md) for scope and evidence.
+Local and CI checks do not establish legal correctness, live Gmail support,
+new substantive model behavior, or parity with a private practice setup.
 
 It works with the matter files you choose, records matter history and state in
 your workspace, and helps identify and execute the next step under lawyer
@@ -25,19 +24,19 @@ decided contract redlines, calendar planning, and independent draft review.
 
 ![Fictional LawyeredOS matter flow](docs/images/website-matter-flow.png)
 
-## Review the beta candidate
+## Download a reviewed beta
 
-These are proposed publication destinations; the candidate is local until approved.
-Both host filenames are generated from one checked build.
+Both host filenames contain the same checked build. The generated external
+manifest records the complete member inventory and publication source commit.
 
 <!-- candidate-downloads:start -->
-| Host | Candidate download | SHA-256 |
+| Host | Download | SHA-256 |
 |---|---|---|
-| Claude Desktop Code Local | [0.2.4 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/lawyeredos-0.2.4-macos-beta.1.zip) | [Generated manifest](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/release-manifest.json) |
-| Codex local project | [0.2.4 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/lawyeredos-0.2.4-macos-codex-beta.1.zip) | [Generated manifest](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/release-manifest.json) |
+| Claude Desktop Code Local | [0.2.4 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/lawyeredos-0.2.4-macos-beta.1.zip) | `3c76e74fa3903bdb4bbee3c1dbcb8efa5f5d1e5d1d08b6b7ec0422e886939795` |
+| Codex local project | [0.2.4 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/lawyeredos-0.2.4-macos-codex-beta.1.zip) | `3c76e74fa3903bdb4bbee3c1dbcb8efa5f5d1e5d1d08b6b7ec0422e886939795` |
 <!-- candidate-downloads:end -->
 
-The external manifest records the exact SHA-256 and member hashes. Keeping the
+The [external manifest](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/release-manifest.json) records the exact SHA-256 and member hashes. Keeping the
 archive checksum outside its own README avoids a circular build. Earlier
 versioned ZIPs on the [download site](https://www.lawyered.lawyer/lawyeredos)
 remain immutable. Source changes do not replace a published archive.
