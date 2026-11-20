@@ -17,7 +17,7 @@ concurrency:
 jobs:
   test:
     if: ${{ github.event.repository.private == false }}
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
     steps:
       - name: Check out source without stored credentials

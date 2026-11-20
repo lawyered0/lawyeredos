@@ -282,4 +282,3 @@ class SelectedCustomPropertyTests(unittest.TestCase):
                 core = etree.fromstring(package.read("docProps/core.xml"))
                 self.assertNotIn(b"Fictional confidential metadata", etree.tostring(core))
                 self.assertFalse(any(node.tag.rsplit("}", 1)[-1] == "revision" for node in core))
-
