@@ -30,7 +30,7 @@ from lawyeredos.private_fs import (
 )
 
 
-VERSION = "0.2.3"
+VERSION = "0.2.4"
 MODULES = ("matter", "tracker", "letters", "redline", "calendar", "review")
 MODULE_SKILLS = {
     "matter": "practice-work-on-matter",

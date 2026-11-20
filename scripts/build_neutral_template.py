@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import tempfile
 import zipfile
 from pathlib import Path
 
-from scrub_docx_metadata import scrub_in_place
+from scrub_docx_metadata import scrub
 
 
 def require_docx():
@@ -77,8 +78,10 @@ def build(output: Path) -> None:
     footer_run._element.rPr.rFonts.set(qn("w:ascii"), "Arial")
     footer_run._element.rPr.rFonts.set(qn("w:hAnsi"), "Arial")
     scrub_core_properties(document)
-    document.save(output)
-    scrub_in_place(output)
+    with tempfile.TemporaryDirectory(prefix=".neutral-template-", dir=output.parent) as temporary:
+        staged = Path(temporary) / "template.docx"
+        document.save(staged)
+        scrub(staged, output)
     with zipfile.ZipFile(output) as package:
         names = set(package.namelist())
         if "docProps/custom.xml" in names:

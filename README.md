@@ -7,16 +7,16 @@ Codex local projects. Both hosts use the same Python, SQLite, document,
 redline, and guarded-workflow core. Host-specific setup and discovery files
 stay separate under `.claude/` and `.agents/`.
 
-Released [0.2.3 beta.1](https://github.com/lawyered0/lawyeredos/releases/tag/v0.2.3-beta.1)
-adds shared review/record contracts and nine manually loaded specialist or
-practice-attention modules. The existing matter skill reads the catalog and
-selected module; there are still six native installer options. Runtime behavior
-and existing optional jurisdiction profiles are unchanged.
-Read the [workflow catalog](docs/WORKFLOW-CATALOG.md),
-[gap dispositions](docs/WORKFLOW-COMPLETENESS.md) and
-[release record](docs/RELEASE-0.2.3.md) for availability, checksums and limits.
-Packaging and installed-reference checks passed; these do not establish new
-substantive model behavior, legal correctness or live-connector coverage.
+Local candidate **0.2.4 beta.1** adds connection-local in-memory temporary
+sorting for read-only tracker queries and an exact-manifest, recursive public
+release gate, plus selected reviewed DOCX metadata-scrubbing fixes. Stale-write rejection and interrupted-save recovery were already
+present. See the [candidate record](docs/RELEASE-0.2.4.md) and
+[release gate](docs/PUBLIC-RELEASE-GATE.md). This candidate is not published.
+The current published release remains
+[0.2.3 beta.1](docs/RELEASE-0.2.3.md). The
+[workflow catalog](docs/WORKFLOW-CATALOG.md) describes existing capabilities.
+Local checks do not establish legal correctness, live Gmail support, new
+substantive model behavior, or parity with a private practice setup.
 
 It works with the matter files you choose, records matter history and state in
 your workspace, and helps identify and execute the next step under lawyer
@@ -25,18 +25,22 @@ decided contract redlines, calendar planning, and independent draft review.
 
 ![Fictional LawyeredOS matter flow](docs/images/website-matter-flow.png)
 
-## Download a reviewed beta
+## Review the beta candidate
 
-| Host | Download | SHA-256 |
+These are proposed publication destinations; the candidate is local until approved.
+Both host filenames are generated from one checked build.
+
+<!-- candidate-downloads:start -->
+| Host | Candidate download | SHA-256 |
 |---|---|---|
-| Claude Desktop Code Local | [0.2.3 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.3-beta.1/lawyeredos-0.2.3-macos-beta.1.zip) | `c5b28fb086f18dc09c2ec89062a578e06469036538d71953cb8134f59312ce35` |
-| Codex local project | [0.2.3 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.3-beta.1/lawyeredos-0.2.3-macos-codex-beta.1.zip) | `c5b28fb086f18dc09c2ec89062a578e06469036538d71953cb8134f59312ce35` |
+| Claude Desktop Code Local | [0.2.4 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/lawyeredos-0.2.4-macos-beta.1.zip) | [Generated manifest](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/release-manifest.json) |
+| Codex local project | [0.2.4 beta.1](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/lawyeredos-0.2.4-macos-codex-beta.1.zip) | [Generated manifest](https://github.com/lawyered0/lawyeredos/releases/download/v0.2.4-beta.1/release-manifest.json) |
+<!-- candidate-downloads:end -->
 
-The versioned release ZIPs remain on the
-[LawyeredOS download site](https://www.lawyered.lawyer/lawyeredos). This source
-repository is the place for review and contributions. Earlier versioned ZIPs
-remain immutable; the version and checksum published beside each download are
-its release boundary.
+The external manifest records the exact SHA-256 and member hashes. Keeping the
+archive checksum outside its own README avoids a circular build. Earlier
+versioned ZIPs on the [download site](https://www.lawyered.lawyer/lawyeredos)
+remain immutable. Source changes do not replace a published archive.
 
 For continuity, earlier reviewed archives remain available with their original
 SHA-256 checksums: Claude beta.2

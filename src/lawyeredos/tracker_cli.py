@@ -39,7 +39,7 @@ def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
     if write:
         connection = sqlite3.connect(path, timeout=5, isolation_level=None)
     else:
-        uri = f"file:{path.as_posix()}?mode=ro"
+        uri = path.resolve().as_uri() + "?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=5)
     connection.row_factory = sqlite3.Row
     connection.create_function(
@@ -48,6 +48,10 @@ def connect(path: Path, *, write: bool = False) -> Iterator[sqlite3.Connection]:
         deterministic=True,
     )
     try:
+        if not write:
+            # Connection-local only: large read-only sorts must not spill
+            # confidential rows into a filesystem temporary database.
+            connection.execute("PRAGMA temp_store=MEMORY")
         yield connection
     finally:
         connection.close()

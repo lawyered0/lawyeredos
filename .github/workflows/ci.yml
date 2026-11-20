@@ -53,4 +53,5 @@ jobs:
         run: |
           python scripts/build_release.py --output "$RUNNER_TEMP/lawyeredos-source.zip"
           python scripts/privacy_audit.py "$RUNNER_TEMP/lawyeredos-source.zip"
+          python scripts/public_release_check.py --archive "$RUNNER_TEMP/lawyeredos-source.zip"
           unzip -t "$RUNNER_TEMP/lawyeredos-source.zip"
