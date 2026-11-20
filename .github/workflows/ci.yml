@@ -17,7 +17,7 @@ concurrency:
 jobs:
   test:
     if: ${{ github.event.repository.private == false }}
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
     steps:
       - name: Check out source without stored credentials
@@ -53,4 +53,5 @@ jobs:
         run: |
           python scripts/build_release.py --output "$RUNNER_TEMP/lawyeredos-source.zip"
           python scripts/privacy_audit.py "$RUNNER_TEMP/lawyeredos-source.zip"
+          python scripts/public_release_check.py --archive "$RUNNER_TEMP/lawyeredos-source.zip"
           unzip -t "$RUNNER_TEMP/lawyeredos-source.zip"

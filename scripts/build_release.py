@@ -29,6 +29,7 @@ ROOT_FILES = {
     "requirements-documents.txt",
     "requirements-lock.txt",
     "requirements-test.txt",
+    "release-policy.json",
 }
 ROOT_DIRECTORIES = {
     ".agents",
@@ -68,7 +69,12 @@ def release_files(root: Path) -> list[Path]:
     if missing:
         raise ValueError(f"release inputs missing: {', '.join(missing)}")
     files = [root / name for name in sorted(ROOT_FILES)]
+    for path in files:
+        if path.is_symlink():
+            raise ValueError("release root input must not be a symlink")
     for name in sorted(ROOT_DIRECTORIES):
+        if (root / name).is_symlink():
+            raise ValueError("release root directory must not be a symlink")
         for path in sorted((root / name).rglob("*")):
             relative = path.relative_to(root)
             if any(part in EXCLUDED_PARTS for part in relative.parts):
@@ -87,6 +93,10 @@ def build(output: Path) -> dict[str, int | str]:
         raise ValueError(f"output already exists: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     files = release_files(root)
+    from public_release_check import check_archive, check_tree, load_policy
+    policy = load_policy(root)
+    if check_tree(root, files, policy, []):
+        raise ValueError("staged public release check failed; run public_release_check.py for redacted findings")
     temporary = output.with_name(f".{output.name}.partial")
     if temporary.exists():
         raise ValueError(f"partial output already exists: {temporary}")
@@ -98,6 +108,8 @@ def build(output: Path) -> dict[str, int | str]:
                 info.compress_type = zipfile.ZIP_DEFLATED
                 info.external_attr = (stat.S_IFREG | 0o644) << 16
                 archive.writestr(info, path.read_bytes())
+        if check_archive(temporary, root, policy, []):
+            raise ValueError("built public release check failed")
         temporary.replace(output)
     except Exception:
         if temporary.exists():

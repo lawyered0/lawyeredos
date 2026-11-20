@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.4 beta.1 — local candidate
+
+- Keep temporary sorting in memory on read-only tracker connections; escape
+  database URI paths without changing persistent database settings.
+- Fail closed on unexpected release files and recursively inspect actual ZIP
+  contents, metadata and nested archives; add synthetic negative coverage.
+- Reuse selected reviewed PR #18 DOCX metadata fixes and neutral template,
+  with namespace preservation, declared custom-property discovery and failure
+  atomicity; include their selected synthetic regressions.
+- Generate host aliases, checksum manifest and member inventory from one build.
+- Use generic publisher identity configuration guidance. Existing public history
+  and earlier downloads are unchanged; no live-connector or model parity claim.
+
 All notable source changes are recorded here. Published host packages retain
 their own reviewed version and checksum boundaries.
 

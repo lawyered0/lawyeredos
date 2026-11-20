@@ -8,13 +8,13 @@ Use repository-local Git configuration only, before the first commit:
 
 ```bash
 git config user.name "Lawyered"
-git config user.email "4802498+lawyered0@users.noreply.github.com"
+git config user.email "<verified-publisher-noreply-address>"
 git config --local --get user.name
 git config --local --get user.email
 ```
 
-The ID-based noreply address is derived from the verified `lawyered0` account
-metadata. Confirm it in GitHub email settings before relying on commit
+Obtain the publisher noreply address from GitHub email settings; this template
+does not embed an account identifier. Confirm it before relying on commit
 attribution. Do not change global Git configuration. Before pushing, inspect the
 complete local history for author and committer metadata; a later config change
 does not rewrite an earlier identity leak.
